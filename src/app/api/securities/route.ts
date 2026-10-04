@@ -1,0 +1,2 @@
+import { NextRequest, NextResponse } from "next/server"; import { searchSecurities } from "@/lib/dhan";
+export async function GET(req:NextRequest) { const q=req.nextUrl.searchParams.get("q")?.trim(); if(!q) return NextResponse.json([]); try{return NextResponse.json(await searchSecurities(q));}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Search unavailable"},{status:502});} }

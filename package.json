@@ -1,0 +1,27 @@
+{
+  "name": "seasonality-risk",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test:seasonality": "node scripts/seasonality-engine-tests.mjs",
+    "test:swing": "node scripts/swing-screener-tests.mjs",
+    "test:thirty-up": "node scripts/thirty-up-screener-tests.mjs",
+    "test:trade-management": "node scripts/trade-management-tests.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "next": "^15.5.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.0.0"
+  }
+}
