@@ -70,7 +70,7 @@ async function mutateDataStore<T>(task: () => Promise<T>) {
 }
 
 function dataRefreshConcurrency() {
-  const configured = Number(process.env.DATA_REFRESH_CONCURRENCY ?? 6);
+  const configured = Number(process.env.DATA_REFRESH_CONCURRENCY ?? 3);
   return Math.min(Math.max(Number.isFinite(configured) ? Math.floor(configured) : 6, 1), 12);
 }
 
@@ -507,6 +507,23 @@ async function updateJob(jobId: string, update: (job: DataDownloadJobRecord) => 
   });
 }
 
+async function markJobFailedBestEffort(jobId: string, error: unknown) {
+  try {
+    await updateJob(jobId, (job) => {
+      job.status = "failed";
+      job.finished_at = new Date().toISOString();
+      job.current_status = "Failed";
+      job.errors.push(error instanceof Error ? error.message : "Unknown refresh failure");
+    });
+  } catch (statusError) {
+    console.error("Could not persist failed refresh status", {
+      jobId,
+      originalError: error instanceof Error ? error.message : String(error),
+      statusError: statusError instanceof Error ? statusError.message : String(statusError),
+    });
+  }
+}
+
 async function runMemberWorkers<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
   let nextIndex = 0;
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
@@ -616,12 +633,7 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
       job.remaining = 0;
     });
   } catch (error) {
-    await updateJob(jobId, (job) => {
-      job.status = "failed";
-      job.finished_at = new Date().toISOString();
-      job.current_status = "Failed";
-      job.errors.push(error instanceof Error ? error.message : "Unknown refresh failure");
-    });
+    await markJobFailedBestEffort(jobId, error);
   }
 }
 
@@ -651,7 +663,11 @@ export async function startHistoricalDataRefresh(universeName?: UniverseName, re
 
   if (result.started && !activeRefreshJobs.has(result.job.id)) {
     activeRefreshJobs.add(result.job.id);
-    void runHistoricalDataJob(result.job.id, universeName, retryFailures, forceUniverse).finally(() => activeRefreshJobs.delete(result.job.id));
+    void runHistoricalDataJob(result.job.id, universeName, retryFailures, forceUniverse)
+      .catch((error) => {
+        console.error("Unhandled historical data refresh failure", error);
+      })
+      .finally(() => activeRefreshJobs.delete(result.job.id));
   }
 
   return result;

@@ -189,7 +189,7 @@ export async function readDatabase(): Promise<SeasonalityDatabase> {
 
 export async function writeDatabase(db: SeasonalityDatabase) {
   if (useMysqlStorage) {
-    writeQueue = writeQueue.then(() => writeMysqlDatabase(db));
+    writeQueue = writeQueue.then(() => writeMysqlDatabase(db), () => writeMysqlDatabase(db));
     return writeQueue;
   }
 
@@ -211,6 +211,10 @@ export async function writeDatabase(db: SeasonalityDatabase) {
         await new Promise((resolve) => setTimeout(resolve, 75 * attempt));
       }
     }
+  }, async () => {
+    db.updated_at = new Date().toISOString();
+    await fs.mkdir(path.dirname(dbFile), { recursive: true });
+    await fs.writeFile(dbFile, JSON.stringify(db, null, 2));
   });
   return writeQueue;
 }
