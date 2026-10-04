@@ -84,7 +84,7 @@ export const defaultDryVolumeBreakoutFilters: DryVolumeBreakoutFilters = {
   dryVolumeLookbackDays: 5,
   breakoutWithinDays: 4,
   stopBufferPct: 0.5,
-  maxDistanceToEntryPct: 4,
+  maxDistanceToEntryPct: 25,
   minAverageDailyTradedValue: 0,
   showAll: false,
 };
@@ -107,6 +107,7 @@ const fixedBacktestFilters: BasketBacktestFilters = {
   dryVolumeRatio: 0.4,
   dryVolumeLookbackDays: 5,
   breakoutWithinDays: 4,
+  maxDistanceToEntryPct: 25,
   stopBufferPct: 0.5,
   exitBelow10Ema: true,
   startDate: "2026-08-01",
