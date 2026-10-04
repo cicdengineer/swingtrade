@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -10,6 +11,8 @@ import {
   Database,
   Download,
   LayoutDashboard,
+  LogOut,
+  Menu,
   Moon,
   RefreshCw,
   Search,
@@ -20,6 +23,7 @@ import {
   TrendingDown,
   TrendingUp,
   WalletCards,
+  X,
 } from "lucide-react";
 import type { SeasonalObservationRecord, SeasonalStatisticsRecord, Security, Summary, UniverseName } from "@/lib/types";
 
@@ -2167,6 +2171,12 @@ export default function Home() {
   const [security, setSecurity] = useState<Security | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [authReady, setAuthReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginUser, setLoginUser] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [navOpen, setNavOpen] = useState(false);
   const [analysis, setAnalysis] = useState<{ monthly: (Summary & { label: string })[]; quarterly: (Summary & { label: string })[]; rolling: (Summary & { label: string })[]; candles: { date: string; close: number }[] } | null>(null);
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null);
   const [seasonality, setSeasonality] = useState<SeasonalityResponse | null>(null);
@@ -2219,8 +2229,9 @@ export default function Home() {
   }, []);
   const shortcuts = currentWindow();
 
-  useEffect(() => { fetch("/api/health").then((r) => r.json()).then((d) => setConfigured(d.configured)).catch(() => setConfigured(false)); }, []);
-  useEffect(() => { fetch("/api/trade-management/settings").then((r) => r.json()).then((d) => setTradingSettings(d.settings)).catch(() => {}); }, []);
+  useEffect(() => { setIsAuthenticated(localStorage.getItem("jobpothe-auth") === "active"); setAuthReady(true); }, []);
+  useEffect(() => { if (!isAuthenticated) return; fetch("/api/health").then((r) => r.json()).then((d) => setConfigured(d.configured)).catch(() => setConfigured(false)); }, [isAuthenticated]);
+  useEffect(() => { if (!isAuthenticated) return; fetch("/api/trade-management/settings").then((r) => r.json()).then((d) => setTradingSettings(d.settings)).catch(() => {}); }, [isAuthenticated]);
   useEffect(() => { const saved = localStorage.getItem("seasonal-edge-theme"); if (saved === "light" || saved === "dark") setTheme(saved); }, []);
   useEffect(() => {
     const saved = localStorage.getItem("momentum-contraction-filters");
@@ -2231,9 +2242,9 @@ export default function Home() {
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("seasonal-edge-theme", theme); }, [theme]);
   useEffect(() => { localStorage.setItem("momentum-contraction-filters", JSON.stringify(momentumContractionFilters)); }, [momentumContractionFilters]);
-  useEffect(() => { if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "Dry Breakout" && !dryVolumeBreakout) runDryVolumeBreakoutScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured]);
+  useEffect(() => { if (!isAuthenticated) return; if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "Dry Breakout" && !dryVolumeBreakout) runDryVolumeBreakoutScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured, isAuthenticated]);
   useEffect(() => {
-    if (view !== "Data Status") return;
+    if (!isAuthenticated || view !== "Data Status") return;
     let fallbackId: number | undefined;
     const source = new EventSource("/api/data/status/live");
     source.addEventListener("snapshot", (event) => {
@@ -2259,7 +2270,7 @@ export default function Home() {
       source.close();
       if (fallbackId !== undefined) window.clearInterval(fallbackId);
     };
-  }, [view]);
+  }, [view, isAuthenticated]);
 
   const latest = useMemo(() => analysis?.candles.at(-1), [analysis]);
   const sortedSeasonality = useMemo(() => [...(seasonality?.statistics ?? [])].sort((a, b) => typeof a[sort] === "number" ? Number(b[sort]) - Number(a[sort]) : String(a[sort]).localeCompare(String(b[sort]))), [seasonality, sort]);
@@ -2289,10 +2300,30 @@ export default function Home() {
   async function deleteManagedTrade(tradeId: string) { try { const r = await fetch(`/api/trade-management/trades/${tradeId}`, { method: "DELETE" }); const d = await r.json(); if (!r.ok) throw new Error(d.error); await loadPortfolio(); } catch (e) { setError(e instanceof Error ? e.message : "Could not delete managed trade"); } }
   async function runSearch() { if (query.trim().length < 2) return setError("Enter at least two characters."); setLoading(true); try { const r = await fetch(`/api/securities?q=${encodeURIComponent(query.trim())}`); const d = await r.json(); if (!r.ok) throw new Error(d.error); setResults(d); } catch (e) { setError(e instanceof Error ? e.message : "Search unavailable"); } finally { setLoading(false); } }
   async function analyze(refresh = false) { if (!security) return; setLoading(true); try { const r = await fetch("/api/analysis", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ security, refresh }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setAnalysis(d); } catch (e) { setError(e instanceof Error ? e.message : "Unable to analyze stock"); } finally { setLoading(false); } }
+  function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (loginUser === "projectwealth" && loginPassword === "I@tradeswing") {
+      localStorage.setItem("jobpothe-auth", "active");
+      setIsAuthenticated(true);
+      setLoginError("");
+      setLoginPassword("");
+      return;
+    }
+    setLoginError("Invalid username or password.");
+  }
+  function logout() {
+    localStorage.removeItem("jobpothe-auth");
+    setIsAuthenticated(false);
+    setNavOpen(false);
+    setConfigured(null);
+  }
 
   const seasons = seasonality?.windows ?? Array.from({ length: 12 }, (_, i) => ({ key: ["Jan-Mar", "Feb-Apr", "Mar-May", "Apr-Jun", "May-Jul", "Jun-Aug", "Jul-Sep", "Aug-Oct", "Sep-Nov", "Oct-Dec", "Nov-Jan", "Dec-Feb"][i], label: ["Jan → Mar", "Feb → Apr", "Mar → May", "Apr → Jun", "May → Jul", "Jun → Aug", "Jul → Sep", "Aug → Oct", "Sep → Nov", "Oct → Dec", "Nov → Jan", "Dec → Feb"][i], startMonth: i, endMonth: (i + 2) % 12 }));
 
-  return <main><aside><div className="brand"><div className="brand-mark"><Activity size={19} /></div><span>JOB<span>POTHE</span></span></div><div className="workspace">WORKSPACE <b>India · Equity</b></div><nav>{nav.map(({ name, icon: Icon }) => <button onClick={() => setView(name)} className={view === name ? "active" : ""} key={name}><Icon size={17} /><span>{name}</span></button>)}</nav><div className="side-bottom"><div className="data-status"><span className={configured ? "ready" : "pending"} /><div><b>{configured ? "Dhan connected" : "Dhan setup needed"}</b><small>{configured ? "Secure server connection" : "Credentials stay on server"}</small></div></div><LiveFeedStatusIndicator status={liveFeedStatus} message={liveFeedMessage} /><button className="help">Documentation <ArrowUpRight size={14} /></button></div></aside><div className="content"><header><div><p className="eyebrow">Rules-based research workspace</p><h1>JobPothe</h1></div><div className="header-actions"><button className="icon-button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button><button className="icon-button" disabled={!security || loading} onClick={() => analyze(true)}><RefreshCw size={17} className={loading ? "spin" : ""} /></button><button className="user">BA</button></div></header>{error && <div className="error">{error}</div>}
+  if (!authReady) return <main className="login-shell" />;
+  if (!isAuthenticated) return <main className="login-shell"><section className="login-card"><div className="brand login-brand"><div className="brand-mark"><Activity size={19} /></div><span>JOB<span>POTHE</span></span></div><p className="eyebrow">Rules-based research workspace</p><h1>Sign in</h1><form onSubmit={login} className="login-form"><label>Username<input className="plain-input" autoComplete="username" value={loginUser} onChange={(event) => setLoginUser(event.target.value)} /></label><label>Password<input className="plain-input" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></label>{loginError && <div className="error">{loginError}</div>}<button className="primary" type="submit">Open Workspace</button></form></section></main>;
+
+  return <main><button className="mobile-menu-button icon-button" onClick={() => setNavOpen(true)} aria-label="Open menu"><Menu size={18} /></button>{navOpen && <button className="menu-backdrop" onClick={() => setNavOpen(false)} aria-label="Close menu" />}<aside className={navOpen ? "open" : ""}><div className="side-topbar"><div className="brand"><div className="brand-mark"><Activity size={19} /></div><span>JOB<span>POTHE</span></span></div><button className="icon-button side-close" onClick={() => setNavOpen(false)} aria-label="Close menu"><X size={18} /></button></div><div className="workspace">WORKSPACE <b>India · Equity</b></div><nav>{nav.map(({ name, icon: Icon }) => <button onClick={() => { setView(name); setNavOpen(false); }} className={view === name ? "active" : ""} key={name}><Icon size={17} /><span>{name}</span></button>)}</nav><div className="side-bottom"><div className="data-status"><span className={configured ? "ready" : "pending"} /><div><b>{configured ? "Dhan connected" : "Dhan setup needed"}</b><small>{configured ? "Secure server connection" : "Credentials stay on server"}</small></div></div><LiveFeedStatusIndicator status={liveFeedStatus} message={liveFeedMessage} /><button className="help">Documentation <ArrowUpRight size={14} /></button></div></aside><div className="content"><header><div><p className="eyebrow">Rules-based research workspace</p><h1>JobPothe</h1></div><div className="header-actions"><button className="icon-button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button><button className="icon-button" disabled={!security || loading} onClick={() => analyze(true)}><RefreshCw size={17} className={loading ? "spin" : ""} /></button><button className="icon-button" onClick={logout} aria-label="Sign out"><LogOut size={17} /></button><button className="user">BA</button></div></header>{error && <div className="error">{error}</div>}
     {view === "Dashboard" && <DashboardView portfolio={portfolio} loading={loading} onRefresh={loadPortfolio} />}
     {view === "Portfolio" && <PortfolioView portfolio={portfolio} loading={loading} onRefresh={loadPortfolio} onManage={setHoldingToManage} onEvent={recordTradeEvent} onUpdate={updateManagedTrade} onDelete={deleteManagedTrade} />}
     {view === "Data Status" && <DataStatusView status={dataStatus} loading={loading || isActiveDataJob(dataStatus?.latest_job)} onRefresh={loadDataStatus} onRefreshUniverse={refreshUniverse} onRetryFailures={retryFailures} />}
