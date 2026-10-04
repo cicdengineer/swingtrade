@@ -5,7 +5,7 @@ Local, rules-based Indian equity seasonality research. It contains no technical 
 ## Included
 
 - Server-only Dhan historical-data integration and Dhan security-master search
-- A local `.data/seasonality-edge-db.json` database containing table-shaped storage for instruments, universe members, daily prices, download jobs, failures, and data-quality issues
+- A `.data/seasonality-edge-db.json` database for local development, with optional MySQL-backed JSON storage in production via `DATABASE_URL`
 - Current Nifty Midcap 150 and Nifty Smallcap 250 universe loading from NSE/Nifty Indices constituent CSV files
 - Dhan Security ID mapping from the official detailed Dhan scrip master
 - Daily OHLCV analysis for Dhan's available rolling five-year history
@@ -24,6 +24,20 @@ Local, rules-based Indian equity seasonality research. It contains no technical 
 3. Run `npm run dev`, then visit `http://localhost:3000`.
 
 The browser only calls local `/api/*` routes. The historical request is made by the Next.js server to Dhan with the access token held in the server environment.
+
+## Production storage and cron
+
+Set `DATABASE_URL` in production to use MySQL instead of the local `.data` JSON file. The app stores the existing JSON database model in a single MySQL document row, so local development can keep using `.data/seasonality-edge-db.json` when `DATABASE_URL` is empty.
+
+Run `scripts/mysql-init.sql` once in phpMyAdmin or your MySQL console to pre-create the table, or let the app create it on first access.
+
+Set `DATA_REFRESH_SECRET`, then configure Hostinger cron to call:
+
+```text
+https://trade.jobpothe.com/api/cron/daily-refresh?secret=YOUR_DATA_REFRESH_SECRET
+```
+
+The endpoint also accepts `Authorization: Bearer YOUR_DATA_REFRESH_SECRET` or `x-data-refresh-secret: YOUR_DATA_REFRESH_SECRET`.
 
 ## Phase 2A data workflow
 

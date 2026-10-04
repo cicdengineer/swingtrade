@@ -1,6 +1,7 @@
 import "server-only";
 import fs from "node:fs/promises";
 import path from "node:path";
+import mysql from "mysql2/promise";
 import type {
   DailyPriceRecord,
   DataDownloadJobRecord,
@@ -41,6 +42,15 @@ export type SeasonalityDatabase = {
 const dbFile = path.join(process.cwd(), ".data", "seasonality-edge-db.json");
 let writeQueue: Promise<void> = Promise.resolve();
 const replacementCharacter = "\uFFFD";
+const mysqlDatabaseId = "default";
+
+type MysqlPool = mysql.Pool;
+type MysqlRow = mysql.RowDataPacket & { data: SeasonalityDatabase | string | Buffer | null; size_bytes?: number };
+
+const databaseUrl = process.env.DATABASE_URL?.trim();
+const useMysqlStorage = Boolean(databaseUrl);
+let mysqlPool: MysqlPool | undefined;
+let mysqlReady: Promise<void> | undefined;
 
 const emptyDb = (): SeasonalityDatabase => {
   const now = new Date().toISOString();
@@ -65,16 +75,100 @@ const emptyDb = (): SeasonalityDatabase => {
   };
 };
 
-async function ensureDb(): Promise<SeasonalityDatabase> {
+function normalizeDatabase(raw: Partial<SeasonalityDatabase> | null | undefined): SeasonalityDatabase {
+  return { ...emptyDb(), ...(raw ?? {}) };
+}
+
+function parseMysqlJson(value: MysqlRow["data"]): SeasonalityDatabase | null {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return JSON.parse(value.toString("utf8"));
+  if (typeof value === "string") return JSON.parse(value);
+  return value;
+}
+
+function getMysqlPool() {
+  if (!databaseUrl) throw new Error("DATABASE_URL is not configured.");
+  if (!mysqlPool) {
+    const url = new URL(databaseUrl);
+    mysqlPool = mysql.createPool({
+      host: url.hostname,
+      port: url.port ? Number(url.port) : 3306,
+      user: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+      database: url.pathname.replace(/^\//, ""),
+      waitForConnections: true,
+      connectionLimit: Number(process.env.DATABASE_POOL_SIZE ?? 4),
+      charset: "utf8mb4",
+      timezone: "Z",
+    });
+  }
+  return mysqlPool;
+}
+
+async function ensureMysqlDb() {
+  if (!mysqlReady) {
+    mysqlReady = (async () => {
+      await getMysqlPool().execute(`
+        CREATE TABLE IF NOT EXISTS seasonality_json_database (
+          id VARCHAR(64) NOT NULL PRIMARY KEY,
+          schema_version INT NOT NULL DEFAULT 1,
+          data JSON NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+    })();
+  }
+  await mysqlReady;
+}
+
+async function ensureMysqlDatabase(): Promise<SeasonalityDatabase> {
+  await ensureMysqlDb();
+  const [rows] = await getMysqlPool().execute<MysqlRow[]>(
+    "SELECT data FROM seasonality_json_database WHERE id = ? LIMIT 1",
+    [mysqlDatabaseId],
+  );
+  const existing = parseMysqlJson(rows[0]?.data);
+  if (existing) return normalizeDatabase(existing);
+
+  const db = emptyDb();
+  await writeMysqlDatabase(db);
+  return db;
+}
+
+async function writeMysqlDatabase(db: SeasonalityDatabase) {
+  await ensureMysqlDb();
+  db.updated_at = new Date().toISOString();
+  await getMysqlPool().execute(
+    `INSERT INTO seasonality_json_database (id, schema_version, data)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       schema_version = VALUES(schema_version),
+       data = VALUES(data),
+       updated_at = CURRENT_TIMESTAMP`,
+    [mysqlDatabaseId, db.schema_version, JSON.stringify(db)],
+  );
+}
+
+async function getMysqlDatabaseSizeBytes() {
+  await ensureMysqlDb();
+  const [rows] = await getMysqlPool().execute<MysqlRow[]>(
+    "SELECT CHAR_LENGTH(CAST(data AS CHAR)) AS size_bytes FROM seasonality_json_database WHERE id = ? LIMIT 1",
+    [mysqlDatabaseId],
+  );
+  return Number(rows[0]?.size_bytes ?? 0);
+}
+
+async function ensureJsonFileDb(): Promise<SeasonalityDatabase> {
   try {
     const raw = await fs.readFile(dbFile, "utf8");
     try {
-      return { ...emptyDb(), ...JSON.parse(raw) };
+      return normalizeDatabase(JSON.parse(raw));
     } catch (error) {
       if (!(error instanceof SyntaxError) || !raw.includes(replacementCharacter)) throw error;
 
       const repaired = raw.replaceAll(replacementCharacter, "");
-      const db = { ...emptyDb(), ...JSON.parse(repaired) };
+      const db = normalizeDatabase(JSON.parse(repaired));
       const backupFile = `${dbFile}.corrupt-${Date.now()}.bak`;
       await fs.copyFile(dbFile, backupFile).catch(() => {});
       console.warn(`Repaired invalid replacement characters in ${dbFile}. Corrupt copy saved to ${backupFile}.`);
@@ -90,10 +184,15 @@ async function ensureDb(): Promise<SeasonalityDatabase> {
 }
 
 export async function readDatabase(): Promise<SeasonalityDatabase> {
-  return ensureDb();
+  return useMysqlStorage ? ensureMysqlDatabase() : ensureJsonFileDb();
 }
 
 export async function writeDatabase(db: SeasonalityDatabase) {
+  if (useMysqlStorage) {
+    writeQueue = writeQueue.then(() => writeMysqlDatabase(db));
+    return writeQueue;
+  }
+
   writeQueue = writeQueue.then(async () => {
     db.updated_at = new Date().toISOString();
     await fs.mkdir(path.dirname(dbFile), { recursive: true });
@@ -117,6 +216,8 @@ export async function writeDatabase(db: SeasonalityDatabase) {
 }
 
 export async function getDatabaseSizeBytes() {
+  if (useMysqlStorage) return getMysqlDatabaseSizeBytes();
+
   try {
     return (await fs.stat(dbFile)).size;
   } catch {
