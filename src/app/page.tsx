@@ -388,10 +388,17 @@ const chartDateLabel = (value: string, timeframe: ChartTimeframe) => {
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 };
+const isWeekendDate = (date: string) => {
+  const parsed = new Date(`${date}T00:00:00+05:30`);
+  const day = parsed.getDay();
+  return day === 0 || day === 6;
+};
 const aggregateIntradayDaily = (candles: DailyChartPoint[]): DailyChartPoint | null => {
-  if (!candles.length) return null;
-  const latestDate = candles.at(-1)!.trade_date.slice(0, 10);
-  const todayCandles = candles.filter((candle) => candle.trade_date.slice(0, 10) === latestDate);
+  const tradedCandles = candles.filter((candle) => candle.volume > 0);
+  if (!tradedCandles.length) return null;
+  const latestDate = tradedCandles.at(-1)!.trade_date.slice(0, 10);
+  if (isWeekendDate(latestDate)) return null;
+  const todayCandles = tradedCandles.filter((candle) => candle.trade_date.slice(0, 10) === latestDate);
   if (!todayCandles.length) return null;
   return {
     trade_date: latestDate,
@@ -407,7 +414,7 @@ const mergeLiveDailyCandle = (dailyRows: DailyChartPoint[], liveDaily: DailyChar
   const rows = [...dailyRows];
   const existingIndex = rows.findIndex((row) => row.trade_date === liveDaily.trade_date);
   if (existingIndex >= 0) rows[existingIndex] = { ...rows[existingIndex], ...liveDaily, ema50: rows[existingIndex].ema50, volume_ratio: rows[existingIndex].volume_ratio };
-  else if (!rows.length || liveDaily.trade_date > rows.at(-1)!.trade_date) rows.push(liveDaily);
+  else if (liveDaily.volume > 0 && (!rows.length || liveDaily.trade_date > rows.at(-1)!.trade_date)) rows.push(liveDaily);
   return rows;
 };
 const liveTradeDate = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -418,13 +425,7 @@ const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): Th
   const today = liveTradeDate();
   const recent = [...row.recent];
   const last = recent.at(-1);
-  if (last) {
-    const liveCandle: DailyChartPoint = last.trade_date === today
-      ? { ...last, close: liveClose, high: Math.max(last.high, liveClose), low: Math.min(last.low, liveClose) }
-      : { ...last, trade_date: today, open: tick.prevClose ?? last.close, high: Math.max(tick.prevClose ?? last.close, liveClose), low: Math.min(tick.prevClose ?? last.close, liveClose), close: liveClose, volume: 0 };
-    if (last.trade_date === today) recent[recent.length - 1] = liveCandle;
-    else recent.push(liveCandle);
-  }
+  if (last?.trade_date === today) recent[recent.length - 1] = { ...last, close: liveClose, high: Math.max(last.high, liveClose), low: Math.min(last.low, liveClose) };
   const rows3m = lastTradingMonths(recent, 63);
   const rows6m = lastTradingMonths(recent, 126);
   const high3m = rows3m.length ? Math.max(...rows3m.map((point) => point.high)) : row.breakout_level;
