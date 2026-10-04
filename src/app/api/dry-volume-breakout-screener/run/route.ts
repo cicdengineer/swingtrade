@@ -4,5 +4,9 @@ import { runDryVolumeBreakoutScreener } from "@/lib/dryVolumeBreakoutScreenerSer
 export const dynamic = "force-dynamic";
 
 export async function POST() {
-  return NextResponse.json(await runDryVolumeBreakoutScreener());
+  try {
+    return NextResponse.json(await runDryVolumeBreakoutScreener());
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Dry Breakout screener failed" }, { status: 500 });
+  }
 }

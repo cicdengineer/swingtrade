@@ -130,8 +130,8 @@ export async function getSecurityMaster(force = false): Promise<InstrumentRecord
       const segment = first(row, ["SEGMENT", "SEM_SEGMENT", "Segment"]);
       const instrument = first(row, ["INSTRUMENT", "SEM_INSTRUMENT_NAME", "INSTRUMENT_TYPE", "Instrument"]);
       const securityId = first(row, ["SECURITY_ID", "SEM_SMST_SECURITY_ID", "SecurityId"]);
-      const symbol = first(row, ["SYMBOL_NAME", "SM_SYMBOL_NAME", "UNDERLYING_SYMBOL", "SYMBOL"]);
-      const tradingSymbol = first(row, ["TRADING_SYMBOL", "SEM_TRADING_SYMBOL", "Trading Symbol"]) || symbol;
+      const symbol = first(row, ["UNDERLYING_SYMBOL", "SYMBOL", "TRADING_SYMBOL", "SEM_TRADING_SYMBOL", "SYMBOL_NAME", "SM_SYMBOL_NAME"]);
+      const tradingSymbol = first(row, ["TRADING_SYMBOL", "SEM_TRADING_SYMBOL", "UNDERLYING_SYMBOL", "SYMBOL", "Trading Symbol"]) || symbol;
       const isin = first(row, ["ISIN", "SEM_ISIN_CODE", "ISIN_CODE"]);
       const isNseEquity = exchange === "NSE" && segment === "E" && instrument.toUpperCase().includes("EQUITY");
       return {
@@ -161,7 +161,7 @@ export async function getCurrentUniverse(universeName?: UniverseName, force = fa
     const source = universeSources[name];
     const rows = parseCsv(await cachedText(`${name.toLowerCase()}-constituents.csv`, source.url, force));
     for (const row of rows) {
-      const symbol = first(row, ["Symbol", "SYMBOL"]).toUpperCase();
+      const symbol = first(row, ["Symbol", "SYMBOL"]).toUpperCase().replace(/-EQ$/, "");
       if (!symbol) continue;
       const instrument = bySymbol.get(symbol);
       members.push({
@@ -189,6 +189,10 @@ export async function refreshUniverseData(force = false) {
   const masterBySecurity = new Map((await getSecurityMaster(false)).map((instrument) => [instrument.security_id, instrument]));
   for (const member of members) {
     upsertUniverseMember(db, member);
+    if (member.security_id) {
+      markFailureResolved(db, `UNMAPPED:${member.symbol}`);
+      markFailureResolved(db, member.security_id);
+    }
     const instrument = masterBySecurity.get(member.security_id);
     if (instrument) upsertInstrument(db, instrument);
   }
