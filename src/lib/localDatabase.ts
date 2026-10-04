@@ -45,12 +45,36 @@ const replacementCharacter = "\uFFFD";
 const mysqlDatabaseId = "default";
 
 type MysqlPool = mysql.Pool;
-type MysqlRow = mysql.RowDataPacket & { data: SeasonalityDatabase | string | Buffer | null; size_bytes?: number };
+type MysqlJsonValue = SeasonalityDatabase | Record<string, unknown> | unknown[] | string | Buffer | null;
+type MysqlRow = mysql.RowDataPacket & {
+  collection_name?: DatabaseCollectionName | "__meta__";
+  shard_key?: string;
+  data: MysqlJsonValue;
+  size_bytes?: number;
+};
+type DatabaseCollectionName = Exclude<keyof SeasonalityDatabase, "schema_version" | "created_at" | "updated_at">;
+type MysqlShard = { collectionName: DatabaseCollectionName | "__meta__"; shardKey: string; data: unknown };
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
 const useMysqlStorage = Boolean(databaseUrl);
 let mysqlPool: MysqlPool | undefined;
 let mysqlReady: Promise<void> | undefined;
+const databaseCollectionNames = [
+  "instruments",
+  "universe_members",
+  "daily_prices",
+  "data_download_jobs",
+  "data_quality_issues",
+  "download_failures",
+  "seasonal_observations",
+  "seasonal_statistics",
+  "seasonal_exclusions",
+  "seasonality_builds",
+  "trading_settings",
+  "managed_trades",
+  "trade_tranches",
+  "trade_events",
+] as const satisfies readonly DatabaseCollectionName[];
 
 const emptyDb = (): SeasonalityDatabase => {
   const now = new Date().toISOString();
@@ -79,11 +103,43 @@ function normalizeDatabase(raw: Partial<SeasonalityDatabase> | null | undefined)
   return { ...emptyDb(), ...(raw ?? {}) };
 }
 
-function parseMysqlJson(value: MysqlRow["data"]): SeasonalityDatabase | null {
+function parseMysqlJson<T>(value: MysqlJsonValue): T | null {
   if (!value) return null;
   if (Buffer.isBuffer(value)) return JSON.parse(value.toString("utf8"));
   if (typeof value === "string") return JSON.parse(value);
-  return value;
+  return value as T;
+}
+
+function mysqlErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isTransientMysqlError(error: unknown) {
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
+  const message = mysqlErrorMessage(error);
+  return ["ECONNRESET", "EPIPE", "ETIMEDOUT", "PROTOCOL_CONNECTION_LOST"].some((text) => code.includes(text) || message.includes(text));
+}
+
+async function resetMysqlPool() {
+  const pool = mysqlPool;
+  mysqlPool = undefined;
+  mysqlReady = undefined;
+  await pool?.end().catch(() => {});
+}
+
+async function withMysqlRetry<T>(task: () => Promise<T>) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientMysqlError(error) || attempt === 3) break;
+      await resetMysqlPool();
+      await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(mysqlErrorMessage(lastError));
 }
 
 function getMysqlPool() {
@@ -108,28 +164,114 @@ function getMysqlPool() {
 async function ensureMysqlDb() {
   if (!mysqlReady) {
     mysqlReady = (async () => {
-      await getMysqlPool().execute(`
-        CREATE TABLE IF NOT EXISTS seasonality_json_database (
-          id VARCHAR(64) NOT NULL PRIMARY KEY,
-          schema_version INT NOT NULL DEFAULT 1,
-          data JSON NOT NULL,
-          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-      `);
+      await withMysqlRetry(async () => {
+        const pool = getMysqlPool();
+        await pool.execute(`
+          CREATE TABLE IF NOT EXISTS seasonality_json_database (
+            id VARCHAR(64) NOT NULL PRIMARY KEY,
+            schema_version INT NOT NULL DEFAULT 1,
+            data JSON NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        await pool.execute(`
+          CREATE TABLE IF NOT EXISTS seasonality_json_collections (
+            document_id VARCHAR(64) NOT NULL,
+            collection_name VARCHAR(64) NOT NULL,
+            shard_key VARCHAR(128) NOT NULL,
+            data JSON NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (document_id, collection_name, shard_key),
+            INDEX idx_seasonality_json_collections_name (collection_name)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+      });
     })();
   }
   await mysqlReady;
 }
 
+function groupBySecurityId(rows: unknown[]) {
+  const shards = new Map<string, unknown[]>();
+  for (const row of rows) {
+    const item = row as { security_id?: string; id?: string };
+    const shardKey = item.security_id || item.id || "default";
+    const bucket = shards.get(shardKey);
+    if (bucket) bucket.push(row);
+    else shards.set(shardKey, [row]);
+  }
+  return shards;
+}
+
+function buildMysqlShards(db: SeasonalityDatabase): MysqlShard[] {
+  const shards: MysqlShard[] = [{
+    collectionName: "__meta__",
+    shardKey: "default",
+    data: { schema_version: db.schema_version, created_at: db.created_at, updated_at: db.updated_at },
+  }];
+
+  for (const collectionName of databaseCollectionNames) {
+    const rows = db[collectionName];
+    if (collectionName === "daily_prices" || collectionName === "data_quality_issues" || collectionName === "seasonal_observations" || collectionName === "seasonal_statistics" || collectionName === "seasonal_exclusions") {
+      const grouped = groupBySecurityId(rows);
+      if (!grouped.size) shards.push({ collectionName, shardKey: "default", data: [] });
+      for (const [shardKey, data] of grouped) shards.push({ collectionName, shardKey, data });
+    } else {
+      shards.push({ collectionName, shardKey: "default", data: rows });
+    }
+  }
+
+  return shards;
+}
+
+function databaseFromShards(rows: MysqlRow[]) {
+  if (!rows.length) return null;
+
+  const db = emptyDb();
+  for (const row of rows) {
+    const collectionName = row.collection_name;
+    if (!collectionName) continue;
+
+    if (collectionName === "__meta__") {
+      const meta = parseMysqlJson<Partial<Pick<SeasonalityDatabase, "schema_version" | "created_at" | "updated_at">>>(row.data);
+      db.schema_version = meta?.schema_version === 1 ? 1 : db.schema_version;
+      db.created_at = meta?.created_at ?? db.created_at;
+      db.updated_at = meta?.updated_at ?? db.updated_at;
+      continue;
+    }
+
+    if (databaseCollectionNames.includes(collectionName as DatabaseCollectionName)) {
+      const parsed = parseMysqlJson<unknown[]>(row.data);
+      if (Array.isArray(parsed)) {
+        (db[collectionName as DatabaseCollectionName] as unknown[]).push(...parsed);
+      }
+    }
+  }
+
+  return db;
+}
+
 async function ensureMysqlDatabase(): Promise<SeasonalityDatabase> {
   await ensureMysqlDb();
-  const [rows] = await getMysqlPool().execute<MysqlRow[]>(
+  const [shardRows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
+    "SELECT collection_name, shard_key, data FROM seasonality_json_collections WHERE document_id = ?",
+    [mysqlDatabaseId],
+  ));
+  const sharded = databaseFromShards(shardRows);
+  if (sharded) return sharded;
+
+  const [legacyRows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
     "SELECT data FROM seasonality_json_database WHERE id = ? LIMIT 1",
     [mysqlDatabaseId],
-  );
-  const existing = parseMysqlJson(rows[0]?.data);
-  if (existing) return normalizeDatabase(existing);
+  ));
+  const existing = parseMysqlJson<SeasonalityDatabase>(legacyRows[0]?.data);
+  if (existing) {
+    const db = normalizeDatabase(existing);
+    await writeMysqlDatabase(db);
+    return db;
+  }
 
   const db = emptyDb();
   await writeMysqlDatabase(db);
@@ -139,23 +281,35 @@ async function ensureMysqlDatabase(): Promise<SeasonalityDatabase> {
 async function writeMysqlDatabase(db: SeasonalityDatabase) {
   await ensureMysqlDb();
   db.updated_at = new Date().toISOString();
-  await getMysqlPool().execute(
-    `INSERT INTO seasonality_json_database (id, schema_version, data)
-     VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       schema_version = VALUES(schema_version),
-       data = VALUES(data),
-       updated_at = CURRENT_TIMESTAMP`,
-    [mysqlDatabaseId, db.schema_version, JSON.stringify(db)],
-  );
+  const shards = buildMysqlShards(db);
+  await withMysqlRetry(async () => {
+    const connection = await getMysqlPool().getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute("DELETE FROM seasonality_json_collections WHERE document_id = ?", [mysqlDatabaseId]);
+      for (const shard of shards) {
+        await connection.execute(
+          `INSERT INTO seasonality_json_collections (document_id, collection_name, shard_key, data)
+           VALUES (?, ?, ?, ?)`,
+          [mysqlDatabaseId, shard.collectionName, shard.shardKey, JSON.stringify(shard.data)],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback().catch(() => {});
+      throw error;
+    } finally {
+      connection.release();
+    }
+  });
 }
 
 async function getMysqlDatabaseSizeBytes() {
   await ensureMysqlDb();
-  const [rows] = await getMysqlPool().execute<MysqlRow[]>(
-    "SELECT CHAR_LENGTH(CAST(data AS CHAR)) AS size_bytes FROM seasonality_json_database WHERE id = ? LIMIT 1",
+  const [rows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
+    "SELECT COALESCE(SUM(CHAR_LENGTH(CAST(data AS CHAR))), 0) AS size_bytes FROM seasonality_json_collections WHERE document_id = ?",
     [mysqlDatabaseId],
-  );
+  ));
   return Number(rows[0]?.size_bytes ?? 0);
 }
 
