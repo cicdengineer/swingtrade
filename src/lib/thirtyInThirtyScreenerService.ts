@@ -1,7 +1,7 @@
 import "server-only";
 import type { DailyPriceRecord, UniverseName } from "./types";
 import { readDatabase } from "./localDatabase";
-import { calculateSma } from "./swingScreenerService";
+import { calculateEma, calculateSma } from "./swingScreenerService";
 
 export type ThirtyInThirtyFilters = {
   universe: UniverseName | "ALL";
@@ -23,6 +23,8 @@ export type ThirtyInThirtyRow = {
   universe_name: UniverseName;
   current_date: string;
   current_close: number;
+  ema50: number;
+  distance_from_ema_pct: number;
   best_return_pct: number;
   best_start_date?: string;
   best_start_close?: number;
@@ -50,6 +52,7 @@ export type ThirtyInThirtyRow = {
     high: number;
     low: number;
     close: number;
+    ema50?: number;
     volume: number;
     volume_ratio?: number;
   }>;
@@ -86,6 +89,11 @@ function analyzeStock(input: {
 
   const currentIndex = rows.length - 1;
   const current = rows[currentIndex];
+  const closes = rows.map((row) => row.close);
+  const ema50 = calculateEma(closes, 50);
+  const currentEma = ema50[currentIndex];
+  if (!currentEma) return null;
+  const distanceFromEma = pct(current.close, currentEma);
   const lookbackStart = Math.max(0, currentIndex - input.filters.lookbackDays - input.filters.windowDays + 1);
   const scanStart = Math.max(lookbackStart, currentIndex - input.filters.lookbackDays - input.filters.windowDays + 1);
   const scanEnd = Math.max(scanStart, currentIndex - input.filters.windowDays);
@@ -149,6 +157,7 @@ function analyzeStock(input: {
       high: row.high,
       low: row.low,
       close: row.close,
+      ema50: ema50[originalIndex],
       volume: row.volume,
       volume_ratio: volAvg ? row.volume / volAvg : undefined,
     };
@@ -163,6 +172,8 @@ function analyzeStock(input: {
     universe_name: input.universeName,
     current_date: current.trade_date,
     current_close: current.close,
+    ema50: currentEma,
+    distance_from_ema_pct: distanceFromEma,
     best_return_pct: Number.isFinite(best.returnPct) ? best.returnPct : 0,
     best_start_date: rows[best.startIndex]?.trade_date,
     best_start_close: rows[best.startIndex]?.close,
