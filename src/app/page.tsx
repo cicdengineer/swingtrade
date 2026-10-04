@@ -65,8 +65,8 @@ type MomentumSetupType = "MOMENTUM_CONTRACTION" | "TRENDING_TIGHT";
 type MomentumContractionFilters = { universe: "ALL" | UniverseName; setupType: "ALL" | MomentumSetupType; emaLength: number; emaSlopeLookback: number; momentumLookback: number; minPriorMovePct: number; volumeAverageLength: number; expansionRelativeVolume: number; atrLength: number; tightRangeAtr: number; lowVolumeLookback: number; dryVolumeRatio: number; contractionLookback: number; minAverageDailyTradedValue: number; maxDistanceFromEmaPct: number; requireRisingEma: boolean; minSetupScore: number; showAll: boolean; debug: boolean };
 type MomentumContractionRow = { status: MomentumSetupType | "BELOW_EMA" | "NO_MOMENTUM" | "NOT_TIGHT" | "VOLUME_NOT_DRY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; setupType: MomentumSetupType; setupScore: number; current_date: string; current_close: number; ema50: number; emaSlope: number; distance_from_ema_pct: number; priorMovePct: number; momentumRelativeVolume: number; atr14: number; rangeCompression: number; currentVolume: number; volumeSMA20: number; volumeSMA50: number; relativeVolume: number; volumePercentile: number; lowestVolume10: boolean; lowestVolume20: boolean; avgVolume5: number; avgVolume20: number; volumeContractionRatio: number; trendStructure: "HIGHER_HIGH_LOW" | "RISING" | "SIDEWAYS" | "WEAK"; averageDailyTradedValue: number; reason: string; diagnostics: { pass: boolean; label: string }[]; recent: DailyChartPoint[] };
 type MomentumContractionResponse = { filters: MomentumContractionFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: MomentumContractionRow[]; generatedAt: string };
-type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; showAll: boolean };
-type ThirtyInThirtySortKey = "best_return" | "above_50ema" | "symbol" | "company" | "current_1m" | "current_2m" | "current_3m" | "current_6m" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
+type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; showAll: boolean };
+type ThirtyInThirtySortKey = "best_return" | "symbol" | "company" | "current_1m" | "current_2m" | "current_3m" | "current_6m" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
 type DryVolumeBreakoutFilters = { universe: "ALL" | UniverseName; minMovePct: number; moveWindowDays: number; impulseLookbackDays: number; minImpulseVolumeRatio: number; minPullbackDays: number; maxPullbackDays: number; minPullbackPct: number; maxPullbackPct: number; dryVolumeRatio: number; dryVolumeLookbackDays: number; breakoutWithinDays: number; stopBufferPct: number; maxDistanceToEntryPct: number; minAverageDailyTradedValue: number; showAll: boolean };
@@ -206,6 +206,12 @@ const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   minAverageDailyTradedValue: 0,
   positive3MonthsOnly: false,
   positive6MonthsOnly: false,
+  above50EmaOnly: false,
+  nearPreviousDayHighOnly: false,
+  upTodayOnly: false,
+  nearSwingHighOnly: false,
+  earlyVolumeOnly: false,
+  highVolumeOnly: false,
   showAll: false,
 };
 const defaultDryVolumeBreakoutFilters: DryVolumeBreakoutFilters = {
@@ -439,6 +445,30 @@ const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): Th
     recent,
   };
 };
+const previousDailyRow = (row: ThirtyInThirtyRow) => row.recent.at(-2) ?? row.recent.at(-1);
+const currentVolumeRatio = (row: ThirtyInThirtyRow) => [...row.recent].reverse().find((point) => point.volume > 0)?.volume_ratio ?? 0;
+const isNearPreviousDayHigh = (row: ThirtyInThirtyRow) => {
+  const previous = previousDailyRow(row);
+  if (!previous?.high) return false;
+  return ((row.current_close / previous.high) - 1) * 100 >= -0.5;
+};
+const isUpToday = (row: ThirtyInThirtyRow, tick?: LiveTick) => {
+  const previousClose = tick?.prevClose ?? previousDailyRow(row)?.close;
+  return !!previousClose && row.current_close > previousClose;
+};
+const isNearSwingHigh = (row: ThirtyInThirtyRow) => {
+  const recentHigh = Math.max(...row.recent.slice(-21, -1).map((point) => point.high));
+  return Number.isFinite(recentHigh) && ((row.current_close / recentHigh) - 1) * 100 >= -1;
+};
+const matchesThirtyInThirtyFilters = (row: ThirtyInThirtyRow, filters: ThirtyInThirtyFilters, tick?: LiveTick) =>
+  (!filters.positive3MonthsOnly || row.current_3m_return_pct > 0) &&
+  (!filters.positive6MonthsOnly || row.current_6m_return_pct > 0) &&
+  (!filters.above50EmaOnly || row.distance_from_ema_pct >= 0) &&
+  (!filters.nearPreviousDayHighOnly || isNearPreviousDayHigh(row)) &&
+  (!filters.upTodayOnly || isUpToday(row, tick)) &&
+  (!filters.nearSwingHighOnly || isNearSwingHigh(row)) &&
+  (!filters.earlyVolumeOnly || currentVolumeRatio(row) >= 0.3) &&
+  (!filters.highVolumeOnly || currentVolumeRatio(row) >= 1.5);
 
 function SetupSparkline({ row, onOpen }: { row: BreakoutChartRow; onOpen: () => void }) {
   const chartRows = lastTradingMonths(row.recent);
@@ -1811,14 +1841,10 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     };
   }, [data, setLiveFeedStatus]);
   const sortedRows = useMemo(() => {
-    const rows = [...liveRows].filter((row) =>
-      (!filters.positive3MonthsOnly || row.current_3m_return_pct > 0) &&
-      (!filters.positive6MonthsOnly || row.current_6m_return_pct > 0)
-    );
+    const rows = [...liveRows].filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]));
     const valueFor = (row: ThirtyInThirtyRow): string | number => {
       if (sort.key === "symbol") return row.symbol;
       if (sort.key === "company") return row.company_name;
-      if (sort.key === "above_50ema") return row.distance_from_ema_pct >= 0 ? 1 : 0;
       if (sort.key === "current_1m") return row.return_1m_pct;
       if (sort.key === "current_2m") return row.return_2m_pct;
       if (sort.key === "current_3m") return row.current_3m_return_pct;
@@ -1841,7 +1867,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       return sort.direction === "asc" ? comparison : -comparison;
     });
     return rows;
-  }, [liveRows, filters.positive3MonthsOnly, filters.positive6MonthsOnly, sort]);
+  }, [liveRows, liveTicks, filters, sort]);
   const visibleRows = useMemo(() => sortedRows.slice(0, tileLimit), [sortedRows, tileLimit]);
   const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "desc" });
 
@@ -1866,12 +1892,18 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
-      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}><option value="best_return">Best 30D Return</option><option value="above_50ema">Above 50 EMA</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="recent">Most Recent 30D Move</option><option value="current_1m">1M Return</option><option value="current_2m">2M Return</option><option value="current_3m">3M Return</option><option value="current_6m">6M Return</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
+      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="recent">Most Recent 30D Move</option><option value="current_1m">1M Return</option><option value="current_2m">2M Return</option><option value="current_3m">3M Return</option><option value="current_6m">6M Return</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
       <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
     </div>
     <div className="thirty-in-thirty-switches">
       <label><input type="checkbox" checked={filters.positive3MonthsOnly} onChange={(e) => setFilters({ ...filters, positive3MonthsOnly: e.target.checked })}/><span>Positive in 3M</span></label>
       <label><input type="checkbox" checked={filters.positive6MonthsOnly} onChange={(e) => setFilters({ ...filters, positive6MonthsOnly: e.target.checked })}/><span>Positive in 6M</span></label>
+      <label><input type="checkbox" checked={filters.above50EmaOnly} onChange={(e) => setFilters({ ...filters, above50EmaOnly: e.target.checked })}/><span>Above 50EMA</span></label>
+      <label><input type="checkbox" checked={filters.nearPreviousDayHighOnly} onChange={(e) => setFilters({ ...filters, nearPreviousDayHighOnly: e.target.checked })}/><span>Near PD High</span></label>
+      <label><input type="checkbox" checked={filters.upTodayOnly} onChange={(e) => setFilters({ ...filters, upTodayOnly: e.target.checked })}/><span>Up</span></label>
+      <label><input type="checkbox" checked={filters.nearSwingHighOnly} onChange={(e) => setFilters({ ...filters, nearSwingHighOnly: e.target.checked })}/><span>Swing High</span></label>
+      <label><input type="checkbox" checked={filters.earlyVolumeOnly} onChange={(e) => setFilters({ ...filters, earlyVolumeOnly: e.target.checked })}/><span>Early Vol</span></label>
+      <label><input type="checkbox" checked={filters.highVolumeOnly} onChange={(e) => setFilters({ ...filters, highVolumeOnly: e.target.checked })}/><span>High Volume</span></label>
     </div>
     {data && <>
       <div className="thirty-scoreboard">

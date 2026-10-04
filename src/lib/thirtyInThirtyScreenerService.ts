@@ -11,6 +11,12 @@ export type ThirtyInThirtyFilters = {
   minAverageDailyTradedValue: number;
   positive3MonthsOnly: boolean;
   positive6MonthsOnly: boolean;
+  above50EmaOnly: boolean;
+  nearPreviousDayHighOnly: boolean;
+  upTodayOnly: boolean;
+  nearSwingHighOnly: boolean;
+  earlyVolumeOnly: boolean;
+  highVolumeOnly: boolean;
   showAll: boolean;
 };
 
@@ -66,6 +72,12 @@ export const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   minAverageDailyTradedValue: 0,
   positive3MonthsOnly: false,
   positive6MonthsOnly: false,
+  above50EmaOnly: false,
+  nearPreviousDayHighOnly: false,
+  upTodayOnly: false,
+  nearSwingHighOnly: false,
+  earlyVolumeOnly: false,
+  highVolumeOnly: false,
   showAll: false,
 };
 
