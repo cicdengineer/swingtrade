@@ -17,6 +17,7 @@ export type ThirtyInThirtyFilters = {
   nearSwingHighOnly: boolean;
   earlyVolumeOnly: boolean;
   highVolumeOnly: boolean;
+  dryVolumeOnly: boolean;
   showAll: boolean;
 };
 
@@ -78,6 +79,7 @@ export const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   nearSwingHighOnly: false,
   earlyVolumeOnly: false,
   highVolumeOnly: false,
+  dryVolumeOnly: false,
   showAll: false,
 };
 
