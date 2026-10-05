@@ -50,6 +50,13 @@ export type DhanHolding = {
   availableQty: number;
   collateralQty: number;
   avgCostPrice: number;
+  ltp?: number;
+  lastTradedPrice?: number;
+  currentPrice?: number;
+  unrealizedProfit?: number;
+  unrealizedPnl?: number;
+  pnl?: number;
+  totalPnl?: number;
 };
 
 export type DhanPosition = {

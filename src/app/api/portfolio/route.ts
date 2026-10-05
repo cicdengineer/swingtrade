@@ -203,6 +203,16 @@ function holdingEntryDate(openLots: OpenLot[]) {
   return openLots.find((lot) => lot.quantity > 0)?.date;
 }
 
+function numberField(input: object | undefined, keys: string[]) {
+  const record = input as Record<string, unknown> | undefined;
+  for (const key of keys) {
+    const value = record?.[key];
+    const numberValue = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : undefined;
+    if (numberValue !== undefined && Number.isFinite(numberValue)) return numberValue;
+  }
+  return undefined;
+}
+
 function latestPrice(prices: { security_id: string; trade_date: string; close: number }[], securityId: string) {
   return prices
     .filter((row) => row.security_id === securityId)
@@ -211,19 +221,27 @@ function latestPrice(prices: { security_id: string; trade_date: string; close: n
 }
 
 function positionLtp(position: DhanPosition | undefined, fallback?: number) {
-  const price = position?.lastTradedPrice ?? position?.ltp ?? fallback;
+  const price = numberField(position, ["lastTradedPrice", "ltp", "LTP", "lastPrice", "currentPrice"]) ?? fallback;
+  return Number.isFinite(price) && price && price > 0 ? price : undefined;
+}
+
+function holdingLtp(holding: DhanHolding, position: DhanPosition | undefined, fallback?: number) {
+  const price = numberField(holding, ["lastTradedPrice", "ltp", "LTP", "lastPrice", "currentPrice"]) ?? positionLtp(position) ?? fallback;
   return Number.isFinite(price) && price && price > 0 ? price : undefined;
 }
 
 function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: number }, position: DhanPosition | undefined, openLots: OpenLot[], today: string, prices: { security_id: string; trade_date: string; close: number }[]) {
   const brokerEntryDate = holdingEntryDate(openLots) ?? today;
   const invested = input.totalQty * input.avgCostPrice;
-  const ltp = positionLtp(position, latestPrice(prices, input.securityId));
-  const unrealizedPnl = ltp ? (ltp - input.avgCostPrice) * input.totalQty : position?.unrealizedProfit ?? 0;
+  const ltp = holdingLtp(input, position, position ? undefined : latestPrice(prices, input.securityId));
+  const holdingPnl = numberField(input, ["unrealizedProfit", "unrealizedPnl", "pnl", "totalPnl"]);
+  const positionPnl = position && openBuyQty(position) > 0 ? position.unrealizedProfit : undefined;
+  const unrealizedPnl = holdingPnl ?? (ltp ? (ltp - input.avgCostPrice) * input.totalQty : positionPnl ?? 0);
   const dayPnl = position?.dayPnl ?? (position ? (position.daySellValue ?? 0) - (position.dayBuyValue ?? 0) : 0);
   return {
     ...input,
     invested,
+    currentPrice: ltp,
     unrealizedPnl,
     dayPnl,
     productType: position?.productType ?? "CNC",
