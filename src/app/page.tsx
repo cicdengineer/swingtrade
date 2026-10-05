@@ -496,7 +496,8 @@ const isNearSwingHigh = (row: ThirtyInThirtyRow) => {
   return Number.isFinite(recentHigh) && ((row.current_close / recentHigh) - 1) * 100 >= -1;
 };
 const hasDryVolumeStreak = (row: ThirtyInThirtyRow, minDays = 5) => {
-  const volumes = row.recent.map((point) => point.volume).filter((volume) => volume > 0);
+  const today = liveTradeDate();
+  const volumes = row.recent.filter((point) => point.trade_date !== today).map((point) => point.volume).filter((volume) => volume > 0);
   if (volumes.length < minDays) return false;
   let streakDays = 1;
   for (let index = volumes.length - 1; index > 0; index -= 1) {
