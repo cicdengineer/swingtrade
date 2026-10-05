@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getHoldings, getPositions, getTradeHistory, hasDhanCredentials, type DhanTrade } from "@/lib/dhan";
+import { getHoldings, getPositions, getTradeHistory, hasDhanCredentials, type DhanHolding, type DhanPosition, type DhanTrade } from "@/lib/dhan";
 import { getTradeManagementSnapshot } from "@/lib/tradeManagementStore";
 import { readDatabase } from "@/lib/localDatabase";
 
@@ -20,11 +20,21 @@ type OpenLot = { date: string; quantity: number; price: number };
 
 const toNumber = (value: unknown) => Number(value ?? 0) || 0;
 const fixedNseHolidayMonthDays = new Set(["01-26", "08-15", "10-02", "12-25"]);
+function dateInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
 const tradeCharges = (trade: DhanTrade) =>
   toNumber(trade.sebiTax) + toNumber(trade.stt) + toNumber(trade.brokerageCharges) + toNumber(trade.serviceTax) + toNumber(trade.exchangeTransactionCharges) + toNumber(trade.stampDuty);
 
 function portfolioPeriod(today = new Date()) {
-  const to = today.toISOString().slice(0, 10);
+  const to = dateInTimeZone(today, "Asia/Kolkata");
   return {
     label: "15 Apr 2026 onwards",
     from: "2026-04-15",
@@ -145,21 +155,71 @@ function weekdayTradingDaysSince(entryDate: string, currentDate: string) {
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return 0;
   let days = 0;
   const cursor = new Date(start);
-  cursor.setUTCDate(cursor.getUTCDate() + 1);
   while (cursor <= end) {
-    const day = cursor.getUTCDay();
-    const monthDay = `${String(cursor.getUTCMonth() + 1).padStart(2, "0")}-${String(cursor.getUTCDate()).padStart(2, "0")}`;
-    if (day !== 0 && day !== 6 && !fixedNseHolidayMonthDays.has(monthDay)) days += 1;
+    if (isNseBusinessDay(cursor.toISOString().slice(0, 10))) days += 1;
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return days;
 }
 
+function isNseBusinessDay(date: string) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  const day = parsed.getUTCDay();
+  const monthDay = `${String(parsed.getUTCMonth() + 1).padStart(2, "0")}-${String(parsed.getUTCDate()).padStart(2, "0")}`;
+  return day !== 0 && day !== 6 && !fixedNseHolidayMonthDays.has(monthDay);
+}
+
 function tradingDaysHeldFromPrices(prices: { security_id: string; trade_date: string }[], securityId: string, entryDate: string, currentDate: string) {
-  const rows = prices.filter((row) => row.security_id === securityId && row.trade_date > entryDate && row.trade_date <= currentDate);
-  if (rows.length) return rows.length;
-  const marketDates = new Set(prices.filter((row) => row.trade_date > entryDate && row.trade_date <= currentDate).map((row) => row.trade_date));
+  const rows = new Set(prices.filter((row) => row.security_id === securityId && row.trade_date >= entryDate && row.trade_date <= currentDate).map((row) => row.trade_date));
+  if (isNseBusinessDay(entryDate)) rows.add(entryDate);
+  if (isNseBusinessDay(currentDate)) rows.add(currentDate);
+  if (rows.size) return rows.size;
+  const marketDates = new Set(prices.filter((row) => row.trade_date >= entryDate && row.trade_date <= currentDate).map((row) => row.trade_date));
+  if (isNseBusinessDay(entryDate)) marketDates.add(entryDate);
+  if (isNseBusinessDay(currentDate)) marketDates.add(currentDate);
   return marketDates.size || weekdayTradingDaysSince(entryDate, currentDate);
+}
+
+function todaySellFromHoldingQty(position?: DhanPosition) {
+  if (!position) return 0;
+  return Math.max(0, position.sellQty - position.buyQty, -position.netQty);
+}
+
+function openBuyQty(position: DhanPosition) {
+  return Math.max(0, position.netQty, position.buyQty - position.sellQty);
+}
+
+function isDeliveryPosition(position: DhanPosition) {
+  return position.productType === "CNC" || position.productType === "DELIVERY" || position.productType === "Delivery";
+}
+
+function isEtfLike(securityId: string, symbol: string, tradeInstruments: Map<string, string>) {
+  const normalized = symbol.toUpperCase();
+  const instrument = (tradeInstruments.get(securityId) ?? "").toUpperCase();
+  return instrument.includes("ETF") || /\bETF\b/.test(normalized) || normalized.endsWith("BEES") || normalized.includes("IETF");
+}
+
+function holdingEntryDate(openLots: OpenLot[]) {
+  return openLots.find((lot) => lot.quantity > 0)?.date;
+}
+
+function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: number }, position: DhanPosition | undefined, openLots: OpenLot[], today: string, prices: { security_id: string; trade_date: string }[]) {
+  const brokerEntryDate = holdingEntryDate(openLots) ?? today;
+  const invested = input.totalQty * input.avgCostPrice;
+  const unrealizedPnl = position && position.netQty > 0 ? position.unrealizedProfit : 0;
+  const dayPnl = position ? (position.daySellValue ?? 0) - (position.dayBuyValue ?? 0) : 0;
+  return {
+    ...input,
+    invested,
+    unrealizedPnl,
+    dayPnl,
+    productType: position?.productType ?? "CNC",
+    positionType: position?.positionType ?? "HOLDING",
+    brokerEntryDate,
+    brokerCalendarDaysHeld: Math.max(0, Math.round((new Date(`${today}T00:00:00Z`).getTime() - new Date(`${brokerEntryDate}T00:00:00Z`).getTime()) / 86_400_000)),
+    brokerTradingDaysHeld: tradingDaysHeldFromPrices(prices, input.securityId, brokerEntryDate, today),
+    brokerOpenLots: openLots.filter((lot) => lot.quantity > 0).length,
+  };
 }
 
 function monthlyPnl(closedTrades: ClosedTrade[], trades: DhanTrade[]) {
@@ -187,28 +247,39 @@ export async function GET() {
     });
     const positionBySecurity = new Map(positions.map((position) => [position.securityId, position]));
     const openLotsBySecurity = calculateOpenLotsBySecurity(inventoryTrades);
+    const tradeInstruments = new Map(inventoryTrades.map((trade) => [trade.securityId, trade.instrument]));
     const db = await readDatabase();
     const today = period.to;
-    const enrichedHoldings = holdings.map((holding) => {
+    const holdingsBySecurity = new Set(holdings.map((holding) => holding.securityId));
+    const adjustedHoldings = holdings.map((holding) => {
       const position = positionBySecurity.get(holding.securityId);
       const openLots = openLotsBySecurity.get(holding.securityId) ?? [];
-      const brokerEntryDate = openLots.find((lot) => lot.quantity > 0)?.date;
-      const invested = holding.totalQty * holding.avgCostPrice;
-      const unrealizedPnl = position?.unrealizedProfit ?? 0;
-      const dayPnl = (position?.daySellValue ?? 0) - (position?.dayBuyValue ?? 0);
-      return {
-        ...holding,
-        invested,
-        unrealizedPnl,
-        dayPnl,
-        productType: position?.productType ?? "CNC",
-        positionType: position?.positionType ?? "HOLDING",
-        brokerEntryDate,
-        brokerCalendarDaysHeld: brokerEntryDate ? Math.max(0, Math.round((new Date(`${today}T00:00:00Z`).getTime() - new Date(`${brokerEntryDate}T00:00:00Z`).getTime()) / 86_400_000)) : undefined,
-        brokerTradingDaysHeld: brokerEntryDate ? tradingDaysHeldFromPrices(db.daily_prices, holding.securityId, brokerEntryDate, today) : undefined,
-        brokerOpenLots: openLots.filter((lot) => lot.quantity > 0).length,
-      };
-    });
+      if (isEtfLike(holding.securityId, holding.tradingSymbol, tradeInstruments)) return null;
+      const sellFromHoldingQty = todaySellFromHoldingQty(position);
+      const effectiveQty = sellFromHoldingQty > 0 ? Math.max(0, holding.availableQty || holding.totalQty - sellFromHoldingQty) : holding.totalQty;
+      if (effectiveQty <= 0) return null;
+      return enrichHolding({ ...holding, totalQty: effectiveQty, availableQty: Math.min(holding.availableQty || effectiveQty, effectiveQty) }, position, openLots, today, db.daily_prices);
+    }).filter((holding): holding is NonNullable<typeof holding> => Boolean(holding));
+    const boughtPositions = positions
+      .filter((position) => !holdingsBySecurity.has(position.securityId) && isDeliveryPosition(position) && openBuyQty(position) > 0 && !isEtfLike(position.securityId, position.tradingSymbol, tradeInstruments))
+      .map((position) => {
+        const quantity = openBuyQty(position);
+        const avgCostPrice = position.buyAvg || position.costPrice;
+        const holding: DhanHolding & { totalQty: number; availableQty: number } = {
+          exchange: position.exchangeSegment,
+          tradingSymbol: position.tradingSymbol,
+          securityId: position.securityId,
+          isin: "",
+          totalQty: quantity,
+          dpQty: 0,
+          t1Qty: quantity,
+          availableQty: quantity,
+          collateralQty: 0,
+          avgCostPrice,
+        };
+        return enrichHolding(holding, position, [{ date: today, quantity, price: avgCostPrice }], today, db.daily_prices);
+      });
+    const enrichedHoldings = [...adjustedHoldings, ...boughtPositions];
 
     const closedTrades = calculateClosedTrades(inventoryTrades).filter((trade) => trade.date >= period.from && trade.date <= period.to);
     const wins = closedTrades.filter((trade) => trade.netPnl > 0);
