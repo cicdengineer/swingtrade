@@ -327,7 +327,8 @@ function findDryVolumeBreakoutCandidate(stock: PreparedStock, index: number, fil
 
   const entryPrice = dry.row.high;
   const stopLoss = dry.row.low * (1 - filters.stopBufferPct / 100);
-  const trigger = current.high > entryPrice && current.close > entryPrice;
+  const entryTradedInRange = current.low <= entryPrice && current.high >= entryPrice;
+  const trigger = entryTradedInRange && current.close > entryPrice;
   const distanceToEntryPct = Math.abs(pct(current.close, entryPrice));
   if (distanceToEntryPct > filters.maxDistanceToEntryPct) return null;
   const distanceFromEma = pct(current.close, ema10);
@@ -352,7 +353,9 @@ function findDryVolumeBreakoutCandidate(stock: PreparedStock, index: number, fil
     distance_from_10ema_pct: round(distanceFromEma),
     reason: trigger
       ? `Dry-volume candle ${dry.row.trade_date} broke above ${entryPrice.toFixed(2)} with SL ${stopLoss.toFixed(2)}.`
-      : `Waiting for breakout above dry-volume candle high ${entryPrice.toFixed(2)} from ${dry.row.trade_date}.`,
+      : current.high >= entryPrice && current.low > entryPrice
+        ? `Skipped gap above ${entryPrice.toFixed(2)} from dry-volume candle ${dry.row.trade_date}; entry price did not trade inside today's candle.`
+        : `Waiting for breakout above dry-volume candle high ${entryPrice.toFixed(2)} from ${dry.row.trade_date}.`,
   };
 }
 
