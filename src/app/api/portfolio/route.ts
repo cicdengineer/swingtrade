@@ -203,11 +203,24 @@ function holdingEntryDate(openLots: OpenLot[]) {
   return openLots.find((lot) => lot.quantity > 0)?.date;
 }
 
-function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: number }, position: DhanPosition | undefined, openLots: OpenLot[], today: string, prices: { security_id: string; trade_date: string }[]) {
+function latestPrice(prices: { security_id: string; trade_date: string; close: number }[], securityId: string) {
+  return prices
+    .filter((row) => row.security_id === securityId)
+    .sort((a, b) => a.trade_date.localeCompare(b.trade_date))
+    .at(-1)?.close;
+}
+
+function positionLtp(position: DhanPosition | undefined, fallback?: number) {
+  const price = position?.lastTradedPrice ?? position?.ltp ?? fallback;
+  return Number.isFinite(price) && price && price > 0 ? price : undefined;
+}
+
+function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: number }, position: DhanPosition | undefined, openLots: OpenLot[], today: string, prices: { security_id: string; trade_date: string; close: number }[]) {
   const brokerEntryDate = holdingEntryDate(openLots) ?? today;
   const invested = input.totalQty * input.avgCostPrice;
-  const unrealizedPnl = position && position.netQty > 0 ? position.unrealizedProfit : 0;
-  const dayPnl = position ? (position.daySellValue ?? 0) - (position.dayBuyValue ?? 0) : 0;
+  const ltp = positionLtp(position, latestPrice(prices, input.securityId));
+  const unrealizedPnl = ltp ? (ltp - input.avgCostPrice) * input.totalQty : position?.unrealizedProfit ?? 0;
+  const dayPnl = position?.dayPnl ?? (position ? (position.daySellValue ?? 0) - (position.dayBuyValue ?? 0) : 0);
   return {
     ...input,
     invested,

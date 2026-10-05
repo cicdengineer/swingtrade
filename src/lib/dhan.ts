@@ -66,6 +66,9 @@ export type DhanPosition = {
   netQty: number;
   realizedProfit: number;
   unrealizedProfit: number;
+  lastTradedPrice?: number;
+  ltp?: number;
+  dayPnl?: number;
   dayBuyValue: number;
   daySellValue: number;
 };
