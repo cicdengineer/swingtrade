@@ -56,6 +56,7 @@ const pad = (value: number) => String(value).padStart(2, "0");
 const dhanDateTime = (date: Date) =>
   `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 const today = () => dhanDate(new Date());
+const fixedNseHolidayMonthDays = new Set(["01-26", "08-15", "10-02", "12-25"]);
 const dhanReason = (body: any, fallback: string) => {
   const reason = body?.errorMessage ?? body?.remarks ?? body?.message ?? body?.error ?? body?.status ?? fallback;
   const text = typeof reason === "string" ? reason : JSON.stringify(reason);
@@ -218,6 +219,38 @@ function missingDateRangesFromLatest(latest?: string) {
   const fromDate = dhanDate(next);
   return { latest, ranges: fromDate <= today() ? [{ fromDate, toDate: today() }] : [] };
 }
+
+function isNseBusinessDay(date: string) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  if (day === 0 || day === 6) return false;
+  return !fixedNseHolidayMonthDays.has(date.slice(5));
+}
+
+function dateRange(fromDate: string, toDate: string) {
+  const dates: string[] = [];
+  const cursor = new Date(`${fromDate}T00:00:00Z`);
+  const end = new Date(`${toDate}T00:00:00Z`);
+  while (cursor <= end) {
+    dates.push(dhanDate(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+function isTodayOnlyHistoricalGap(fromDate: string, toDate: string) {
+  const tradeDate = today();
+  if (toDate !== tradeDate || !isNseBusinessDay(tradeDate)) return false;
+  const missingBusinessDays = dateRange(fromDate, toDate).filter(isNseBusinessDay);
+  return missingBusinessDays.length === 1 && missingBusinessDays[0] === tradeDate;
+}
+
+function isNoHistoricalDataError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes("no daily candles") || message.includes("no data") || message.includes("no data present");
+}
+
+const pendingEodNotice = () =>
+  `Today's daily candle is not available from Dhan yet. Local data is current through the latest available trading day; retry after Dhan posts end-of-day historical candles, usually later in the evening IST.`;
 
 async function withRetry<T>(label: string, task: () => Promise<T>, attempts = 4): Promise<T> {
   let last: unknown;
@@ -443,13 +476,23 @@ async function downloadHistoricalDataForMember(member: UniverseMemberRecord | Se
   let total = 0;
   let dataThroughDate: string | undefined = latest;
   const candlesByRange: Candle[][] = [];
+  let pendingEod = false;
   for (const range of ranges) {
-    const candles = await getHistoricalData(security, range.fromDate, range.toDate);
+    let candles: Candle[];
+    try {
+      candles = await getHistoricalData(security, range.fromDate, range.toDate);
+    } catch (error) {
+      if (latest && isTodayOnlyHistoricalGap(range.fromDate, range.toDate) && isNoHistoricalDataError(error)) {
+        pendingEod = true;
+        continue;
+      }
+      throw error;
+    }
     total += candles.length;
     dataThroughDate = candles.at(-1)?.date ?? dataThroughDate;
     candlesByRange.push(candles);
   }
-  return { security, candles: candlesByRange.flat(), downloadedRows: total, skipped: ranges.length === 0, dataThroughDate };
+  return { security, candles: candlesByRange.flat(), downloadedRows: total, skipped: ranges.length === 0 || pendingEod, pendingEod, dataThroughDate };
 }
 
 export async function refreshInstrumentData(member: UniverseMemberRecord | Security) {
@@ -458,9 +501,16 @@ export async function refreshInstrumentData(member: UniverseMemberRecord | Secur
   const result = await downloadHistoricalDataForMember(member, latestPriceDate(db, security.securityId));
   if (!result.skipped) {
     const saved = await saveHistoricalData(result.security, result.candles);
-    return { downloadedRows: saved.insertedOrUpdated, skipped: false, dataThroughDate: saved.dataThroughDate };
+    return { downloadedRows: saved.insertedOrUpdated, skipped: false, pendingEod: false, dataThroughDate: saved.dataThroughDate };
   }
-  return { downloadedRows: 0, skipped: true, dataThroughDate: result.dataThroughDate };
+  if (result.pendingEod) {
+    await mutateDataStore(async () => {
+      const db = await readDatabase();
+      markFailureResolved(db, security.securityId);
+      await writeDatabase(db);
+    });
+  }
+  return { downloadedRows: 0, skipped: true, pendingEod: result.pendingEod, dataThroughDate: result.dataThroughDate };
 }
 
 function startJob(universeName: UniverseName | undefined, total: number): DataDownloadJobRecord {
@@ -606,11 +656,17 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
             if (!item.result.skipped) {
               const saved = applyHistoricalData(db, item.result.security, item.result.candles);
               dataThroughDate = saved.dataThroughDate ?? dataThroughDate;
+            } else if (item.result.pendingEod) {
+              markFailureResolved(db, item.member.security_id);
             }
             if (job) {
               job.successful += 1;
               job.last_successful_update = new Date().toISOString();
               job.data_through_date = dataThroughDate ?? job.data_through_date;
+              if (item.result.pendingEod) {
+                job.pending_eod_count = (job.pending_eod_count ?? 0) + 1;
+                job.notice = pendingEodNotice();
+              }
             }
           }
 
@@ -622,7 +678,11 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
         if (job) {
           job.remaining = Math.max(job.total - job.completed, 0);
           job.progress = job.total ? Math.round((job.completed / job.total) * 100) : 100;
-          job.current_status = job.remaining ? `Downloading with ${Math.min(concurrency, job.remaining)} workers` : "Finished";
+          job.current_status = job.remaining
+            ? `Downloading with ${Math.min(concurrency, job.remaining)} workers`
+            : job.pending_eod_count
+              ? "Finished; waiting for Dhan EOD candle"
+              : "Finished";
         }
         await writeDatabase(db);
         if (job) emitDataStatusJob(job);
@@ -694,12 +754,17 @@ export async function updateHistoricalData(universeName?: UniverseName, retryFai
     liveJob.current_status = "Downloading";
     await writeDatabase(liveDb);
     try {
-      await refreshInstrumentData(member);
+      const result = await refreshInstrumentData(member);
       const after = await readDatabase();
       const afterJob = after.data_download_jobs.find((row) => row.id === job.id)!;
       afterJob.successful += 1;
       afterJob.last_successful_update = new Date().toISOString();
-      afterJob.data_through_date = after.daily_prices.filter((row) => row.security_id === member.security_id).map((row) => row.trade_date).sort().at(-1) ?? afterJob.data_through_date;
+      afterJob.data_through_date = result.dataThroughDate ?? after.daily_prices.filter((row) => row.security_id === member.security_id).map((row) => row.trade_date).sort().at(-1) ?? afterJob.data_through_date;
+      if (result.pendingEod) {
+        afterJob.pending_eod_count = (afterJob.pending_eod_count ?? 0) + 1;
+        afterJob.notice = pendingEodNotice();
+      }
+      markFailureResolved(after, member.security_id);
       await writeDatabase(after);
     } catch (error) {
       const failedDb = await readDatabase();
@@ -719,7 +784,7 @@ export async function updateHistoricalData(universeName?: UniverseName, retryFai
       progressJob.completed += 1;
       progressJob.remaining = Math.max(progressJob.total - progressJob.completed, 0);
       progressJob.progress = progressJob.total ? Math.round((progressJob.completed / progressJob.total) * 100) : 100;
-      progressJob.current_status = progressJob.remaining ? "Continuing" : "Finished";
+      progressJob.current_status = progressJob.remaining ? "Continuing" : progressJob.pending_eod_count ? "Finished; waiting for Dhan EOD candle" : "Finished";
       await writeDatabase(progressDb);
     }
   }

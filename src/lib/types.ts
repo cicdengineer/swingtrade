@@ -76,6 +76,8 @@ export type DataDownloadJobRecord = {
   finished_at?: string;
   last_successful_update?: string;
   data_through_date?: string;
+  notice?: string;
+  pending_eod_count?: number;
   errors: string[];
 };
 
