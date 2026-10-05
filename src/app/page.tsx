@@ -284,6 +284,7 @@ const money = (n: number) => `₹${n.toFixed(2)}`;
 const rupees = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const pct2 = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 const rValue = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
+const tradingViewUrl = (symbol: string) => `https://in.tradingview.com/chart/05Iji3dY/?symbol=${encodeURIComponent(`NSE:${symbol.trim().toUpperCase()}`)}`;
 const staleDataJobMs = 2 * 60 * 1000;
 const dataJobActivityTime = (job?: DataDownloadJob | null) => job ? Date.parse(job.last_successful_update ?? job.started_at ?? "") : NaN;
 const isActiveDataJob = (job?: DataDownloadJob | null) => {
@@ -1832,9 +1833,14 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths }: { selected: ThirtyI
         <p className="eyebrow">Chart timeframe</p>
         <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${liveDailyRow ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
       </div>
-      <div className="segmented-control" role="group" aria-label="Chart timeframe">
-        <button className={timeframe === "daily" ? "active" : ""} onClick={() => setTimeframe("daily")}>Daily</button>
-        <button className={timeframe === "hourly" ? "active" : ""} onClick={() => setTimeframe("hourly")}>Hourly</button>
+      <div className="chart-toolbar-actions">
+        <a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer" title={`Open ${selected.symbol} in TradingView`}>
+          <ArrowUpRight size={14}/>TradingView
+        </a>
+        <div className="segmented-control" role="group" aria-label="Chart timeframe">
+          <button className={timeframe === "daily" ? "active" : ""} onClick={() => setTimeframe("daily")}>Daily</button>
+          <button className={timeframe === "hourly" ? "active" : ""} onClick={() => setTimeframe("hourly")}>Hourly</button>
+        </div>
       </div>
     </div>
     <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} />
