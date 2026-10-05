@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getHoldings, getPositions, getTradeHistory, hasDhanCredentials, type DhanTrade } from "@/lib/dhan";
 import { getTradeManagementSnapshot } from "@/lib/tradeManagementStore";
+import { readDatabase } from "@/lib/localDatabase";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,7 @@ type ClosedTrade = {
 type OpenLot = { date: string; quantity: number; price: number };
 
 const toNumber = (value: unknown) => Number(value ?? 0) || 0;
+const fixedNseHolidayMonthDays = new Set(["01-26", "08-15", "10-02", "12-25"]);
 const tradeCharges = (trade: DhanTrade) =>
   toNumber(trade.sebiTax) + toNumber(trade.stt) + toNumber(trade.brokerageCharges) + toNumber(trade.serviceTax) + toNumber(trade.exchangeTransactionCharges) + toNumber(trade.stampDuty);
 
@@ -137,6 +139,29 @@ function maxDrawdown(values: number[]) {
   return worst;
 }
 
+function weekdayTradingDaysSince(entryDate: string, currentDate: string) {
+  const start = new Date(`${entryDate}T00:00:00Z`);
+  const end = new Date(`${currentDate}T00:00:00Z`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return 0;
+  let days = 0;
+  const cursor = new Date(start);
+  cursor.setUTCDate(cursor.getUTCDate() + 1);
+  while (cursor <= end) {
+    const day = cursor.getUTCDay();
+    const monthDay = `${String(cursor.getUTCMonth() + 1).padStart(2, "0")}-${String(cursor.getUTCDate()).padStart(2, "0")}`;
+    if (day !== 0 && day !== 6 && !fixedNseHolidayMonthDays.has(monthDay)) days += 1;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return days;
+}
+
+function tradingDaysHeldFromPrices(prices: { security_id: string; trade_date: string }[], securityId: string, entryDate: string, currentDate: string) {
+  const rows = prices.filter((row) => row.security_id === securityId && row.trade_date > entryDate && row.trade_date <= currentDate);
+  if (rows.length) return rows.length;
+  const marketDates = new Set(prices.filter((row) => row.trade_date > entryDate && row.trade_date <= currentDate).map((row) => row.trade_date));
+  return marketDates.size || weekdayTradingDaysSince(entryDate, currentDate);
+}
+
 function monthlyPnl(closedTrades: ClosedTrade[], trades: DhanTrade[]) {
   const buckets = new Map<string, number>();
   for (const trade of closedTrades) {
@@ -162,6 +187,7 @@ export async function GET() {
     });
     const positionBySecurity = new Map(positions.map((position) => [position.securityId, position]));
     const openLotsBySecurity = calculateOpenLotsBySecurity(inventoryTrades);
+    const db = await readDatabase();
     const today = period.to;
     const enrichedHoldings = holdings.map((holding) => {
       const position = positionBySecurity.get(holding.securityId);
@@ -179,6 +205,7 @@ export async function GET() {
         positionType: position?.positionType ?? "HOLDING",
         brokerEntryDate,
         brokerCalendarDaysHeld: brokerEntryDate ? Math.max(0, Math.round((new Date(`${today}T00:00:00Z`).getTime() - new Date(`${brokerEntryDate}T00:00:00Z`).getTime()) / 86_400_000)) : undefined,
+        brokerTradingDaysHeld: brokerEntryDate ? tradingDaysHeldFromPrices(db.daily_prices, holding.securityId, brokerEntryDate, today) : undefined,
         brokerOpenLots: openLots.filter((lot) => lot.quantity > 0).length,
       };
     });
