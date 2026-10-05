@@ -475,6 +475,8 @@ export async function runBasketRotationBacktest(input: Partial<BasketBacktestFil
   const ignoredSignals = new Set<string>();
 
   for (const date of simulationDates) {
+    // Entries must be based on opening holdings/risk, before any same-day exits free capacity.
+    const startOfDayHoldingIds = new Set(positions.keys());
     const startOfDayOpenSlots = Math.max(0, filters.basketSize - positions.size);
     const maxOpenRiskAmount = filters.initialCapital * Math.max(0, filters.maxOpenRiskPct) / 100;
     const maxTradeRiskAmount = filters.initialCapital * Math.max(0, filters.maxRiskPerTradePct) / 100;
@@ -582,7 +584,7 @@ export async function runBasketRotationBacktest(input: Partial<BasketBacktestFil
 
     if (actionableEntryDay) {
       const eligibleBuyCandidates = rawCandidates
-        .filter((candidate) => candidate.trigger && !positions.has(candidate.security_id) && !ignoredSignals.has(signalKey(candidate, date)));
+        .filter((candidate) => candidate.trigger && !startOfDayHoldingIds.has(candidate.security_id) && !positions.has(candidate.security_id) && !ignoredSignals.has(signalKey(candidate, date)));
       const orderedBuyCandidates = isRandomEntryMode(filters.strategyMode)
         ? shuffleCandidates(eligibleBuyCandidates)
         : eligibleBuyCandidates;
@@ -637,6 +639,7 @@ export async function runBasketRotationBacktest(input: Partial<BasketBacktestFil
 
     for (const candidate of rawCandidates) {
       if (!candidate.trigger || positions.has(candidate.security_id)) continue;
+      if (startOfDayHoldingIds.has(candidate.security_id)) continue;
       if (boughtToday.has(candidate.security_id)) continue;
       ignoredSignals.add(signalKey(candidate, date));
     }
@@ -644,7 +647,9 @@ export async function runBasketRotationBacktest(input: Partial<BasketBacktestFil
     const candidates = rawCandidates.map((candidate) => {
       if (!candidate.trigger) return { ...candidate, entry_triggered: false };
       if (boughtToday.has(candidate.security_id)) return { ...candidate, entry_triggered: true };
-      const blockedReason = !actionableEntryDay
+      const blockedReason = startOfDayHoldingIds.has(candidate.security_id)
+        ? "Already held at the start of the day; same-day re-entry is blocked until the next session."
+        : !actionableEntryDay
         ? isRiskBasedEntryMode(filters.strategyMode)
           ? "Open risk limit was full at the start of the day; entry signal ignored for trading."
           : "Basket was full at the start of the day; entry signal ignored for trading."
