@@ -1055,7 +1055,7 @@ function BasketBacktestView({ filters, setFilters, data, loading, onRun }: { fil
       return { year, months, total: months.reduce((sum, value) => sum + value, 0) };
     });
     const monthlyTotals = monthKeys.map((_, index) => monthlyByYear.reduce((sum, row) => sum + row.months[index], 0));
-    const returnBase = filters.compoundEquity ? data.summary.finalEquity : data.summary.initialCapital;
+    const returnBase = data.summary.initialCapital;
     const monthlyRows = Array.from(monthly.values()).map((row) => ({ ...row, returnPct: returnBase ? (row.pnl / returnBase) * 100 : 0 }));
     const yearlyRows = Array.from(yearly.values()).map((row) => ({ ...row, returnPct: returnBase ? (row.pnl / returnBase) * 100 : 0 }));
     const startTime = Date.parse(data.summary.startDate);

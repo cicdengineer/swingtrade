@@ -481,8 +481,9 @@ export async function runBasketRotationBacktest(input: Partial<BasketBacktestFil
     // Entries must be based on opening holdings/risk, before any same-day exits free capacity.
     const startOfDayHoldingIds = new Set(positions.keys());
     const startOfDayOpenSlots = Math.max(0, filters.basketSize - positions.size);
-    const maxOpenRiskAmount = filters.initialCapital * Math.max(0, filters.maxOpenRiskPct) / 100;
-    const maxTradeRiskAmount = filters.initialCapital * Math.max(0, filters.maxRiskPerTradePct) / 100;
+    const riskCapitalBase = filters.compoundEquity ? Math.max(0, previousEquity) : filters.initialCapital;
+    const maxOpenRiskAmount = riskCapitalBase * Math.max(0, filters.maxOpenRiskPct) / 100;
+    const maxTradeRiskAmount = riskCapitalBase * Math.max(0, filters.maxRiskPerTradePct) / 100;
     const startOfDayRiskCapacity = Math.max(0, maxOpenRiskAmount - totalOpenRisk(positions));
     const health = healthByDate.get(date) ?? { above20: 0, up20: 0 };
     const canEnter = filters.strategyMode !== "RS_TIGHT_2025" || health.above20 >= filters.breadthMin;
@@ -604,8 +605,10 @@ export async function runBasketRotationBacktest(input: Partial<BasketBacktestFil
           const targetRisk = Math.min(maxTradeRiskAmount, remainingStartRiskCapacity);
           quantity = targetRisk / riskPerShare;
           allocation = quantity * entryPrice;
-          if (allocation > cash) {
-            quantity = cash / entryPrice;
+          const deployedCost = Array.from(positions.values()).reduce((sum, position) => sum + position.entry_price * position.quantity, 0);
+          const availableBuyingPower = filters.compoundEquity ? cash : Math.min(cash, Math.max(0, filters.initialCapital - deployedCost));
+          if (allocation > availableBuyingPower) {
+            quantity = availableBuyingPower / entryPrice;
             allocation = quantity * entryPrice;
           }
           initialRisk = riskPerShare * quantity;
@@ -613,7 +616,9 @@ export async function runBasketRotationBacktest(input: Partial<BasketBacktestFil
         } else {
           const remainingSlots = Math.max(1, filters.basketSize - positions.size);
           const baseAllocation = filters.initialCapital / Math.max(1, filters.basketSize);
-          allocation = filters.compoundEquity ? cash / remainingSlots : Math.min(baseAllocation, cash);
+          const deployedCost = Array.from(positions.values()).reduce((sum, position) => sum + position.entry_price * position.quantity, 0);
+          const availableBuyingPower = filters.compoundEquity ? cash : Math.min(cash, Math.max(0, filters.initialCapital - deployedCost));
+          allocation = filters.compoundEquity ? availableBuyingPower / remainingSlots : Math.min(baseAllocation, availableBuyingPower);
           quantity = allocation / entryPrice;
         }
         if (allocation < 1000) continue;
