@@ -46,7 +46,7 @@ type DailyChartPoint = { trade_date: string; open: number; high: number; low: nu
 type ChartTimeframe = "daily" | "hourly";
 type HourlySignalState = "loading" | "green" | "yellow" | "red" | "error";
 type HourlySignal = { state: HourlySignalState; ltp?: number; ema50?: number; distancePct?: number; belowTwoDays?: boolean; label: string };
-type LiveTick = { securityId: string; ltp: number; prevClose?: number; lastTradeTime?: number; receivedAt: number };
+type LiveTick = { securityId: string; ltp: number; prevClose?: number; dayOpen?: number; dayHigh?: number; dayLow?: number; volume?: number; lastTradeTime?: number; receivedAt: number };
 type LiveFeedStatus = "idle" | "connecting" | "live" | "error";
 type LiveFeedStatusUpdate = { state?: LiveFeedStatus; message?: string };
 type ThirtyUpSortKey = "status" | "symbol" | "universe" | "setup_path" | "hourly_signal" | "ltp" | "today_change" | "close" | "ema_dist" | "move" | "impulse_vol" | "higher_highs" | "base_days" | "base_depth" | "breakout_dist" | "current_vol" | "since_high" | "pullback" | "retrace";
@@ -419,13 +419,36 @@ const mergeLiveDailyCandle = (dailyRows: DailyChartPoint[], liveDaily: DailyChar
 };
 const liveTradeDate = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 const pctChange = (from: number | undefined, to: number) => from && from > 0 ? ((to / from) - 1) * 100 : 0;
+const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): ThirtyInThirtyRow => {
   if (!tick?.ltp) return row;
   const liveClose = tick.ltp;
   const today = liveTradeDate();
   const recent = [...row.recent];
   const last = recent.at(-1);
-  if (last?.trade_date === today) recent[recent.length - 1] = { ...last, close: liveClose, high: Math.max(last.high, liveClose), low: Math.min(last.low, liveClose) };
+  const previousVolumeAverage = average(recent.slice(-20).map((point) => point.volume));
+  const liveVolumeRatio = tick.volume !== undefined && previousVolumeAverage > 0 ? tick.volume / previousVolumeAverage : undefined;
+  const liveDaily = {
+    trade_date: today,
+    open: tick.dayOpen ?? tick.prevClose ?? liveClose,
+    high: Math.max(tick.dayHigh ?? liveClose, liveClose),
+    low: Math.min(tick.dayLow ?? liveClose, liveClose),
+    close: liveClose,
+    ema50: row.ema50,
+    volume: tick.volume ?? 0,
+    volume_ratio: liveVolumeRatio,
+  };
+  if (last?.trade_date === today) {
+    recent[recent.length - 1] = {
+      ...last,
+      ...liveDaily,
+      open: tick.dayOpen ?? last.open,
+      high: Math.max(last.high, liveDaily.high),
+      low: Math.min(last.low, liveDaily.low),
+      volume: tick.volume ?? last.volume,
+      volume_ratio: liveVolumeRatio ?? last.volume_ratio,
+    };
+  } else if (!last || today > last.trade_date) recent.push(liveDaily);
   const rows3m = lastTradingMonths(recent, 63);
   const rows6m = lastTradingMonths(recent, 126);
   const high3m = rows3m.length ? Math.max(...rows3m.map((point) => point.high)) : row.breakout_level;
@@ -437,6 +460,8 @@ const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): Th
     current_date: today,
     current_close: liveClose,
     distance_from_ema_pct: distanceFromEma,
+    return_1m_pct: pctChange(lastTradingMonths(recent, 21)[0]?.close, liveClose),
+    return_2m_pct: pctChange(lastTradingMonths(recent, 42)[0]?.close, liveClose),
     current_3m_return_pct: pctChange(rows3m[0]?.close, liveClose),
     current_6m_return_pct: pctChange(rows6m[0]?.close, liveClose),
     pullback_from_3m_high_pct: pctChange(high3m, liveClose),
@@ -446,16 +471,24 @@ const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): Th
     recent,
   };
 };
+const todayReturnPct = (row: ThirtyInThirtyRow, tick?: LiveTick) => {
+  const previousClose = tick?.prevClose ?? previousDailyRow(row)?.close;
+  return previousClose ? pctChange(previousClose, row.current_close) : undefined;
+};
 const previousDailyRow = (row: ThirtyInThirtyRow) => row.recent.at(-2) ?? row.recent.at(-1);
-const currentVolumeRatio = (row: ThirtyInThirtyRow) => [...row.recent].reverse().find((point) => point.volume > 0)?.volume_ratio ?? 0;
+const currentVolumeRatio = (row: ThirtyInThirtyRow) => {
+  const latest = row.recent.at(-1);
+  if (latest?.trade_date === liveTradeDate() && latest.volume_ratio !== undefined) return latest.volume_ratio;
+  return [...row.recent].reverse().find((point) => point.volume > 0)?.volume_ratio ?? 0;
+};
 const isNearPreviousDayHigh = (row: ThirtyInThirtyRow) => {
   const previous = previousDailyRow(row);
   if (!previous?.high) return false;
   return ((row.current_close / previous.high) - 1) * 100 >= -0.5;
 };
 const isUpToday = (row: ThirtyInThirtyRow, tick?: LiveTick) => {
-  const previousClose = tick?.prevClose ?? previousDailyRow(row)?.close;
-  return !!previousClose && row.current_close > previousClose;
+  const todayReturn = todayReturnPct(row, tick);
+  return todayReturn !== undefined && todayReturn > 0;
 };
 const isNearSwingHigh = (row: ThirtyInThirtyRow) => {
   const recentHigh = Math.max(...row.recent.slice(-21, -1).map((point) => point.high));
@@ -1914,11 +1947,15 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <div><span>Shown</span><b>{visibleRows.length} / {sortedRows.length}</b></div>
       </div>
       <section className="screenshot-tile-grid">
-        {visibleRows.length ? visibleRows.map((row) => <button key={row.security_id} className="screenshot-tile" onClick={() => setSelected(row)} title={`${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
-          <b>{row.symbol}</b>
-          <small>{row.company_name}</small>
-          <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} onOpen={() => setSelected(row)} />
-        </button>) : <p className="panel-empty">No stocks matched the selected 30 in 30 criteria.</p>}
+        {visibleRows.length ? visibleRows.map((row) => {
+          const todayReturn = todayReturnPct(row, liveTicks[row.security_id]);
+          return <button key={row.security_id} className="screenshot-tile" onClick={() => setSelected(row)} title={`${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
+            <b>{row.symbol}</b>
+            <small>{row.company_name}</small>
+            {todayReturn !== undefined && <span className={`tile-today-return ${todayReturn >= 0 ? "positive" : "negative"}`}>{pct2(todayReturn)}</span>}
+            <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} onOpen={() => setSelected(row)} />
+          </button>;
+        }) : <p className="panel-empty">No stocks matched the selected 30 in 30 criteria.</p>}
       </section>
     </>}
     {selected && <div className="drawer" onClick={() => setSelected(null)}>

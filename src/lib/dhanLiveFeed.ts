@@ -5,6 +5,10 @@ type LiveTick = {
   securityId: string;
   ltp: number;
   prevClose?: number;
+  dayOpen?: number;
+  dayHigh?: number;
+  dayLow?: number;
+  volume?: number;
   lastTradeTime?: number;
   receivedAt: number;
 };
@@ -112,7 +116,7 @@ class DhanLiveFeed {
     for (let index = 0; index < ids.length; index += 100) {
       const batch = ids.slice(index, index + 100);
       const message = {
-        RequestCode: 15,
+        RequestCode: 17,
         InstrumentCount: batch.length,
         InstrumentList: batch.map((securityId) => ({ ExchangeSegment: "NSE_EQ", SecurityId: securityId })),
       };
@@ -148,7 +152,33 @@ class DhanLiveFeed {
       const prevClose = view.getFloat32(8, true);
       if (!Number.isFinite(prevClose) || prevClose <= 0) return;
       const current = this.ticks.get(securityId);
-      const tick = { securityId, ltp: current?.ltp ?? prevClose, prevClose, lastTradeTime: current?.lastTradeTime, receivedAt: Date.now() };
+      const tick = { ...current, securityId, ltp: current?.ltp ?? prevClose, prevClose, lastTradeTime: current?.lastTradeTime, receivedAt: Date.now() };
+      this.ticks.set(securityId, tick);
+      this.listeners.forEach((listener) => listener(tick));
+      return;
+    }
+    if (responseCode === 4 && view.byteLength >= 50) {
+      const current = this.ticks.get(securityId);
+      const ltp = view.getFloat32(8, true);
+      const lastTradeTime = view.getInt32(14, true);
+      const volume = view.getInt32(22, true);
+      const dayOpen = view.getFloat32(34, true);
+      const prevClose = view.getFloat32(38, true);
+      const dayHigh = view.getFloat32(42, true);
+      const dayLow = view.getFloat32(46, true);
+      if (!Number.isFinite(ltp) || ltp <= 0) return;
+      const tick = {
+        ...current,
+        securityId,
+        ltp,
+        prevClose: Number.isFinite(prevClose) && prevClose > 0 ? prevClose : current?.prevClose,
+        dayOpen: Number.isFinite(dayOpen) && dayOpen > 0 ? dayOpen : current?.dayOpen,
+        dayHigh: Number.isFinite(dayHigh) && dayHigh > 0 ? dayHigh : current?.dayHigh,
+        dayLow: Number.isFinite(dayLow) && dayLow > 0 ? dayLow : current?.dayLow,
+        volume: Number.isFinite(volume) && volume >= 0 ? volume : current?.volume,
+        lastTradeTime,
+        receivedAt: Date.now(),
+      };
       this.ticks.set(securityId, tick);
       this.listeners.forEach((listener) => listener(tick));
       return;
@@ -158,7 +188,8 @@ class DhanLiveFeed {
     const lastTradeTime = view.byteLength >= 16 ? view.getInt32(12, true) : undefined;
     if (!Number.isFinite(ltp) || ltp <= 0) return;
 
-    const tick = { securityId, ltp, prevClose: this.ticks.get(securityId)?.prevClose, lastTradeTime, receivedAt: Date.now() };
+    const current = this.ticks.get(securityId);
+    const tick = { ...current, securityId, ltp, prevClose: current?.prevClose, lastTradeTime, receivedAt: Date.now() };
     this.ticks.set(securityId, tick);
     this.listeners.forEach((listener) => listener(tick));
   }
