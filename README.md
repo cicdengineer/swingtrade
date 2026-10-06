@@ -10,7 +10,9 @@ Local, rules-based Indian equity seasonality research. It contains no technical 
 - Dhan Security ID mapping from the official detailed Dhan scrip master
 - Daily OHLCV analysis for Dhan's available rolling five-year history
 - Smart refresh behavior: new securities download from the required start date, existing securities request only dates after the latest stored trade date
-- Duplicate prevention through a `security_id + trade_date` upsert key
+- Self-healing refresh behavior: existing securities request from their latest stored date through today, so skipped days are backfilled from Dhan Daily Historical data
+- After the NSE close, when Dhan Daily has not posted today's candle yet, the app constructs today's daily OHLCV from completed 5-minute Dhan intraday candles and stores it in the same daily dataset
+- Duplicate prevention through a `security_id + trade_date` upsert key; provisional candles are reconciled in place when Dhan Daily later returns the official candle
 - Controlled sequential refresh, retry/backoff for Dhan transient errors, failure logging, and retry of failed downloads
 - Data Status workspace with per-universe counts, latest job progress, failures, export links, and Dhan connection status
 - Monthly, quarterly, and every rolling 3-month return distribution
@@ -39,11 +41,59 @@ https://trade.jobpothe.com/api/cron/daily-refresh?secret=YOUR_DATA_REFRESH_SECRE
 
 The endpoint also accepts `Authorization: Bearer YOUR_DATA_REFRESH_SECRET` or `x-data-refresh-secret: YOUR_DATA_REFRESH_SECRET`.
 
+Recommended refresh schedule:
+
+- 3:40 PM IST: create today's provisional EOD candles from completed intraday data if Dhan Daily is still missing today.
+- 4:00 PM IST: retry the same refresh to catch transient failures.
+- 6:00 AM IST next calendar day: reconcile provisional candles with official Dhan Daily candles.
+
+If Hostinger cron is configured in UTC, use 10:10 UTC, 10:30 UTC, and 00:30 UTC respectively. If the account/server cron timezone is Asia/Kolkata, use the IST times directly.
+
+Manual refresh uses the same path:
+
+```bash
+curl -X POST https://trade.jobpothe.com/api/data/refresh-universe \
+  -H "content-type: application/json" \
+  -d '{"forceUniverse":true}'
+```
+
+For cron-compatible authenticated refresh:
+
+```bash
+curl "https://trade.jobpothe.com/api/cron/daily-refresh?secret=YOUR_DATA_REFRESH_SECRET"
+```
+
+The latest status is available from:
+
+```text
+https://trade.jobpothe.com/api/data/status
+```
+
+To confirm whether a candle is provisional or official in MySQL, inspect the JSON shard for the security in `seasonality_json_collections` where `collection_name = 'daily_prices'`. Each daily row now includes:
+
+```json
+{
+  "data_source": "DHAN_DAILY",
+  "is_provisional": false
+}
+```
+
+or:
+
+```json
+{
+  "data_source": "DHAN_INTRADAY_AGGREGATED",
+  "is_provisional": true
+}
+```
+
+To force reconciliation for testing, run refresh after a provisional candle exists and Dhan Daily has started returning that same `trade_date`. The upsert key `security_id + trade_date` replaces the provisional row in place with `data_source = "DHAN_DAILY"` and `is_provisional = false`.
+
 ## Phase 2A data workflow
 
 1. Open **Data Status**.
 2. Use **Refresh Status** to inspect the local database.
-3. Use **Refresh All Data** to load the current Midcap and Smallcap universes and download missing daily OHLCV data.
+3. Use **Refresh All Data** to load the current Midcap and Smallcap universes, backfill missing daily OHLCV data, reconcile provisional candles, and construct today's EOD candle from intraday data after market close when needed.
 4. Use the per-universe **Refresh** buttons to refresh only MIDCAP or SMALLCAP.
 5. Use **Retry Failed** after transient API failures.
 6. Use **Export Universe** or **Export Failed** for CSV debugging.
@@ -68,6 +118,8 @@ Portfolio slots, tranches, scanner, broker-position tracking, order placement, a
 
 ## Data quality
 
-Daily candles are stored exactly as returned by Dhan. The app validates date presence, numeric OHLCV, high/low relationships, non-negative prices and volume, date ordering, and duplicate dates. Bad records are flagged in `data_quality_issues`; they are not silently deleted.
+Daily official candles are stored as returned by Dhan. Provisional same-day candles are constructed from completed Dhan intraday candles during the NSE session window only. The app validates date presence, numeric OHLCV, high/low relationships, positive prices, non-negative volume, date ordering, duplicate dates, and a minimum reasonable intraday candle count. Bad records are flagged or skipped; fake candles are not generated for weekends, holidays, or days where Dhan returns no intraday trading data.
+
+Dhan documents intraday history as candle OHLC and volume arrays, so provisional volume is calculated as `SUM(volume)` across valid completed intraday candles. If Dhan changes this to cumulative session volume in the future, adjust the aggregation in `aggregateIntradayToDaily()`.
 
 The current `price_adjustment_status` is `UNKNOWN`. Verify whether Dhan’s returned historical series is adjusted for corporate actions before relying on five-year return calculations. Raw OHLCV and adjusted data are not treated as interchangeable.

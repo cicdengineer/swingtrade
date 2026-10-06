@@ -56,6 +56,11 @@ const pad = (value: number) => String(value).padStart(2, "0");
 const dhanDateTime = (date: Date) =>
   `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 const today = () => dhanDate(new Date());
+const indiaTimeZone = "Asia/Kolkata";
+const marketOpenMinutes = 9 * 60 + 15;
+const marketCloseMinutes = 15 * 60 + 30;
+const provisionalDataSource = "DHAN_INTRADAY_AGGREGATED" as const;
+const officialDataSource = "DHAN_DAILY" as const;
 const fixedNseHolidayMonthDays = new Set(["01-26", "08-15", "10-02", "12-25"]);
 const dhanReason = (body: any, fallback: string) => {
   const reason = body?.errorMessage ?? body?.remarks ?? body?.message ?? body?.error ?? body?.status ?? fallback;
@@ -73,6 +78,59 @@ async function mutateDataStore<T>(task: () => Promise<T>) {
 function dataRefreshConcurrency() {
   const configured = Number(process.env.DATA_REFRESH_CONCURRENCY ?? 3);
   return Math.min(Math.max(Number.isFinite(configured) ? Math.floor(configured) : 6, 1), 12);
+}
+
+export function getIndiaNow(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: indiaTimeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    hour: Number(value("hour")),
+    minute: Number(value("minute")),
+    second: Number(value("second")),
+  };
+}
+
+export function getIndiaTradingDate(now = new Date()) {
+  return getIndiaNow(now).date;
+}
+
+export function isIndianMarketClosed(now = new Date()) {
+  const india = getIndiaNow(now);
+  return india.hour * 60 + india.minute >= marketCloseMinutes;
+}
+
+function indiaSessionDateTime(tradingDate: string, minutes: number) {
+  return `${tradingDate} ${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}:00`;
+}
+
+function indiaTimestampParts(timestamp: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: indiaTimeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    minutes: Number(value("hour")) * 60 + Number(value("minute")),
+  };
 }
 
 const staleRefreshJobMs = 2 * 60 * 1000;
@@ -213,11 +271,9 @@ export async function getMissingDateRanges(securityId: string) {
 }
 
 function missingDateRangesFromLatest(latest?: string) {
-  if (!latest) return { latest, ranges: [{ fromDate: requiredHistoryStartDate(), toDate: today() }] };
-  const next = new Date(`${latest}T00:00:00Z`);
-  next.setUTCDate(next.getUTCDate() + 1);
-  const fromDate = dhanDate(next);
-  return { latest, ranges: fromDate <= today() ? [{ fromDate, toDate: today() }] : [] };
+  const tradingDate = getIndiaTradingDate();
+  if (!latest) return { latest, ranges: [{ fromDate: requiredHistoryStartDate(), toDate: tradingDate }] };
+  return { latest, ranges: latest <= tradingDate ? [{ fromDate: latest, toDate: tradingDate }] : [] };
 }
 
 function isNseBusinessDay(date: string) {
@@ -249,10 +305,21 @@ function isNoHistoricalDataError(error: unknown) {
   return message.includes("no daily candles") || message.includes("no data") || message.includes("no data present");
 }
 
-const pendingEodNotice = () =>
-  `Today's daily candle is not available from Dhan yet. Local data is current through the latest available trading day; retry after Dhan posts end-of-day historical candles, usually later in the evening IST.`;
+function isNoIntradayDataError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return isNoHistoricalDataError(error) || message.includes("missing required fields") || message.includes("bad values for parameters") || message.includes("incorrect parameters");
+}
 
-async function withRetry<T>(label: string, task: () => Promise<T>, attempts = 4): Promise<T> {
+function dhanExchangeSegment(segment?: string) {
+  if (segment === "NSE_EQ" || segment === "BSE_EQ") return segment;
+  if (segment === "E" || !segment) return "NSE_EQ";
+  return segment;
+}
+
+const pendingEodNotice = () =>
+  "Dhan Daily did not include today's EOD candle yet. Today's candle was constructed from completed Dhan intraday candles where available and will be reconciled automatically on a later refresh.";
+
+export async function withRetry<T>(label: string, task: () => Promise<T>, attempts = 4): Promise<T> {
   let last: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -305,9 +372,9 @@ async function postDhanJson(pathname: string, payload: Record<string, unknown>) 
 export async function getHistoricalData(security: Pick<Security, "securityId" | "symbol" | "segment">, fromDate: string, toDate: string): Promise<Candle[]> {
   if (!hasDhanCredentials()) throw new Error("Dhan credentials are not configured.");
   return withRetry(`Dhan historical ${security.symbol}`, async () => {
-    const response = await postDhanJson("/charts/historical", {
+      const response = await postDhanJson("/charts/historical", {
       securityId: security.securityId,
-      exchangeSegment: security.segment || "NSE_EQ",
+      exchangeSegment: dhanExchangeSegment(security.segment),
       instrument: "EQUITY",
       expiryCode: 0,
       oi: false,
@@ -345,7 +412,7 @@ export async function getIntradayData(securityId: string, interval = 60, days = 
   from.setDate(from.getDate() - Math.min(Math.max(days, 1), 90));
   from.setHours(9, 15, 0, 0);
 
-  const exchangeSegment = instrument?.exchange_segment || member?.segment || "NSE_EQ";
+  const exchangeSegment = dhanExchangeSegment(instrument?.exchange_segment || member?.segment);
   const symbol = instrument?.symbol || member?.symbol || securityId;
   return withRetry(`Dhan intraday ${symbol}`, async () => {
     const response = await postDhanJson("/charts/intraday", {
@@ -384,6 +451,75 @@ export async function getIntradayData(securityId: string, interval = 60, days = 
   }, 1);
 }
 
+async function getIntradayDataForSession(security: Security, tradingDate: string, interval = 5): Promise<Candle[]> {
+  if (!hasDhanCredentials()) throw new Error("Dhan credentials are not configured.");
+  if (![1, 5, 15, 25, 60].includes(interval)) throw new Error("Unsupported intraday interval.");
+
+  return withRetry(`Dhan intraday ${security.symbol}`, async () => {
+    const response = await postDhanJson("/charts/intraday", {
+      securityId: security.securityId,
+      exchangeSegment: dhanExchangeSegment(security.segment),
+      instrument: "EQUITY",
+      interval: String(interval),
+      oi: false,
+      fromDate: indiaSessionDateTime(tradingDate, marketOpenMinutes),
+      toDate: indiaSessionDateTime(tradingDate, marketCloseMinutes),
+    });
+    if (response.status === 429 || response.status >= 500) throw new Error(`Dhan transient error ${response.status}`);
+    const body = response.body;
+    const candles = body.data?.timestamp ? body.data : body;
+    const ok = response.ok && (body.status === undefined || body.status === "success") && candles.timestamp?.length;
+    if (!ok) throw new Error(dhanReason(body, "No intraday candles were returned."));
+    return candles.timestamp.map((ts: number, index: number) => ({
+      date: new Date(ts * 1000).toISOString(),
+      open: Number(candles.open[index]),
+      high: Number(candles.high[index]),
+      low: Number(candles.low[index]),
+      close: Number(candles.close[index]),
+      volume: Number(candles.volume[index] ?? 0),
+    })).sort((a: Candle, b: Candle) => a.date.localeCompare(b.date));
+  });
+}
+
+export function validateConstructedDailyCandle(candle: Candle, sourceCandleCount: number, intervalMinutes = 5) {
+  const values = [candle.open, candle.high, candle.low, candle.close, candle.volume];
+  if (!candle.date) return { valid: false, reason: "missing_date" };
+  if (values.some((value) => !Number.isFinite(value))) return { valid: false, reason: "non_numeric_ohlcv" };
+  if ([candle.open, candle.high, candle.low, candle.close].some((value) => value <= 0)) return { valid: false, reason: "non_positive_price" };
+  if (candle.high < candle.open || candle.high < candle.close || candle.high < candle.low) return { valid: false, reason: "invalid_high" };
+  if (candle.low > candle.open || candle.low > candle.close) return { valid: false, reason: "invalid_low" };
+  if (candle.volume < 0) return { valid: false, reason: "negative_volume" };
+  const expectedFullSessionCandles = Math.floor((marketCloseMinutes - marketOpenMinutes) / intervalMinutes);
+  const minimumReasonableCandles = Math.max(6, Math.floor(expectedFullSessionCandles * 0.25));
+  if (sourceCandleCount < minimumReasonableCandles) return { valid: false, reason: "insufficient_intraday_candles" };
+  return { valid: true };
+}
+
+export function aggregateIntradayToDaily(candles: Candle[], tradingDate: string, now = new Date(), intervalMinutes = 5) {
+  const indiaNow = getIndiaNow(now);
+  const lastCompletedMinute = indiaNow.date === tradingDate
+    ? Math.min(marketCloseMinutes, indiaNow.hour * 60 + indiaNow.minute - ((indiaNow.hour * 60 + indiaNow.minute) % intervalMinutes))
+    : marketCloseMinutes;
+  const validCandles = candles
+    .map((candle) => ({ candle, parts: indiaTimestampParts(candle.date) }))
+    .filter(({ parts }) => parts?.date === tradingDate && parts.minutes >= marketOpenMinutes && parts.minutes < marketCloseMinutes && parts.minutes + intervalMinutes <= lastCompletedMinute)
+    .sort((a, b) => (a.parts?.minutes ?? 0) - (b.parts?.minutes ?? 0))
+    .map(({ candle }) => candle);
+
+  if (!validCandles.length) return { candle: null, sourceCandleCount: 0, valid: false, reason: "no_intraday_trading_data" };
+
+  const daily: Candle = {
+    date: tradingDate,
+    open: validCandles[0].open,
+    high: Math.max(...validCandles.map((candle) => candle.high)),
+    low: Math.min(...validCandles.map((candle) => candle.low)),
+    close: validCandles.at(-1)!.close,
+    // Dhan documents intraday history as candle OHLC and volume arrays, so volume is treated as per-candle volume and summed.
+    volume: validCandles.reduce((sum, candle) => sum + candle.volume, 0),
+  };
+  return { candle: daily, sourceCandleCount: validCandles.length, ...validateConstructedDailyCandle(daily, validCandles.length, intervalMinutes) };
+}
+
 function validateCandles(securityId: string, symbol: string, candles: Candle[]): DataQualityIssueRecord[] {
   const now = new Date().toISOString();
   const issues: DataQualityIssueRecord[] = [];
@@ -407,9 +543,14 @@ function validateCandles(securityId: string, symbol: string, candles: Candle[]):
   return issues;
 }
 
-function applyHistoricalData(db: SeasonalityDatabase, security: Security, candles: Candle[]) {
+function applyHistoricalData(db: SeasonalityDatabase, security: Security, candles: Candle[], dataSource: DailyPriceRecord["data_source"] = officialDataSource, isProvisional = false) {
   const now = new Date().toISOString();
   const issues = validateCandles(security.securityId, security.symbol, candles);
+  let reconciled = 0;
+  if (!isProvisional) {
+    const incomingDates = new Set(candles.map((candle) => candle.date));
+    reconciled = db.daily_prices.filter((row) => row.security_id === security.securityId && incomingDates.has(row.trade_date) && row.is_provisional).length;
+  }
   const rows: DailyPriceRecord[] = candles.map((candle) => ({
     id: `${security.securityId}-${candle.date}`,
     security_id: security.securityId,
@@ -421,9 +562,10 @@ function applyHistoricalData(db: SeasonalityDatabase, security: Security, candle
     low: candle.low,
     close: candle.close,
     volume: candle.volume,
-    exchange_segment: security.segment || "NSE_EQ",
+    exchange_segment: dhanExchangeSegment(security.segment),
     instrument: "EQUITY",
-    data_source: "DHAN",
+    data_source: dataSource,
+    is_provisional: isProvisional,
     created_at: now,
     updated_at: now,
   }));
@@ -435,8 +577,8 @@ function applyHistoricalData(db: SeasonalityDatabase, security: Security, candle
     company_name: security.name,
     isin: security.isin ?? "",
     exchange: security.exchange,
-    exchange_segment: security.segment || "NSE_EQ",
-    segment: security.segment === "NSE_EQ" ? "E" : security.segment,
+    exchange_segment: dhanExchangeSegment(security.segment),
+    segment: dhanExchangeSegment(security.segment) === "NSE_EQ" ? "E" : security.segment,
     instrument: security.instrument || "EQUITY",
     status: "ACTIVE",
     price_adjustment_status: "UNKNOWN",
@@ -451,7 +593,7 @@ function applyHistoricalData(db: SeasonalityDatabase, security: Security, candle
     instrument.last_updated_at = now;
     instrument.number_of_sessions = stockRows.length;
   }
-  return { insertedOrUpdated: rows.length, issues: issues.length, dataThroughDate: stockRows.at(-1)?.trade_date };
+  return { insertedOrUpdated: rows.length, issues: issues.length, dataThroughDate: stockRows.at(-1)?.trade_date, reconciled };
 }
 
 export async function saveHistoricalData(security: Security, candles: Candle[]) {
@@ -465,8 +607,8 @@ export async function saveHistoricalData(security: Security, candles: Candle[]) 
 
 function securityFromMember(member: UniverseMemberRecord | Security): Security {
   return "securityId" in member
-    ? member
-    : { securityId: member.security_id, symbol: member.symbol, name: member.company_name, exchange: member.exchange, segment: member.segment, instrument: member.instrument, isin: member.isin };
+    ? { ...member, segment: dhanExchangeSegment(member.segment) }
+    : { securityId: member.security_id, symbol: member.symbol, name: member.company_name, exchange: member.exchange, segment: dhanExchangeSegment(member.segment), instrument: member.instrument, isin: member.isin };
 }
 
 async function downloadHistoricalDataForMember(member: UniverseMemberRecord | Security, latest?: string) {
@@ -476,14 +618,12 @@ async function downloadHistoricalDataForMember(member: UniverseMemberRecord | Se
   let total = 0;
   let dataThroughDate: string | undefined = latest;
   const candlesByRange: Candle[][] = [];
-  let pendingEod = false;
   for (const range of ranges) {
     let candles: Candle[];
     try {
       candles = await getHistoricalData(security, range.fromDate, range.toDate);
     } catch (error) {
-      if (latest && isTodayOnlyHistoricalGap(range.fromDate, range.toDate) && isNoHistoricalDataError(error)) {
-        pendingEod = true;
+      if (isNoHistoricalDataError(error)) {
         continue;
       }
       throw error;
@@ -492,25 +632,69 @@ async function downloadHistoricalDataForMember(member: UniverseMemberRecord | Se
     dataThroughDate = candles.at(-1)?.date ?? dataThroughDate;
     candlesByRange.push(candles);
   }
-  return { security, candles: candlesByRange.flat(), downloadedRows: total, skipped: ranges.length === 0 || pendingEod, pendingEod, dataThroughDate };
+  return { security, candles: candlesByRange.flat(), downloadedRows: total, skipped: ranges.length === 0 && total === 0, dataThroughDate };
 }
 
 export async function refreshInstrumentData(member: UniverseMemberRecord | Security) {
   const security = securityFromMember(member);
   const db = await readDatabase();
   const result = await downloadHistoricalDataForMember(member, latestPriceDate(db, security.securityId));
-  if (!result.skipped) {
-    const saved = await saveHistoricalData(result.security, result.candles);
-    return { downloadedRows: saved.insertedOrUpdated, skipped: false, pendingEod: false, dataThroughDate: saved.dataThroughDate };
+  const tradingDate = getIndiaTradingDate();
+  const hasOfficialToday = result.candles.some((candle) => candle.date === tradingDate);
+  let provisionalAggregate: ReturnType<typeof aggregateIntradayToDaily> | null = null;
+  let provisionalReason: string | undefined;
+
+  if (!hasOfficialToday && isIndianMarketClosed()) {
+    try {
+      const intraday = await getIntradayDataForSession(result.security, tradingDate, 5);
+      provisionalAggregate = aggregateIntradayToDaily(intraday, tradingDate, new Date(), 5);
+      if (!provisionalAggregate.candle || !provisionalAggregate.valid) {
+        provisionalReason = "reason" in provisionalAggregate ? provisionalAggregate.reason : "invalid_intraday_aggregation";
+        console.info(`No intraday trading data available for ${tradingDate}.`, { securityId: result.security.securityId, symbol: result.security.symbol, reason: provisionalReason });
+      }
+    } catch (error) {
+      if (isNoIntradayDataError(error)) {
+        provisionalReason = "no_intraday_trading_data";
+        console.info(`No intraday trading data available for ${tradingDate}.`, {
+          securityId: result.security.securityId,
+          symbol: result.security.symbol,
+          segment: dhanExchangeSegment(result.security.segment),
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      } else {
+        throw error;
+      }
+    }
   }
-  if (result.pendingEod) {
-    await mutateDataStore(async () => {
-      const db = await readDatabase();
-      markFailureResolved(db, security.securityId);
-      await writeDatabase(db);
-    });
-  }
-  return { downloadedRows: 0, skipped: true, pendingEod: result.pendingEod, dataThroughDate: result.dataThroughDate };
+
+  return mutateDataStore(async () => {
+    const db = await readDatabase();
+    const official = result.candles.length ? applyHistoricalData(db, result.security, result.candles, officialDataSource, false) : { insertedOrUpdated: 0, dataThroughDate: result.dataThroughDate, reconciled: 0 };
+    let provisionalCreated = 0;
+    let pendingEod = false;
+    let dataThroughDate = official.dataThroughDate ?? result.dataThroughDate;
+
+    if (provisionalAggregate?.candle && provisionalAggregate.valid) {
+      const saved = applyHistoricalData(db, result.security, [provisionalAggregate.candle], provisionalDataSource, true);
+      provisionalCreated = saved.insertedOrUpdated;
+      pendingEod = true;
+      dataThroughDate = saved.dataThroughDate ?? dataThroughDate;
+    }
+
+    markFailureResolved(db, security.securityId);
+    await writeDatabase(db);
+    return {
+      downloadedRows: official.insertedOrUpdated + provisionalCreated,
+      historicalBackfilled: official.insertedOrUpdated,
+      officialUpdated: official.insertedOrUpdated,
+      reconciled: official.reconciled,
+      provisionalCreated,
+      skipped: official.insertedOrUpdated === 0 && provisionalCreated === 0,
+      pendingEod,
+      provisionalReason,
+      dataThroughDate,
+    };
+  });
 }
 
 function startJob(universeName: UniverseName | undefined, total: number): DataDownloadJobRecord {
@@ -526,6 +710,12 @@ function startJob(universeName: UniverseName | undefined, total: number): DataDo
     progress: 0,
     current_status: "Starting",
     started_at: new Date().toISOString(),
+    trading_date: getIndiaTradingDate(),
+    historical_candles_backfilled: 0,
+    official_candles_updated: 0,
+    provisional_candles_created: 0,
+    provisional_candles_reconciled: 0,
+    already_up_to_date: 0,
     errors: [],
   };
 }
@@ -607,16 +797,11 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
     const members = retryFailures
       ? db.universe_members.filter((member) => db.download_failures.some((failure) => failure.status === "open" && failure.security_id === member.security_id))
       : db.universe_members.filter((member) => !universeName || member.universe_name === universeName);
-    const latestBySecurity = new Map<string, string>();
-    for (const row of db.daily_prices) {
-      const current = latestBySecurity.get(row.security_id);
-      if (!current || row.trade_date > current) latestBySecurity.set(row.security_id, row.trade_date);
-    }
-
     await updateJob(jobId, (job) => {
       job.total = members.length;
       job.remaining = members.length;
       job.progress = members.length ? 0 : 100;
+      job.trading_date = getIndiaTradingDate();
       job.current_status = members.length ? "Starting downloads" : "No instruments to refresh";
     });
 
@@ -629,7 +814,7 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
       const batch = members.slice(start, start + concurrency);
       const results = await Promise.all(batch.map(async (member) => {
         try {
-          const result = await downloadHistoricalDataForMember(member, latestBySecurity.get(member.security_id));
+          const result = await refreshInstrumentData(member);
           return { member, result };
         } catch (error) {
           return { member, error };
@@ -652,17 +837,15 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
               job.errors.push(`${item.member.symbol}: ${item.error instanceof Error ? item.error.message : "Unknown error"}`);
             }
           } else {
-            let dataThroughDate = item.result.dataThroughDate;
-            if (!item.result.skipped) {
-              const saved = applyHistoricalData(db, item.result.security, item.result.candles);
-              dataThroughDate = saved.dataThroughDate ?? dataThroughDate;
-            } else if (item.result.pendingEod) {
-              markFailureResolved(db, item.member.security_id);
-            }
             if (job) {
               job.successful += 1;
               job.last_successful_update = new Date().toISOString();
-              job.data_through_date = dataThroughDate ?? job.data_through_date;
+              job.data_through_date = item.result.dataThroughDate ?? job.data_through_date;
+              job.historical_candles_backfilled = (job.historical_candles_backfilled ?? 0) + (item.result.historicalBackfilled ?? 0);
+              job.official_candles_updated = (job.official_candles_updated ?? 0) + (item.result.officialUpdated ?? 0);
+              job.provisional_candles_created = (job.provisional_candles_created ?? 0) + (item.result.provisionalCreated ?? 0);
+              job.provisional_candles_reconciled = (job.provisional_candles_reconciled ?? 0) + (item.result.reconciled ?? 0);
+              if (item.result.skipped) job.already_up_to_date = (job.already_up_to_date ?? 0) + 1;
               if (item.result.pendingEod) {
                 job.pending_eod_count = (job.pending_eod_count ?? 0) + 1;
                 job.notice = pendingEodNotice();
@@ -743,6 +926,7 @@ export async function updateHistoricalData(universeName?: UniverseName, retryFai
     ? db.universe_members.filter((member) => db.download_failures.some((failure) => failure.status === "open" && failure.security_id === member.security_id))
     : db.universe_members.filter((member) => !universeName || member.universe_name === universeName);
   const job = startJob(universeName, members.length);
+  job.trading_date = getIndiaTradingDate();
   db.data_download_jobs.unshift(job);
   await writeDatabase(db);
 
@@ -760,6 +944,11 @@ export async function updateHistoricalData(universeName?: UniverseName, retryFai
       afterJob.successful += 1;
       afterJob.last_successful_update = new Date().toISOString();
       afterJob.data_through_date = result.dataThroughDate ?? after.daily_prices.filter((row) => row.security_id === member.security_id).map((row) => row.trade_date).sort().at(-1) ?? afterJob.data_through_date;
+      afterJob.historical_candles_backfilled = (afterJob.historical_candles_backfilled ?? 0) + (result.historicalBackfilled ?? 0);
+      afterJob.official_candles_updated = (afterJob.official_candles_updated ?? 0) + (result.officialUpdated ?? 0);
+      afterJob.provisional_candles_created = (afterJob.provisional_candles_created ?? 0) + (result.provisionalCreated ?? 0);
+      afterJob.provisional_candles_reconciled = (afterJob.provisional_candles_reconciled ?? 0) + (result.reconciled ?? 0);
+      if (result.skipped) afterJob.already_up_to_date = (afterJob.already_up_to_date ?? 0) + 1;
       if (result.pendingEod) {
         afterJob.pending_eod_count = (afterJob.pending_eod_count ?? 0) + 1;
         afterJob.notice = pendingEodNotice();
@@ -808,6 +997,9 @@ export async function getDataStatus() {
     const downloaded = new Set(prices.map((row) => row.security_id));
     const failed = new Set(db.download_failures.filter((failure) => failure.status === "open" && securityIds.has(failure.security_id)).map((failure) => failure.security_id));
     const dates = prices.map((row) => row.trade_date).sort();
+    const latestDate = dates.at(-1) ?? null;
+    const latestRows = latestDate ? prices.filter((row) => row.trade_date === latestDate) : [];
+    const provisionalRows = latestRows.filter((row) => row.is_provisional);
     const lastRefresh = members.map((member) => db.instruments.find((instrument) => instrument.security_id === member.security_id)?.last_updated_at).filter(Boolean).sort().at(-1);
     return {
       universe_name: universeName,
@@ -817,16 +1009,30 @@ export async function getDataStatus() {
       stocks_pending: Math.max(securityIds.size - downloaded.size - failed.size, 0),
       stocks_failed: failed.size,
       earliest_data_date: dates.at(0) ?? null,
-      latest_data_date: dates.at(-1) ?? null,
+      latest_data_date: latestDate,
       total_ohlcv_rows: prices.length,
       last_refresh: lastRefresh ?? null,
       historical_sessions: prices.length,
+      latest_official: latestRows.length - provisionalRows.length,
+      latest_provisional: provisionalRows.length,
     };
   });
+  const allDates = db.daily_prices.map((row) => row.trade_date).sort();
+  const latestMarketDate = allDates.at(-1) ?? null;
+  const latestMarketRows = latestMarketDate ? db.daily_prices.filter((row) => row.trade_date === latestMarketDate) : [];
+  const latestProvisional = latestMarketRows.filter((row) => row.is_provisional).length;
   return {
     dhan_connected: hasDhanCredentials(),
     database_size_bytes: await getDatabaseSizeBytes(),
     price_adjustment_status: "UNKNOWN",
+    latest_market_data: latestMarketDate
+      ? {
+          trading_date: latestMarketDate,
+          official: latestMarketRows.length - latestProvisional,
+          provisional: latestProvisional,
+          data_status: latestProvisional > 0 ? "EOD candle constructed from Dhan intraday data." : "Official Dhan EOD data synchronized.",
+        }
+      : null,
     survivorship_bias_note: "Historical analysis currently uses the current constituent universe and may contain survivorship bias.",
     universe_sources: universeSources,
     latest_job: db.data_download_jobs[0] ?? null,

@@ -40,6 +40,8 @@ export type UniverseMemberRecord = {
   last_verified_at: string;
 };
 
+export type DailyPriceDataSource = "DHAN" | "DHAN_DAILY" | "DHAN_INTRADAY_AGGREGATED";
+
 export type DailyPriceRecord = {
   id: string;
   security_id: string;
@@ -53,7 +55,8 @@ export type DailyPriceRecord = {
   volume: number;
   exchange_segment: string;
   instrument: string;
-  data_source: "DHAN";
+  data_source: DailyPriceDataSource;
+  is_provisional?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -78,6 +81,12 @@ export type DataDownloadJobRecord = {
   data_through_date?: string;
   notice?: string;
   pending_eod_count?: number;
+  trading_date?: string;
+  historical_candles_backfilled?: number;
+  official_candles_updated?: number;
+  provisional_candles_created?: number;
+  provisional_candles_reconciled?: number;
+  already_up_to_date?: number;
   errors: string[];
 };
 
