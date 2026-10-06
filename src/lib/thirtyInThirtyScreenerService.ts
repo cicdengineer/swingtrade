@@ -17,6 +17,7 @@ export type ThirtyInThirtyFilters = {
   nearSwingHighOnly: boolean;
   earlyVolumeOnly: boolean;
   highVolumeOnly: boolean;
+  decliningVolumeOnly: boolean;
   dryVolumeOnly: boolean;
   redCandleOnly: boolean;
   showAll: boolean;
@@ -80,6 +81,7 @@ export const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   nearSwingHighOnly: false,
   earlyVolumeOnly: false,
   highVolumeOnly: false,
+  decliningVolumeOnly: false,
   dryVolumeOnly: false,
   redCandleOnly: false,
   showAll: false,
