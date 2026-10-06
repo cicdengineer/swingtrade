@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getHoldings, getPositions, getTradeHistory, hasDhanCredentials, type DhanHolding, type DhanPosition, type DhanTrade } from "@/lib/dhan";
 import { getTradeManagementSnapshot } from "@/lib/tradeManagementStore";
 import { readDatabase } from "@/lib/localDatabase";
+import { calculateEma } from "@/lib/swingScreenerService";
 
 export const dynamic = "force-dynamic";
 
@@ -220,6 +221,14 @@ function latestPrice(prices: { security_id: string; trade_date: string; close: n
     .at(-1)?.close;
 }
 
+function latestEma10(prices: { security_id: string; trade_date: string; close: number }[], securityId: string) {
+  const closes = prices
+    .filter((row) => row.security_id === securityId)
+    .sort((a, b) => a.trade_date.localeCompare(b.trade_date))
+    .map((row) => row.close);
+  return calculateEma(closes, 10).at(-1);
+}
+
 function positionLtp(position: DhanPosition | undefined, fallback?: number) {
   const price = numberField(position, ["lastTradedPrice", "ltp", "LTP", "lastPrice", "currentPrice"]) ?? fallback;
   return Number.isFinite(price) && price && price > 0 ? price : undefined;
@@ -234,6 +243,7 @@ function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: nu
   const brokerEntryDate = holdingEntryDate(openLots) ?? today;
   const invested = input.totalQty * input.avgCostPrice;
   const ltp = holdingLtp(input, position, position ? undefined : latestPrice(prices, input.securityId));
+  const ema10 = latestEma10(prices, input.securityId);
   const holdingPnl = numberField(input, ["unrealizedProfit", "unrealizedPnl", "pnl", "totalPnl"]);
   const positionPnl = position && openBuyQty(position) > 0 ? position.unrealizedProfit : undefined;
   const unrealizedPnl = holdingPnl ?? (ltp ? (ltp - input.avgCostPrice) * input.totalQty : positionPnl ?? 0);
@@ -244,6 +254,8 @@ function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: nu
     currentPrice: ltp,
     unrealizedPnl,
     dayPnl,
+    ema10,
+    distanceFrom10EmaPct: ema10 && ltp ? ((ltp - ema10) / ema10) * 100 : undefined,
     productType: position?.productType ?? "CNC",
     positionType: position?.positionType ?? "HOLDING",
     brokerEntryDate,
