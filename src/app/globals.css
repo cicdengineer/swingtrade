@@ -52,3 +52,5 @@
 @media(min-width:1500px){.dashboard-glance-grid{grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}.dashboard-glance-grid>.compact-dashboard-panel:not(.wide-chart){grid-column:span 2}.dashboard-glance-grid .wide-chart{grid-column:span 3}.dashboard-chart-panel .portfolio-chart svg{height:250px}.dashboard-chart-panel{min-height:326px}}
 @media(min-width:2100px){.dashboard-glance-grid{grid-template-columns:repeat(6,minmax(0,1fr))}.dashboard-chart-panel .portfolio-chart svg{height:280px}.dashboard-chart-panel{min-height:356px}}
 @media(max-width:850px){.header-brand .brand-logo{display:none}.brand-logo.compact{width:38px;height:24px}}
+.header-brand.logo-only .brand-logo{width:112px;height:66px}.header-brand.logo-only{min-height:66px}
+@media(max-width:850px){.header-brand.logo-only .brand-logo{display:inline-grid;width:88px;height:52px}.header-brand.logo-only{min-height:52px}}
