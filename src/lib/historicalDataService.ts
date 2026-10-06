@@ -5,6 +5,7 @@ import path from "node:path";
 import type {
   Candle,
   DailyPriceRecord,
+  DhanProfileStatus,
   DataDownloadJobRecord,
   DataQualityIssueRecord,
   InstrumentRecord,
@@ -276,6 +277,18 @@ function missingDateRangesFromLatest(latest?: string) {
   return { latest, ranges: latest <= tradingDate ? [{ fromDate: latest, toDate: tradingDate }] : [] };
 }
 
+function addDays(date: string, days: number) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return dhanDate(value);
+}
+
+export function safeDailyHistoricalFallbackToDate(fromDate: string, toDate: string, tradingDate = getIndiaTradingDate()) {
+  if (toDate < tradingDate) return null;
+  const fallbackToDate = addDays(tradingDate, -1);
+  return fromDate < fallbackToDate ? fallbackToDate : null;
+}
+
 function isNseBusinessDay(date: string) {
   const day = new Date(`${date}T00:00:00Z`).getUTCDay();
   if (day === 0 || day === 6) return false;
@@ -305,9 +318,14 @@ function isNoHistoricalDataError(error: unknown) {
   return message.includes("no daily candles") || message.includes("no data") || message.includes("no data present");
 }
 
+function isDhanInputException(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes("missing required fields") || message.includes("bad values for parameters") || message.includes("dh-905") || message.includes("input_exception");
+}
+
 function isNoIntradayDataError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return isNoHistoricalDataError(error) || message.includes("missing required fields") || message.includes("bad values for parameters") || message.includes("incorrect parameters");
+  return isNoHistoricalDataError(error) || isDhanInputException(error) || message.includes("incorrect parameters");
 }
 
 function dhanExchangeSegment(segment?: string) {
@@ -367,6 +385,58 @@ async function postDhanJson(pathname: string, payload: Record<string, unknown>) 
     request.write(body);
     request.end();
   });
+}
+
+async function getDhanProfileStatus(): Promise<DhanProfileStatus> {
+  if (!hasDhanCredentials()) return { ok: false, error: "Dhan credentials are not configured." };
+  return new Promise<DhanProfileStatus>((resolve) => {
+    const request = https.request({
+      hostname: "api.dhan.co",
+      path: "/v2/profile",
+      method: "GET",
+      rejectUnauthorized: false,
+      headers: {
+        "accept": "application/json",
+        "access-token": process.env.DHAN_ACCESS_TOKEN!,
+        "client-id": process.env.DHAN_CLIENT_ID!,
+        "dhanClientId": process.env.DHAN_CLIENT_ID!,
+      },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      response.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        let body: any = {};
+        try {
+          body = text ? JSON.parse(text) : {};
+        } catch {
+          body = { message: text || "Invalid JSON response from Dhan profile." };
+        }
+        const error = dhanReason(body, `Dhan profile check failed with HTTP ${response.statusCode ?? 0}`);
+        const dataPlan = typeof body?.dataPlan === "string" ? body.dataPlan : undefined;
+        resolve({
+          ok: Boolean(response.statusCode && response.statusCode >= 200 && response.statusCode < 300) && (!dataPlan || dataPlan.toLowerCase() === "active"),
+          dhanClientId: typeof body?.dhanClientId === "string" ? body.dhanClientId : undefined,
+          tokenValidity: typeof body?.tokenValidity === "string" ? body.tokenValidity : undefined,
+          activeSegment: typeof body?.activeSegment === "string" ? body.activeSegment : undefined,
+          dataPlan,
+          dataValidity: typeof body?.dataValidity === "string" ? body.dataValidity : undefined,
+          error: response.statusCode && response.statusCode >= 200 && response.statusCode < 300 ? dataPlan && dataPlan.toLowerCase() !== "active" ? `Dhan Data API plan is ${dataPlan}.` : undefined : error,
+        });
+      });
+    });
+    request.setTimeout(10000, () => request.destroy(new Error("Dhan profile request timed out.")));
+    request.on("error", (error) => resolve({ ok: false, error: error instanceof Error ? error.message : "Dhan profile check failed." }));
+    request.end();
+  });
+}
+
+async function assertDhanProfileReady() {
+  const profile = await getDhanProfileStatus();
+  if (!profile.ok) {
+    throw new Error(profile.error || "Dhan profile check failed. Regenerate the access token and verify Data API subscription/IP access.");
+  }
+  return profile;
 }
 
 export async function getHistoricalData(security: Pick<Security, "securityId" | "symbol" | "segment">, fromDate: string, toDate: string): Promise<Candle[]> {
@@ -615,6 +685,7 @@ async function downloadHistoricalDataForMember(member: UniverseMemberRecord | Se
   const security = securityFromMember(member);
   if (!security.securityId) throw new Error(`No Dhan security ID is mapped for ${security.symbol}.`);
   const { ranges } = missingDateRangesFromLatest(latest);
+  const tradingDate = getIndiaTradingDate();
   let total = 0;
   let dataThroughDate: string | undefined = latest;
   const candlesByRange: Candle[][] = [];
@@ -626,7 +697,39 @@ async function downloadHistoricalDataForMember(member: UniverseMemberRecord | Se
       if (isNoHistoricalDataError(error)) {
         continue;
       }
-      throw error;
+      if (isDhanInputException(error) && range.toDate >= tradingDate) {
+        const fallbackToDate = safeDailyHistoricalFallbackToDate(range.fromDate, range.toDate, tradingDate);
+        if (fallbackToDate) {
+          try {
+            candles = await getHistoricalData(security, range.fromDate, fallbackToDate);
+          } catch (fallbackError) {
+            if (isNoHistoricalDataError(fallbackError) || isDhanInputException(fallbackError)) {
+              console.info("Dhan Daily did not return historical candles for safe fallback range.", {
+                securityId: security.securityId,
+                symbol: security.symbol,
+                fromDate: range.fromDate,
+                toDate: fallbackToDate,
+                originalToDate: range.toDate,
+                reason: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+              });
+              continue;
+            }
+            throw fallbackError;
+          }
+        } else {
+          console.info("Skipping Dhan Daily retry because the safe fallback range would be empty.", {
+            securityId: security.securityId,
+            symbol: security.symbol,
+            fromDate: range.fromDate,
+            originalToDate: range.toDate,
+            fallbackToDate,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          continue;
+        }
+      } else {
+        throw error;
+      }
     }
     total += candles.length;
     dataThroughDate = candles.at(-1)?.date ?? dataThroughDate;
@@ -783,10 +886,15 @@ async function runMemberWorkers<T>(items: T[], concurrency: number, worker: (ite
 async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, retryFailures = false, forceUniverse = false) {
   await updateJob(jobId, (job) => {
     job.status = "running";
-    job.current_status = retryFailures ? "Preparing failed downloads" : "Refreshing universe";
+    job.current_status = "Checking Dhan access";
   });
 
   try {
+    await assertDhanProfileReady();
+    await updateJob(jobId, (job) => {
+      job.current_status = retryFailures ? "Preparing failed downloads" : "Refreshing universe";
+    });
+
     if (!retryFailures) {
       const currentDb = await readDatabase();
       const hasUniverse = currentDb.universe_members.some((member) => !universeName || member.universe_name === universeName);
@@ -921,6 +1029,7 @@ export async function startHistoricalDataRefresh(universeName?: UniverseName, re
 }
 
 export async function updateHistoricalData(universeName?: UniverseName, retryFailures = false) {
+  await assertDhanProfileReady();
   const db = await readDatabase();
   const members = retryFailures
     ? db.universe_members.filter((member) => db.download_failures.some((failure) => failure.status === "open" && failure.security_id === member.security_id))
@@ -990,6 +1099,7 @@ export async function updateHistoricalData(universeName?: UniverseName, retryFai
 
 export async function getDataStatus() {
   const db = await readDatabase();
+  const dhanProfile = await getDhanProfileStatus();
   const summaries = (["MIDCAP", "SMALLCAP"] as UniverseName[]).map((universeName) => {
     const members = db.universe_members.filter((member) => member.universe_name === universeName);
     const securityIds = new Set(members.map((member) => member.security_id).filter(Boolean));
@@ -1022,7 +1132,8 @@ export async function getDataStatus() {
   const latestMarketRows = latestMarketDate ? db.daily_prices.filter((row) => row.trade_date === latestMarketDate) : [];
   const latestProvisional = latestMarketRows.filter((row) => row.is_provisional).length;
   return {
-    dhan_connected: hasDhanCredentials(),
+    dhan_connected: dhanProfile.ok,
+    dhan_profile: dhanProfile,
     database_size_bytes: await getDatabaseSizeBytes(),
     price_adjustment_status: "UNKNOWN",
     latest_market_data: latestMarketDate

@@ -42,6 +42,7 @@ const {
   aggregateIntradayToDaily,
   getIndiaTradingDate,
   isIndianMarketClosed,
+  safeDailyHistoricalFallbackToDate,
   validateConstructedDailyCandle,
   withRetry,
 } = loadTs("src/lib/historicalDataService.ts");
@@ -77,6 +78,12 @@ const atUtc = (iso) => new Date(iso);
 {
   assert.equal(getIndiaTradingDate(atUtc("2026-10-05T19:00:00.000Z")), "2026-10-06", "CASE 9: UTC server time must resolve to IST trading date");
   assert.equal(isIndianMarketClosed(atUtc("2026-10-05T10:01:00.000Z")), true, "CASE 9: market close check uses IST");
+}
+
+{
+  assert.equal(safeDailyHistoricalFallbackToDate("2026-10-01", "2026-10-06", "2026-10-06"), "2026-10-05", "DH-905 current-date ranges should retry with a conservative end date");
+  assert.equal(safeDailyHistoricalFallbackToDate("2026-10-05", "2026-10-06", "2026-10-06"), null, "Empty fallback ranges should be skipped instead of failing every stock");
+  assert.equal(safeDailyHistoricalFallbackToDate("2026-10-01", "2026-10-04", "2026-10-06"), null, "Older bad-parameter ranges should remain real failures");
 }
 
 {

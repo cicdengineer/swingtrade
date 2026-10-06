@@ -90,6 +90,16 @@ export type DataDownloadJobRecord = {
   errors: string[];
 };
 
+export type DhanProfileStatus = {
+  ok: boolean;
+  dhanClientId?: string;
+  tokenValidity?: string;
+  activeSegment?: string;
+  dataPlan?: string;
+  dataValidity?: string;
+  error?: string;
+};
+
 export type DownloadFailureRecord = {
   symbol: string;
   security_id: string;
