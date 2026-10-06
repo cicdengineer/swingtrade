@@ -11,6 +11,7 @@ export type ThirtyInThirtyFilters = {
   minAverageDailyTradedValue: number;
   positive3MonthsOnly: boolean;
   positive6MonthsOnly: boolean;
+  above10EmaOnly: boolean;
   above50EmaOnly: boolean;
   nearPreviousDayHighOnly: boolean;
   upTodayOnly: boolean;
@@ -32,6 +33,8 @@ export type ThirtyInThirtyRow = {
   universe_name: UniverseName;
   current_date: string;
   current_close: number;
+  ema10: number;
+  distance_from_10ema_pct: number;
   ema50: number;
   distance_from_ema_pct: number;
   best_return_pct: number;
@@ -61,6 +64,7 @@ export type ThirtyInThirtyRow = {
     high: number;
     low: number;
     close: number;
+    ema10?: number;
     ema50?: number;
     volume: number;
     volume_ratio?: number;
@@ -75,6 +79,7 @@ export const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   minAverageDailyTradedValue: 0,
   positive3MonthsOnly: false,
   positive6MonthsOnly: false,
+  above10EmaOnly: false,
   above50EmaOnly: false,
   nearPreviousDayHighOnly: false,
   upTodayOnly: false,
@@ -108,9 +113,12 @@ function analyzeStock(input: {
   const currentIndex = rows.length - 1;
   const current = rows[currentIndex];
   const closes = rows.map((row) => row.close);
+  const ema10 = calculateEma(closes, 10);
   const ema50 = calculateEma(closes, 50);
+  const currentEma10 = ema10[currentIndex];
   const currentEma = ema50[currentIndex];
-  if (!currentEma) return null;
+  if (!currentEma10 || !currentEma) return null;
+  const distanceFrom10Ema = pct(current.close, currentEma10);
   const distanceFromEma = pct(current.close, currentEma);
   const lookbackStart = Math.max(0, currentIndex - input.filters.lookbackDays - input.filters.windowDays + 1);
   const scanStart = Math.max(lookbackStart, currentIndex - input.filters.lookbackDays - input.filters.windowDays + 1);
@@ -175,6 +183,7 @@ function analyzeStock(input: {
       high: row.high,
       low: row.low,
       close: row.close,
+      ema10: ema10[originalIndex],
       ema50: ema50[originalIndex],
       volume: row.volume,
       volume_ratio: volAvg ? row.volume / volAvg : undefined,
@@ -190,6 +199,8 @@ function analyzeStock(input: {
     universe_name: input.universeName,
     current_date: current.trade_date,
     current_close: current.close,
+    ema10: currentEma10,
+    distance_from_10ema_pct: distanceFrom10Ema,
     ema50: currentEma,
     distance_from_ema_pct: distanceFromEma,
     best_return_pct: Number.isFinite(best.returnPct) ? best.returnPct : 0,
