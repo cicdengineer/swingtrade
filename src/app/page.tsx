@@ -76,7 +76,7 @@ type DryVolumeBreakoutResponse = { filters: DryVolumeBreakoutFilters; evaluated:
 type BreakoutChartRow = { security_id: string; symbol: string; company_name: string; current_date: string; current_close: number; ema50: number; distance_from_ema_pct: number; reason: string; recent: DailyChartPoint[] };
 type FilterKey = "minAverage" | "minMedian" | "minWinRate" | "minN" | "maxAvgMedianGap" | "minMaeP75" | "minWorstReturn";
 type Filters = Record<FilterKey, { enabled: boolean; value: number }>;
-type PortfolioHolding = { exchange: string; tradingSymbol: string; securityId: string; isin: string; totalQty: number; dpQty: number; t1Qty: number; availableQty: number; collateralQty: number; avgCostPrice: number; invested: number; unrealizedPnl: number; dayPnl: number; productType: string; positionType: string; currentPrice?: number; ema10?: number; distanceFrom10EmaPct?: number; brokerEntryDate?: string; brokerCalendarDaysHeld?: number; brokerTradingDaysHeld?: number; brokerOpenLots?: number };
+type PortfolioHolding = { exchange: string; tradingSymbol: string; securityId: string; isin: string; totalQty: number; dpQty: number; t1Qty: number; availableQty: number; collateralQty: number; avgCostPrice: number; invested: number; unrealizedPnl: number; dayPnl: number; productType: string; positionType: string; currentPrice?: number; todayChangePct?: number; ema10?: number; distanceFrom10EmaPct?: number; brokerEntryDate?: string; brokerCalendarDaysHeld?: number; brokerTradingDaysHeld?: number; brokerOpenLots?: number };
 type ClosedTrade = { date: string; symbol: string; securityId: string; quantity: number; buyPrice: number; sellPrice: number; grossPnl: number; charges: number; netPnl: number };
 type TradingSettings = { id: "default"; totalCapital: number; riskPercent: number; defaultStopSource: "Setup Candle Low" | "Manual"; defaultManagementTimeframe: "Daily" | "Hourly"; initialManagementDays: number; partialStartDay: number; partialEndDay: number; partialPercent: number; partialMinR: number; defaultTrailMA: "10 EMA" | "20 EMA" | "Manual"; moveStopToBreakevenAfterPartial: boolean; exitConfirmationRule: "Close below EMA" | "Intraday break" | "2 closes below EMA"; portfolioRiskNormalPct: number; portfolioRiskElevatedPct: number; portfolioRiskHighPct: number };
 type TradeEvent = { id: string; managedTradeId: string; eventType: string; timestamp: string; price?: number; quantity?: number; notes?: string; source: string };
@@ -730,6 +730,7 @@ function liveAdjustedPortfolio(portfolio: PortfolioResponse | null, liveTicks: R
     return {
       ...holding,
       currentPrice: tick.ltp,
+      todayChangePct: tick.prevClose && tick.prevClose > 0 ? ((tick.ltp / tick.prevClose) - 1) * 100 : holding.todayChangePct,
       unrealizedPnl: (tick.ltp - holding.avgCostPrice) * holding.totalQty,
       distanceFrom10EmaPct: holding.ema10 ? ((tick.ltp - holding.ema10) / holding.ema10) * 100 : holding.distanceFrom10EmaPct,
     };
@@ -993,7 +994,42 @@ function ManageHoldingDrawer({ holding, onClose, onCreated }: { holding: Portfol
 }
 
 function PortfolioTable({ holdings }: { holdings: PortfolioHolding[] }) {
-  return <section className="panel portfolio-holdings-panel"><div className="panel-head"><div><p className="eyebrow">Portfolio</p><h2>Dhan holdings</h2></div><span className="count">{holdings.length} live</span></div>{holdings.length ? <div className="table-wrap"><table className="portfolio-holdings-table"><thead><tr><th>Symbol</th><th>Qty</th><th>Days</th><th>Available</th><th>Avg Cost</th><th>Invested</th><th>Unrealized</th><th>10 EMA</th><th>Actions</th></tr></thead><tbody>{holdings.map((holding) => { const days = holding.brokerTradingDaysHeld; const daysLeft = days === undefined ? undefined : Math.max(3 - days, 0); const exitDue = daysLeft === 0; const actionTone = exitDue ? "exit" : daysLeft === 1 ? "danger" : daysLeft === 2 ? "good" : "neutral"; const above10Ema = holding.distanceFrom10EmaPct !== undefined && holding.distanceFrom10EmaPct >= 0; return <tr key={holding.securityId} className={exitDue ? "portfolio-exit-row" : ""}><td className="window">{holding.tradingSymbol}<small className="sample-warning">{holding.brokerEntryDate ? `Since ${holding.brokerEntryDate}` : "Entry date unavailable"}</small></td><td>{holding.totalQty}</td><td>{days === undefined ? "—" : days}<small className="sample-warning">trading days</small></td><td>{holding.availableQty}</td><td>{money(holding.avgCostPrice)}</td><td>{rupees(holding.invested)}</td><td className={`portfolio-pnl ${holding.unrealizedPnl >= 0 ? "positive" : "negative"}`}>{rupees(holding.unrealizedPnl)}</td><td>{holding.ema10 === undefined || holding.distanceFrom10EmaPct === undefined ? "—" : <span className={`portfolio-ema-pill ${above10Ema ? "above" : "below"}`}><b>{above10Ema ? "Above" : "Below"}</b><small>{money(holding.ema10)}</small></span>}</td><td><span className={`portfolio-action-pill ${actionTone}`}>{exitDue ? "EXIT CHECK" : daysLeft === undefined ? "REVIEW" : `${daysLeft}D LEFT`}</span></td></tr>; })}</tbody></table></div> : <p className="panel-empty">No holdings returned by Dhan.</p>}</section>;
+  return <section className="panel portfolio-holdings-panel">
+    <div className="panel-head">
+      <div><p className="eyebrow">Portfolio</p><h2>Dhan holdings</h2></div>
+      <span className="count">{holdings.length} live</span>
+    </div>
+    {holdings.length ? <div className="table-wrap">
+      <table className="portfolio-holdings-table">
+        <thead>
+          <tr><th>Symbol</th><th>Qty</th><th>Days</th><th>Available</th><th>Avg Cost</th><th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>10 EMA</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          {holdings.map((holding) => {
+            const days = holding.brokerTradingDaysHeld;
+            const daysLeft = days === undefined ? undefined : Math.max(3 - days, 0);
+            const exitDue = daysLeft === 0;
+            const actionTone = exitDue ? "exit" : daysLeft === 1 ? "danger" : daysLeft === 2 ? "good" : "neutral";
+            const above10Ema = holding.distanceFrom10EmaPct !== undefined && holding.distanceFrom10EmaPct >= 0;
+            const todayTone = holding.todayChangePct === undefined ? "neutral" : holding.todayChangePct >= 0 ? "positive" : "negative";
+            return <tr key={holding.securityId} className={exitDue ? "portfolio-exit-row" : ""}>
+              <td className="window">{holding.tradingSymbol}<small className="sample-warning">{holding.brokerEntryDate ? `Since ${holding.brokerEntryDate}` : "Entry date unavailable"}</small></td>
+              <td>{holding.totalQty}</td>
+              <td>{days === undefined ? "—" : days}<small className="sample-warning">trading days</small></td>
+              <td>{holding.availableQty}</td>
+              <td>{money(holding.avgCostPrice)}</td>
+              <td>{rupees(holding.invested)}</td>
+              <td className={`portfolio-live-price ${todayTone}`}>{holding.currentPrice === undefined ? "—" : money(holding.currentPrice)}<small>{holding.todayChangePct === undefined ? "waiting tick" : "live tick"}</small></td>
+              <td className={`portfolio-live-change ${todayTone}`}>{holding.todayChangePct === undefined ? "—" : pct2(holding.todayChangePct)}</td>
+              <td className={`portfolio-pnl ${holding.unrealizedPnl >= 0 ? "positive" : "negative"}`}>{rupees(holding.unrealizedPnl)}</td>
+              <td>{holding.ema10 === undefined || holding.distanceFrom10EmaPct === undefined ? "—" : <span className={`portfolio-ema-pill ${above10Ema ? "above" : "below"}`}><b>{above10Ema ? "Above" : "Below"}</b><small>{money(holding.ema10)}</small></span>}</td>
+              <td><span className={`portfolio-action-pill ${actionTone}`}>{exitDue ? "EXIT CHECK" : daysLeft === undefined ? "REVIEW" : `${daysLeft}D LEFT`}</span></td>
+            </tr>;
+          })}
+        </tbody>
+      </table>
+    </div> : <p className="panel-empty">No holdings returned by Dhan.</p>}
+  </section>;
 }
 
 function TradeConfidenceCard({ trades }: { trades: ClosedTrade[] }) {
