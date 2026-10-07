@@ -16,6 +16,7 @@ export type ThirtyInThirtyFilters = {
   nearPreviousDayHighOnly: boolean;
   upTodayOnly: boolean;
   nearSwingHighOnly: boolean;
+  strongStartOnly: boolean;
   earlyVolumeOnly: boolean;
   highVolumeOnly: boolean;
   decliningVolumeOnly: boolean;
@@ -84,6 +85,7 @@ export const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   nearPreviousDayHighOnly: false,
   upTodayOnly: false,
   nearSwingHighOnly: false,
+  strongStartOnly: false,
   earlyVolumeOnly: false,
   highVolumeOnly: false,
   decliningVolumeOnly: false,

@@ -14,6 +14,7 @@ import {
   LogOut,
   Menu,
   Moon,
+  Pin,
   RefreshCw,
   Search,
   Settings,
@@ -65,7 +66,7 @@ type MomentumSetupType = "MOMENTUM_CONTRACTION" | "TRENDING_TIGHT";
 type MomentumContractionFilters = { universe: "ALL" | UniverseName; setupType: "ALL" | MomentumSetupType; emaLength: number; emaSlopeLookback: number; momentumLookback: number; minPriorMovePct: number; volumeAverageLength: number; expansionRelativeVolume: number; atrLength: number; tightRangeAtr: number; lowVolumeLookback: number; dryVolumeRatio: number; contractionLookback: number; minAverageDailyTradedValue: number; maxDistanceFromEmaPct: number; requireRisingEma: boolean; minSetupScore: number; showAll: boolean; debug: boolean };
 type MomentumContractionRow = { status: MomentumSetupType | "BELOW_EMA" | "NO_MOMENTUM" | "NOT_TIGHT" | "VOLUME_NOT_DRY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; setupType: MomentumSetupType; setupScore: number; current_date: string; current_close: number; ema50: number; emaSlope: number; distance_from_ema_pct: number; priorMovePct: number; momentumRelativeVolume: number; atr14: number; rangeCompression: number; currentVolume: number; volumeSMA20: number; volumeSMA50: number; relativeVolume: number; volumePercentile: number; lowestVolume10: boolean; lowestVolume20: boolean; avgVolume5: number; avgVolume20: number; volumeContractionRatio: number; trendStructure: "HIGHER_HIGH_LOW" | "RISING" | "SIDEWAYS" | "WEAK"; averageDailyTradedValue: number; reason: string; diagnostics: { pass: boolean; label: string }[]; recent: DailyChartPoint[] };
 type MomentumContractionResponse = { filters: MomentumContractionFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: MomentumContractionRow[]; generatedAt: string };
-type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; showAll: boolean };
+type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; showAll: boolean };
 type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "hourly_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
@@ -211,6 +212,7 @@ const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   nearPreviousDayHighOnly: false,
   upTodayOnly: false,
   nearSwingHighOnly: false,
+  strongStartOnly: false,
   earlyVolumeOnly: false,
   highVolumeOnly: false,
   decliningVolumeOnly: false,
@@ -514,6 +516,11 @@ const isUpToday = (row: ThirtyInThirtyRow, tick?: LiveTick) => {
   const todayReturn = todayReturnPct(row, tick);
   return todayReturn !== undefined && todayReturn > 0;
 };
+const isStrongStart = (row: ThirtyInThirtyRow, tick?: LiveTick) => {
+  const previous = previousDailyRow(row);
+  const open = tick?.dayOpen;
+  return Boolean(open && previous?.close && previous?.high && open > previous.close && open < previous.high);
+};
 const isNearSwingHigh = (row: ThirtyInThirtyRow) => {
   const recentHigh = Math.max(...row.recent.slice(-21, -1).map((point) => point.high));
   return Number.isFinite(recentHigh) && ((row.current_close / recentHigh) - 1) * 100 >= -1;
@@ -573,6 +580,7 @@ const matchesThirtyInThirtyFilters = (row: ThirtyInThirtyRow, filters: ThirtyInT
   (!filters.nearPreviousDayHighOnly || isNearPreviousDayHigh(row)) &&
   (!filters.upTodayOnly || isUpToday(row, tick)) &&
   (!filters.nearSwingHighOnly || isNearSwingHigh(row)) &&
+  (!filters.strongStartOnly || isStrongStart(row, tick)) &&
   (!filters.earlyVolumeOnly || currentVolumeRatio(row) >= 0.3) &&
   (!filters.highVolumeOnly || currentVolumeRatio(row) >= 1.5) &&
   (!filters.decliningVolumeOnly || hasDryVolumeStreak(row)) &&
@@ -2087,6 +2095,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [tileLimit, setTileLimit] = useState(80);
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
   const [hourlyStops, setHourlyStops] = useState<Record<string, number | undefined>>({});
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const setNumber = (key: keyof ThirtyInThirtyFilters, value: number) => setFilters({ ...filters, [key]: value });
   const liveRows = useMemo(() => (data?.results ?? []).map((row) => liveAdjustedThirtyInThirty(row, liveTicks[row.security_id])), [data, liveTicks]);
   useEffect(() => {
@@ -2144,8 +2153,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     });
     return () => { cancelled = true; };
   }, [liveRows, hourlyStops]);
-  const sortedRows = useMemo(() => {
-    const rows = [...liveRows].filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]));
+  const sortRows = useCallback((rows: ThirtyInThirtyRow[]) => {
     const valueFor = (row: ThirtyInThirtyRow): string | number => {
       if (sort.key === "symbol") return row.symbol;
       if (sort.key === "company") return row.company_name;
@@ -2163,15 +2171,20 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       if (sort.key === "recent") return -row.days_since_best_move;
       return row.best_return_pct;
     };
-    rows.sort((a, b) => {
+    return [...rows].sort((a, b) => {
       const av = valueFor(a);
       const bv = valueFor(b);
       const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
       return sort.direction === "asc" ? comparison : -comparison;
     });
-    return rows;
-  }, [liveRows, liveTicks, filters, sort, hourlyStops]);
-  const visibleRows = useMemo(() => sortedRows.slice(0, tileLimit), [sortedRows, tileLimit]);
+  }, [liveTicks, sort, hourlyStops]);
+  const sortedRows = useMemo(() => sortRows(liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]))), [liveRows, liveTicks, filters, sortRows]);
+  const pinnedRows = useMemo(() => sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id))), [liveRows, pinnedIds, sortRows]);
+  const visibleRows = useMemo(() => {
+    const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
+    return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
+  }, [pinnedRows, sortedRows, tileLimit]);
+  const togglePinned = (securityId: string) => setPinnedIds((current) => current.includes(securityId) ? current.filter((id) => id !== securityId) : [...current, securityId]);
   const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "hourly_sl_pct" ? "asc" : "desc" });
 
   return <section className="research-page thirty-in-thirty-page">
@@ -2206,6 +2219,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label><input type="checkbox" checked={filters.nearPreviousDayHighOnly} onChange={(e) => setFilters({ ...filters, nearPreviousDayHighOnly: e.target.checked })}/><span>Near PD High</span></label>
       <label><input type="checkbox" checked={filters.upTodayOnly} onChange={(e) => setFilters({ ...filters, upTodayOnly: e.target.checked })}/><span>Up</span></label>
       <label><input type="checkbox" checked={filters.nearSwingHighOnly} onChange={(e) => setFilters({ ...filters, nearSwingHighOnly: e.target.checked })}/><span>Swing High</span></label>
+      <label title="Strong Start: live day open is above previous close and below previous high"><input type="checkbox" checked={filters.strongStartOnly} onChange={(e) => setFilters({ ...filters, strongStartOnly: e.target.checked })}/><span>SS</span></label>
       <label><input type="checkbox" checked={filters.earlyVolumeOnly} onChange={(e) => setFilters({ ...filters, earlyVolumeOnly: e.target.checked })}/><span>Early Vol</span></label>
       <label><input type="checkbox" checked={filters.highVolumeOnly} onChange={(e) => setFilters({ ...filters, highVolumeOnly: e.target.checked })}/><span>High Volume</span></label>
       <label><input type="checkbox" checked={filters.decliningVolumeOnly} onChange={(e) => setFilters({ ...filters, decliningVolumeOnly: e.target.checked })}/><span>Declining Vol</span></label>
@@ -2222,12 +2236,15 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <section className="screenshot-tile-grid">
         {visibleRows.length ? visibleRows.map((row) => {
           const todayReturn = todayReturnPct(row, liveTicks[row.security_id]);
-          return <button key={row.security_id} className={`screenshot-tile ${isBreakingPreviousDayHigh(row) ? "breaking-pdh" : ""}`} onClick={() => setSelected(row)} title={`${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
+          const pinned = pinnedIds.includes(row.security_id);
+          const strongStart = isStrongStart(row, liveTicks[row.security_id]);
+          return <div key={row.security_id} className={`screenshot-tile ${isBreakingPreviousDayHigh(row) ? "breaking-pdh" : ""} ${pinned ? "pinned" : ""} ${strongStart ? "strong-start" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={`${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
+            <span className="tile-badges">{strongStart && <i>SS</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span>
             <b>{row.symbol}</b>
             <small>{row.company_name}</small>
             {todayReturn !== undefined && <span className={`tile-today-return ${todayReturn >= 0 ? "positive" : "negative"}`}>{pct2(todayReturn)}</span>}
             <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} onOpen={() => setSelected(row)} />
-          </button>;
+          </div>;
         }) : <p className="panel-empty">No stocks matched the selected 30 in 30 criteria.</p>}
       </section>
     </>}
