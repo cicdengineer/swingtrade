@@ -66,7 +66,7 @@ type MomentumContractionFilters = { universe: "ALL" | UniverseName; setupType: "
 type MomentumContractionRow = { status: MomentumSetupType | "BELOW_EMA" | "NO_MOMENTUM" | "NOT_TIGHT" | "VOLUME_NOT_DRY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; setupType: MomentumSetupType; setupScore: number; current_date: string; current_close: number; ema50: number; emaSlope: number; distance_from_ema_pct: number; priorMovePct: number; momentumRelativeVolume: number; atr14: number; rangeCompression: number; currentVolume: number; volumeSMA20: number; volumeSMA50: number; relativeVolume: number; volumePercentile: number; lowestVolume10: boolean; lowestVolume20: boolean; avgVolume5: number; avgVolume20: number; volumeContractionRatio: number; trendStructure: "HIGHER_HIGH_LOW" | "RISING" | "SIDEWAYS" | "WEAK"; averageDailyTradedValue: number; reason: string; diagnostics: { pass: boolean; label: string }[]; recent: DailyChartPoint[] };
 type MomentumContractionResponse = { filters: MomentumContractionFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: MomentumContractionRow[]; generatedAt: string };
 type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; showAll: boolean };
-type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "company" | "current_1m" | "current_2m" | "current_3m" | "current_6m" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
+type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "hourly_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
 type DryVolumeBreakoutFilters = { universe: "ALL" | UniverseName; minMovePct: number; moveWindowDays: number; impulseLookbackDays: number; minImpulseVolumeRatio: number; minPullbackDays: number; maxPullbackDays: number; minPullbackPct: number; maxPullbackPct: number; dryVolumeRatio: number; dryVolumeLookbackDays: number; breakoutWithinDays: number; stopBufferPct: number; maxDistanceToEntryPct: number; minAverageDailyTradedValue: number; showAll: boolean };
@@ -506,6 +506,10 @@ const isNearPreviousDayHigh = (row: ThirtyInThirtyRow) => {
   if (!previous?.high) return false;
   return ((row.current_close / previous.high) - 1) * 100 >= -0.5;
 };
+const isBreakingPreviousDayHigh = (row: ThirtyInThirtyRow) => {
+  const previous = previousDailyRow(row);
+  return Boolean(row.recent.at(-1)?.trade_date === liveTradeDate() && previous?.high && row.current_close > previous.high);
+};
 const isUpToday = (row: ThirtyInThirtyRow, tick?: LiveTick) => {
   const todayReturn = todayReturnPct(row, tick);
   return todayReturn !== undefined && todayReturn > 0;
@@ -543,10 +547,10 @@ const closedRedPreviousSession = (row: ThirtyInThirtyRow) => {
   return Boolean(latestCompleted && latestCompleted.close < latestCompleted.open);
 };
 const latestDailyStop = (rows: DailyChartPoint[]) => {
-  const today = liveTradeDate();
-  return [...rows].reverse().find((point) => point.trade_date !== today)?.low ?? rows.at(-1)?.low;
+  return rows.at(-1)?.low;
 };
 const latestHourlyStop = (rows: DailyChartPoint[]) => rows.at(-1)?.low;
+const stopLossPct = (entry: number, stop?: number) => entry > 0 && stop !== undefined && stop > 0 && entry > stop ? ((entry - stop) / entry) * 100 : undefined;
 const positionSizingFromStop = (entry: number, stop: number | undefined, settings?: TradingSettings | null) => {
   const riskUnit = settings ? settings.totalCapital * settings.riskPercent / 100 : 0;
   if (!settings || !stop || stop <= 0) return { quantity: 0, value: 0, riskPerShare: 0, riskUnit, valid: false };
@@ -1971,12 +1975,12 @@ function EntrySizingTile({ title, entry, stop, settings, loading }: { title: str
     <div>
       <span>{title}</span>
       <strong>{loading ? "Loading..." : sizing.valid ? `${sizing.quantity.toLocaleString("en-IN")} qty` : "No entry"}</strong>
-      <small className="entry-value">{sizing.valid ? `${rupees(sizing.value)} value` : settings ? "Stop is not below entry" : "Settings unavailable"}</small>
+      <small className="entry-value">{sizing.valid ? rupees(sizing.value) : settings ? "Stop is not below entry" : "Settings unavailable"}</small>
     </div>
     <div>
       <span>SL</span>
       <b>{stop ? money(stop) : "—"}</b>
-      <small>{riskPct > 0 ? `${riskPct.toFixed(2)}% risk/share` : `Risk unit ${rupees(sizing.riskUnit)}`}</small>
+      <small className="entry-value">{riskPct > 0 ? `${riskPct.toFixed(2)}%` : `Risk unit ${rupees(sizing.riskUnit)}`}</small>
     </div>
   </div>;
 }
@@ -2082,6 +2086,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [tileLimit, setTileLimit] = useState(80);
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
+  const [hourlyStops, setHourlyStops] = useState<Record<string, number | undefined>>({});
   const setNumber = (key: keyof ThirtyInThirtyFilters, value: number) => setFilters({ ...filters, [key]: value });
   const liveRows = useMemo(() => (data?.results ?? []).map((row) => liveAdjustedThirtyInThirty(row, liveTicks[row.security_id])), [data, liveTicks]);
   useEffect(() => {
@@ -2122,16 +2127,31 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       setLiveFeedStatus("idle");
     };
   }, [data, setLiveFeedStatus]);
+  useEffect(() => {
+    const rows = liveRows.slice(0, 180).filter((row) => !(row.security_id in hourlyStops));
+    if (!rows.length) return;
+    let cancelled = false;
+    rows.forEach((row) => {
+      void fetchThirtyUpIntraday(row.security_id, false, "thirty-in-thirty-screener")
+        .then((candles) => {
+          if (cancelled) return;
+          const stop = latestHourlyStop(candles);
+          setHourlyStops((current) => current[row.security_id] === stop ? current : { ...current, [row.security_id]: stop });
+        })
+        .catch(() => {
+          if (!cancelled) setHourlyStops((current) => row.security_id in current ? current : { ...current, [row.security_id]: undefined });
+        });
+    });
+    return () => { cancelled = true; };
+  }, [liveRows, hourlyStops]);
   const sortedRows = useMemo(() => {
     const rows = [...liveRows].filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]));
     const valueFor = (row: ThirtyInThirtyRow): string | number => {
       if (sort.key === "symbol") return row.symbol;
       if (sort.key === "company") return row.company_name;
       if (sort.key === "today_return") return todayReturnPct(row, liveTicks[row.security_id]) ?? -Infinity;
-      if (sort.key === "current_1m") return row.return_1m_pct;
-      if (sort.key === "current_2m") return row.return_2m_pct;
-      if (sort.key === "current_3m") return row.current_3m_return_pct;
-      if (sort.key === "current_6m") return row.current_6m_return_pct;
+      if (sort.key === "daily_sl_pct") return stopLossPct(row.current_close, latestDailyStop(row.recent)) ?? Infinity;
+      if (sort.key === "hourly_sl_pct") return stopLossPct(row.current_close, hourlyStops[row.security_id]) ?? Infinity;
       if (sort.key === "pullback") return row.pullback_from_best_end_pct;
       if (sort.key === "near_3m_high") return row.pullback_from_3m_high_pct;
       if (sort.key === "near_6m_high") return row.pullback_from_6m_high_pct;
@@ -2150,9 +2170,9 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       return sort.direction === "asc" ? comparison : -comparison;
     });
     return rows;
-  }, [liveRows, liveTicks, filters, sort]);
+  }, [liveRows, liveTicks, filters, sort, hourlyStops]);
   const visibleRows = useMemo(() => sortedRows.slice(0, tileLimit), [sortedRows, tileLimit]);
-  const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "desc" });
+  const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "hourly_sl_pct" ? "asc" : "desc" });
 
   return <section className="research-page thirty-in-thirty-page">
     <div className="thirty-hero thirty-in-thirty-hero">
@@ -2175,7 +2195,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
-      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}><option value="today_return">Today Live Gain</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="recent">Most Recent 30D Move</option><option value="current_1m">1M Return</option><option value="current_2m">2M Return</option><option value="current_3m">3M Return</option><option value="current_6m">6M Return</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
+      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}><option value="today_return">Today Live Gain</option><option value="daily_sl_pct">Daily SL%</option><option value="hourly_sl_pct">Hourly SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
       <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
     </div>
     <div className="thirty-in-thirty-switches">
@@ -2202,7 +2222,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <section className="screenshot-tile-grid">
         {visibleRows.length ? visibleRows.map((row) => {
           const todayReturn = todayReturnPct(row, liveTicks[row.security_id]);
-          return <button key={row.security_id} className="screenshot-tile" onClick={() => setSelected(row)} title={`${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
+          return <button key={row.security_id} className={`screenshot-tile ${isBreakingPreviousDayHigh(row) ? "breaking-pdh" : ""}`} onClick={() => setSelected(row)} title={`${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
             <b>{row.symbol}</b>
             <small>{row.company_name}</small>
             {todayReturn !== undefined && <span className={`tile-today-return ${todayReturn >= 0 ? "positive" : "negative"}`}>{pct2(todayReturn)}</span>}
