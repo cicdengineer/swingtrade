@@ -1966,16 +1966,17 @@ function ThirtyInThirtyTileChart({ row, chartMonths, onOpen }: { row: ThirtyInTh
 
 function EntrySizingTile({ title, entry, stop, settings, loading }: { title: string; entry: number; stop?: number; settings?: TradingSettings | null; loading?: boolean }) {
   const sizing = positionSizingFromStop(entry, stop, settings);
+  const riskPct = sizing.riskPerShare > 0 && entry > 0 ? (sizing.riskPerShare / entry) * 100 : 0;
   return <div className={`entry-sizing-tile ${sizing.valid ? "good" : "bad"}`}>
     <div>
       <span>{title}</span>
       <strong>{loading ? "Loading..." : sizing.valid ? `${sizing.quantity.toLocaleString("en-IN")} qty` : "No entry"}</strong>
-      <small>{sizing.valid ? `LTP ${money(entry)} · ${rupees(sizing.value)} value` : settings ? `LTP ${money(entry)} · stop is not below LTP` : "Settings unavailable"}</small>
+      <small className="entry-value">{sizing.valid ? `${rupees(sizing.value)} value` : settings ? "Stop is not below entry" : "Settings unavailable"}</small>
     </div>
     <div>
       <span>SL</span>
       <b>{stop ? money(stop) : "—"}</b>
-      <small>{sizing.riskPerShare > 0 ? `${money(sizing.riskPerShare)} risk/share` : `Risk unit ${rupees(sizing.riskUnit)}`}</small>
+      <small>{riskPct > 0 ? `${riskPct.toFixed(2)}% risk/share` : `Risk unit ${rupees(sizing.riskUnit)}`}</small>
     </div>
   </div>;
 }
