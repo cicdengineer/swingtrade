@@ -337,6 +337,12 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   return <div className="stat"><span>{label}</span><strong>{value}</strong>{sub && <small>{sub}</small>}</div>;
 }
 
+type TileTone = "good" | "average" | "bad" | "neutral";
+
+function StrategyStat({ label, value, sub, tone = "neutral" }: { label: string; value: string; sub?: string; tone?: TileTone }) {
+  return <div className={`strategy-stat ${tone}`}><span>{label}</span><strong>{value}</strong>{sub && <small>{sub}</small>}</div>;
+}
+
 function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <span className={`brand-logo ${compact ? "compact" : ""}`}><img src="/brand/jobpothe-logo-cropped.png" alt="JobPothe" /></span>;
 }
@@ -535,6 +541,25 @@ const latestCompletedDailyRow = (row: ThirtyInThirtyRow) => {
 const closedRedPreviousSession = (row: ThirtyInThirtyRow) => {
   const latestCompleted = latestCompletedDailyRow(row);
   return Boolean(latestCompleted && latestCompleted.close < latestCompleted.open);
+};
+const latestDailyStop = (rows: DailyChartPoint[]) => {
+  const today = liveTradeDate();
+  return [...rows].reverse().find((point) => point.trade_date !== today)?.low ?? rows.at(-1)?.low;
+};
+const latestHourlyStop = (rows: DailyChartPoint[]) => rows.at(-1)?.low;
+const positionSizingFromStop = (entry: number, stop: number | undefined, settings?: TradingSettings | null) => {
+  const riskUnit = settings ? settings.totalCapital * settings.riskPercent / 100 : 0;
+  if (!settings || !stop || stop <= 0) return { quantity: 0, value: 0, riskPerShare: 0, riskUnit, valid: false };
+  const riskPerShare = entry - stop;
+  if (entry <= 0 || riskPerShare <= 0) return { quantity: 0, value: 0, riskPerShare, riskUnit, valid: false };
+  const quantity = Math.floor(riskUnit / riskPerShare);
+  return { quantity, value: quantity * entry, riskPerShare, riskUnit, valid: quantity > 0 };
+};
+const toneFromRange = (value: number | undefined, good: (value: number) => boolean, average: (value: number) => boolean): TileTone => {
+  if (value === undefined || Number.isNaN(value)) return "neutral";
+  if (good(value)) return "good";
+  if (average(value)) return "average";
+  return "bad";
 };
 const matchesThirtyInThirtyFilters = (row: ThirtyInThirtyRow, filters: ThirtyInThirtyFilters, tick?: LiveTick) =>
   (!filters.positive3MonthsOnly || row.current_3m_return_pct > 0) &&
@@ -1939,7 +1964,50 @@ function ThirtyInThirtyTileChart({ row, chartMonths, onOpen }: { row: ThirtyInTh
   </span>;
 }
 
-function ThirtyInThirtyChartPanel({ selected, chartMonths }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6 }) {
+function EntrySizingTile({ title, entry, stop, settings, loading }: { title: string; entry: number; stop?: number; settings?: TradingSettings | null; loading?: boolean }) {
+  const sizing = positionSizingFromStop(entry, stop, settings);
+  return <div className={`entry-sizing-tile ${sizing.valid ? "good" : "bad"}`}>
+    <div>
+      <span>{title}</span>
+      <strong>{loading ? "Loading..." : sizing.valid ? `${sizing.quantity.toLocaleString("en-IN")} qty` : "No entry"}</strong>
+      <small>{sizing.valid ? `LTP ${money(entry)} · ${rupees(sizing.value)} value` : settings ? `LTP ${money(entry)} · stop is not below LTP` : "Settings unavailable"}</small>
+    </div>
+    <div>
+      <span>SL</span>
+      <b>{stop ? money(stop) : "—"}</b>
+      <small>{sizing.riskPerShare > 0 ? `${money(sizing.riskPerShare)} risk/share` : `Risk unit ${rupees(sizing.riskUnit)}`}</small>
+    </div>
+  </div>;
+}
+
+function ThirtyInThirtyRiskTiles({ selected, activeRows, hourlyRows, hourlyLoading, hourlyError, settings }: { selected: ThirtyInThirtyRow; activeRows: DailyChartPoint[]; hourlyRows: DailyChartPoint[]; hourlyLoading: boolean; hourlyError?: string; settings?: TradingSettings | null }) {
+  const entry = selected.current_close;
+  const dailyStop = latestDailyStop(activeRows.length ? activeRows : selected.recent);
+  const hourlyStop = latestHourlyStop(hourlyRows);
+  return <div className="entry-sizing-grid">
+    <EntrySizingTile title="Daily Low Entry" entry={entry} stop={dailyStop} settings={settings} />
+    <EntrySizingTile title="Hourly Low Entry" entry={entry} stop={hourlyStop} settings={settings} loading={!hourlyError && (hourlyLoading || !hourlyRows.length)} />
+  </div>;
+}
+
+function ThirtyInThirtyScoreTiles({ selected, chartMonths }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6 }) {
+  const nearHigh = chartMonths === 6 ? selected.pullback_from_6m_high_pct : selected.pullback_from_3m_high_pct;
+  const chartReturn = chartMonths === 6 ? selected.current_6m_return_pct : selected.current_3m_return_pct;
+  return <div className="strategy-stat-grid">
+    <StrategyStat label="Best Window" value={pct(selected.best_return_pct)} sub={`${selected.best_start_date ?? "—"} to ${selected.best_end_date ?? "—"}`} tone={toneFromRange(selected.best_return_pct, (value) => value >= 45, (value) => value >= 30)} />
+    <StrategyStat label="Current Close" value={money(selected.current_close)} sub={selected.current_date} tone="neutral" />
+    <StrategyStat label="10 EMA" value={money(selected.ema10)} sub={pct(selected.distance_from_10ema_pct)} tone={toneFromRange(selected.distance_from_10ema_pct, (value) => value >= 0 && value <= 8, (value) => value > -2 && value <= 15)} />
+    <StrategyStat label="50 EMA" value={money(selected.ema50)} sub={pct(selected.distance_from_ema_pct)} tone={toneFromRange(selected.distance_from_ema_pct, (value) => value >= 0 && value <= 25, (value) => value > -3 && value <= 35)} />
+    <StrategyStat label={`${chartMonths}M Return`} value={pct(chartReturn)} tone={toneFromRange(chartReturn, (value) => value > 15, (value) => value > 0)} />
+    <StrategyStat label="Near High" value={pct(nearHigh)} sub={`${selected.days_since_best_move} sessions since move`} tone={toneFromRange(nearHigh, (value) => value >= -4 && value <= 0.5, (value) => value >= -8 && value <= 2)} />
+    <StrategyStat label="Breakout Zone" value={money(selected.breakout_level)} sub={pct(selected.breakout_distance_pct)} tone={toneFromRange(selected.breakout_distance_pct, (value) => value >= -3 && value <= 0.5, (value) => value >= -6 && value <= 2)} />
+    <StrategyStat label="Tightness 5D/20D" value={`${selected.tightness_5d_vs_20d.toFixed(2)}x`} tone={toneFromRange(selected.tightness_5d_vs_20d, (value) => value <= 0.75, (value) => value <= 1)} />
+    <StrategyStat label="Lowest Vol 5D/20D" value={`${selected.lowest_volume_5d_vs_20d.toFixed(2)}x`} tone={toneFromRange(selected.lowest_volume_5d_vs_20d, (value) => value <= 0.45, (value) => value <= 0.75)} />
+    <StrategyStat label="Demand/Supply" value={`${selected.demand_supply_score}`} tone={toneFromRange(selected.demand_supply_score, (value) => value >= 70, (value) => value >= 50)} />
+  </div>;
+}
+
+function ThirtyInThirtyChartPanel({ selected, chartMonths, settings }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
   const [hourlyLoading, setHourlyLoading] = useState(false);
@@ -1984,8 +2052,10 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths }: { selected: ThirtyI
     };
   }, [selected.security_id, timeframe]);
 
-  const activeRows = timeframe === "daily" ? lastTradingMonths(mergeLiveDailyCandle(selected.recent, liveDailyRow), chartMonths === 6 ? 126 : 63) : hourlyRows;
+  const dailyRows = lastTradingMonths(mergeLiveDailyCandle(selected.recent, liveDailyRow), chartMonths === 6 ? 126 : 63);
+  const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
   return <div className="chart-shell">
+    <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} hourlyRows={hourlyRows} hourlyLoading={hourlyLoading} hourlyError={hourlyError} settings={settings} />
     <div className="chart-toolbar">
       <div>
         <p className="eyebrow">Chart timeframe</p>
@@ -2006,7 +2076,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths }: { selected: ThirtyI
   </div>;
 }
 
-function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt }: { data: ThirtyInThirtyResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: (row: ThirtyInThirtyRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null }) {
+function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings }: { data: ThirtyInThirtyResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: (row: ThirtyInThirtyRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null }) {
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [tileLimit, setTileLimit] = useState(80);
@@ -2146,21 +2216,8 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <p className="eyebrow">30 in 30 · {selected.best_return_pct.toFixed(1)}%</p>
         <h2>{selected.symbol} · {selected.company_name}</h2>
         <p className="muted">{selected.reason}</p>
-        <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} />
-        <div className="stats-grid compact-stats">
-          <Stat label="Best Window" value={pct(selected.best_return_pct)} sub={`${selected.best_start_date ?? "—"} to ${selected.best_end_date ?? "—"}`}/>
-          <Stat label="Current Close" value={money(selected.current_close)} sub={selected.current_date}/>
-          <Stat label="10 EMA" value={money(selected.ema10)} sub={pct(selected.distance_from_10ema_pct)} />
-          <Stat label="50 EMA" value={money(selected.ema50)} sub={pct(selected.distance_from_ema_pct)} />
-          <Stat label={`${chartMonths}M Return`} value={pct(chartMonths === 6 ? selected.current_6m_return_pct : selected.current_3m_return_pct)} />
-        </div>
-        <div className="stats-grid compact-stats">
-          <Stat label="Near High" value={pct(chartMonths === 6 ? selected.pullback_from_6m_high_pct : selected.pullback_from_3m_high_pct)} sub={`${selected.days_since_best_move} sessions since move`} />
-          <Stat label="Breakout Zone" value={money(selected.breakout_level)} sub={pct(selected.breakout_distance_pct)} />
-          <Stat label="Tightness 5D/20D" value={`${selected.tightness_5d_vs_20d.toFixed(2)}x`} />
-          <Stat label="Lowest Vol 5D/20D" value={`${selected.lowest_volume_5d_vs_20d.toFixed(2)}x`} />
-          <Stat label="Demand/Supply" value={`${selected.demand_supply_score}`} />
-        </div>
+        <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} settings={settings} />
+        <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} />
       </div>
     </div>}
   </section>;
@@ -2590,7 +2647,7 @@ export default function Home() {
     {view === "Early Breakout" && <EarlyBreakoutScreenerView data={earlyBreakout} filters={earlyBreakoutFilters} setFilters={setEarlyBreakoutFilters} loading={loading} onRun={runEarlyBreakoutScreener} onReset={() => setEarlyBreakoutFilters(defaultEarlyBreakoutFilters)} selected={selectedEarlyBreakout} setSelected={setSelectedEarlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={earlyBreakoutUpdatedAt} onTradeCreated={loadPortfolio} />}
     {view === "Hourly Breakout" && <HourlyBreakoutScreenerView data={hourlyBreakout} filters={hourlyBreakoutFilters} setFilters={setHourlyBreakoutFilters} loading={loading} onRun={runHourlyBreakoutScreener} onReset={() => setHourlyBreakoutFilters(defaultHourlyBreakoutFilters)} selected={selectedHourlyBreakout} setSelected={setSelectedHourlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={hourlyBreakoutUpdatedAt} />}
     {view === "Momentum Tight" && <MomentumContractionScreenerView data={momentumContraction} filters={momentumContractionFilters} setFilters={setMomentumContractionFilters} loading={loading} onRun={runMomentumContractionScreener} onReset={() => setMomentumContractionFilters(defaultMomentumContractionFilters)} selected={selectedMomentumContraction} setSelected={setSelectedMomentumContraction} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={momentumContractionUpdatedAt} />}
-    {view === "30 in 30" && <ThirtyInThirtyScreenerView data={thirtyInThirty} filters={thirtyInThirtyFilters} setFilters={setThirtyInThirtyFilters} loading={loading} onRun={runThirtyInThirtyScreener} onReset={() => setThirtyInThirtyFilters(defaultThirtyInThirtyFilters)} selected={selectedThirtyInThirty} setSelected={setSelectedThirtyInThirty} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={thirtyInThirtyUpdatedAt} />}
+    {view === "30 in 30" && <ThirtyInThirtyScreenerView data={thirtyInThirty} filters={thirtyInThirtyFilters} setFilters={setThirtyInThirtyFilters} loading={loading} onRun={runThirtyInThirtyScreener} onReset={() => setThirtyInThirtyFilters(defaultThirtyInThirtyFilters)} selected={selectedThirtyInThirty} setSelected={setSelectedThirtyInThirty} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={thirtyInThirtyUpdatedAt} settings={tradingSettings} />}
     {view === "Dry Breakout" && <DryVolumeBreakoutScreenerView data={dryVolumeBreakout} filters={dryVolumeBreakoutFilters} loading={loading} onRun={runDryVolumeBreakoutScreener} onTradeCreated={loadPortfolio} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Backtest" && <BasketBacktestView filters={basketBacktestFilters} setFilters={setBasketBacktestFilters} data={basketBacktest} loading={loading} onRun={runBasketBacktest} />}
     {view === "Stock Search" && <><section className="search-card"><div className="search-copy"><p className="eyebrow">01 / Research a security</p><h2>Find an Indian equity</h2><p>Search the Dhan security master by symbol or company name.</p></div><div className="search-area"><form onSubmit={(e) => { e.preventDefault(); runSearch(); }}><div className="search-row"><div className="search-input"><Search size={18} /><input placeholder="Search RELIANCE, TCS, INFY…" value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>Enter</kbd></div><button className="primary search-button" type="submit" disabled={loading}>{loading ? "Searching…" : "Search"}</button></div></form>{results.length > 0 && <div className="results">{results.map((s) => <button key={`${s.securityId}-${s.segment}`} onClick={() => { setSecurity(s); setQuery(""); setResults([]); setAnalysis(null); }}><div><b>{s.symbol}</b><span>{s.name}</span></div><small>{s.exchange} · {s.securityId}</small></button>)}</div>}<div className="search-hint"><Database size={14} /><span>Security IDs are resolved from Dhan’s master—not ticker text alone.</span></div></div></section>{!configured && <section className="setup"><div className="setup-icon"><ShieldCheck size={25} /></div><div><p className="eyebrow">Secure data connection</p><h2>Connect your Dhan account to begin</h2><p>Market data and calculated statistics remain empty until server-side Dhan credentials are configured.</p></div><code>DHAN_CLIENT_ID= · DHAN_ACCESS_TOKEN=</code></section>}{!security && <section className="empty"><div className="empty-art"><CalendarDays size={30} /></div><p className="eyebrow">Awaiting a selection</p><h2>Start with a security search</h2><p>Select an equity to load its daily OHLCV history and derive seasonality statistics.</p></section>}{security && <><section className="stock-header"><div><div className="ticker-row"><span className="ticker">{security.symbol}</span><span className="exchange">{security.exchange}</span></div><h2>{security.name}</h2><p>Security ID {security.securityId} · Daily OHLCV · {analysis ? `${analysis.candles.length} trading sessions` : "Not loaded"}</p></div><button className="primary" onClick={() => analyze()} disabled={loading || !configured}>{loading ? <><RefreshCw size={16} className="spin" /> Calculating…</> : <><BarChart3 size={16} /> Load seasonality</>}</button></section>{analysis && <><section className="stats-grid"><Stat label="Current close" value={latest ? money(latest.close) : "—"} sub={latest?.date} /><Stat label="History available" value={`${new Set(analysis.candles.map((c) => c.date.slice(0, 4))).size} years`} sub="Complete years used" /><Stat label="Data through" value={latest?.date || "—"} sub="Cached locally" /><Stat label="Method" value="Daily OHLCV" sub="Adjusted data must be verified" /></section></>}</>}</>}
