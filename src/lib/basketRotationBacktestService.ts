@@ -327,8 +327,7 @@ function findDryVolumeBreakoutCandidate(stock: PreparedStock, index: number, fil
 
   const entryPrice = dry.row.high;
   const stopLoss = dry.row.low * (1 - filters.stopBufferPct / 100);
-  const entryTradedInRange = current.low <= entryPrice && current.high >= entryPrice;
-  const trigger = entryTradedInRange && current.close > entryPrice;
+  const trigger = current.high >= entryPrice;
   const distanceToEntryPct = Math.abs(pct(current.close, entryPrice));
   if (distanceToEntryPct > filters.maxDistanceToEntryPct) return null;
   const distanceFromEma = pct(current.close, ema10);
@@ -352,10 +351,8 @@ function findDryVolumeBreakoutCandidate(stock: PreparedStock, index: number, fil
     pullback_volume_ratio: round(pullbackVolumeRatio, 2),
     distance_from_10ema_pct: round(distanceFromEma),
     reason: trigger
-      ? `Dry-volume candle ${dry.row.trade_date} broke above ${entryPrice.toFixed(2)} with SL ${stopLoss.toFixed(2)}.`
-      : current.high >= entryPrice && current.low > entryPrice
-        ? `Skipped gap above ${entryPrice.toFixed(2)} from dry-volume candle ${dry.row.trade_date}; entry price did not trade inside today's candle.`
-        : `Waiting for breakout above dry-volume candle high ${entryPrice.toFixed(2)} from ${dry.row.trade_date}.`,
+      ? `Dry-volume candle ${dry.row.trade_date} triggered stop-entry above ${entryPrice.toFixed(2)} with SL ${stopLoss.toFixed(2)}.`
+      : `Waiting for breakout above dry-volume candle high ${entryPrice.toFixed(2)} from ${dry.row.trade_date}.`,
   };
 }
 
@@ -642,6 +639,34 @@ export async function runBasketRotationBacktest(input: Partial<BasketBacktestFil
         const event: BasketEvent = { date, type: "BUY", symbol: candidate.symbol, reason: `${selectionPrefix}Rank ${candidate.rank}: ${candidate.reason}`, price: round(entryPrice), quantity: round(quantity, 4), amount: round(allocation) };
         events.push(event);
         tradeEvents.push(event);
+
+        const stock = stocks.find((item) => item.security_id === candidate.security_id);
+        const rowIndex = stock?.byDate.get(date);
+        const row = stock && rowIndex !== undefined ? stock.prices[rowIndex] : undefined;
+        if (isDryVolumeMode(filters.strategyMode) && candidate.stop_loss !== undefined && row !== undefined && row.low <= candidate.stop_loss) {
+          const position = positions.get(candidate.security_id);
+          if (position) {
+            const exitPrice = candidate.stop_loss;
+            const exitAmount = exitPrice * position.quantity;
+            const pnl = exitAmount - position.entry_price * position.quantity;
+            cash += exitAmount;
+            positions.delete(candidate.security_id);
+            ignoredSignals.add(signalKey(candidate, date));
+            const stopEvent: BasketEvent = {
+              date,
+              type: "SELL",
+              symbol: position.symbol,
+              reason: "Same-day stop loss hit after stop-entry fill",
+              price: round(exitPrice),
+              quantity: round(position.quantity, 4),
+              amount: round(exitAmount),
+              pnl: round(pnl),
+            };
+            events.push(stopEvent);
+            tradeEvents.push(stopEvent);
+            closedReturns.push(pct(exitPrice, position.entry_price));
+          }
+        }
       }
     }
 
