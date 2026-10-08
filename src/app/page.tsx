@@ -302,11 +302,24 @@ const isActiveDataJob = (job?: DataDownloadJob | null) => {
 const intradayCache = new Map<string, { rows: DailyChartPoint[]; fetchedAt: number }>();
 const intradayRequests = new Map<string, Promise<DailyChartPoint[]>>();
 const intradayCacheMs = 60_000;
+const thirtyInThirtyLiveFeedLimit = 180;
 const currentWindow = () => {
   const month = new Date().getMonth();
   const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return { current: `${names[month]}-${names[(month + 2) % 12]}`, next: `${names[(month + 1) % 12]}-${names[(month + 3) % 12]}` };
 };
+
+async function readJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const text = await response.text().catch(() => "");
+    const title = text.match(/<title>(.*?)<\/title>/i)?.[1]?.trim();
+    throw new Error(`${fallbackMessage}: HTTP ${response.status}${title ? ` - ${title}` : ""}`);
+  }
+  const body = await response.json();
+  if (!response.ok) throw new Error(body?.error ?? `${fallbackMessage}: HTTP ${response.status}`);
+  return body as T;
+}
 
 async function fetchThirtyUpIntraday(securityId: string, force = false, endpoint = "thirty-up-screener") {
   const cached = intradayCache.get(securityId);
@@ -315,8 +328,7 @@ async function fetchThirtyUpIntraday(securityId: string, force = false, endpoint
   if (!force && existing) return existing;
   const request = fetch(`/api/${endpoint}/${securityId}/intraday?interval=60&days=30`)
     .then(async (response) => {
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Intraday data unavailable");
+      const body = await readJsonResponse<{ candles: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }> }>(response, "Intraday data unavailable");
       return (body.candles as Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }>).map((candle) => ({
         trade_date: candle.date,
         open: candle.open,
@@ -2104,8 +2116,9 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       setLiveFeedStatus("idle");
       return;
     }
-    setLiveFeedStatus("connecting", "Starting 30 in 30 live feed");
-    const ids = rows.map((row) => row.security_id).join(",");
+    const liveRows = rows.slice(0, thirtyInThirtyLiveFeedLimit);
+    setLiveFeedStatus("connecting", `Starting ${liveRows.length} of ${rows.length} 30 in 30 live feed`);
+    const ids = liveRows.map((row) => row.security_id).join(",");
     const source = new EventSource(`/api/thirty-in-thirty-screener/live?ids=${encodeURIComponent(ids)}`);
     source.onopen = () => setLiveFeedStatus("connecting", "Waiting for Dhan websocket status");
     source.addEventListener("status", (event) => {
@@ -2635,7 +2648,7 @@ export default function Home() {
   async function runEarlyBreakoutScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/early-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: earlyBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setEarlyBreakout(d); setEarlyBreakoutUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Early Breakout screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runHourlyBreakoutScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/hourly-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: hourlyBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setHourlyBreakout(d); setHourlyBreakoutUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Hourly Breakout screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runMomentumContractionScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/momentum-contraction-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: momentumContractionFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setMomentumContraction(d); setMomentumContractionUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Momentum Tight scanner unavailable"); } finally { if (!options.silent) setLoading(false); } }
-  async function runThirtyInThirtyScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/thirty-in-thirty-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: thirtyInThirtyFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setThirtyInThirty(d); setThirtyInThirtyUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "30 in 30 screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
+  async function runThirtyInThirtyScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/thirty-in-thirty-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: thirtyInThirtyFilters }) }); const d = await readJsonResponse<ThirtyInThirtyResponse>(r, "30 in 30 screener unavailable"); setThirtyInThirty(d); setThirtyInThirtyUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "30 in 30 screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runDryVolumeBreakoutScreener() { setLoading(true); try { const r = await fetch("/api/dry-volume-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: dryVolumeBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setDryVolumeBreakout(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Dry Breakout screener unavailable"); } finally { setLoading(false); } }
   async function runBasketBacktest() { setLoading(true); try { const r = await fetch("/api/basket-backtest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: basketBacktestFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setBasketBacktest(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Basket backtest unavailable"); } finally { setLoading(false); } }
   async function loadPortfolio() { setLoading(true); setError(""); try { const r = await fetch("/api/portfolio"); const d = await r.json(); if (!r.ok) throw new Error(d.error); setPortfolio(d); if (d.tradeManagement?.settings) setTradingSettings(d.tradeManagement.settings); } catch (e) { setError(e instanceof Error ? e.message : "Portfolio unavailable"); } finally { setLoading(false); } }
