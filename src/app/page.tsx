@@ -302,7 +302,7 @@ const isActiveDataJob = (job?: DataDownloadJob | null) => {
 const intradayCache = new Map<string, { rows: DailyChartPoint[]; fetchedAt: number }>();
 const intradayRequests = new Map<string, Promise<DailyChartPoint[]>>();
 const intradayCacheMs = 60_000;
-const thirtyInThirtyLiveFeedLimit = 180;
+const thirtyInThirtyLiveFeedLimit = 80;
 const currentWindow = () => {
   const month = new Date().getMonth();
   const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -319,6 +319,17 @@ async function readJsonResponse<T>(response: Response, fallbackMessage: string):
   const body = await response.json();
   if (!response.ok) throw new Error(body?.error ?? `${fallbackMessage}: HTTP ${response.status}`);
   return body as T;
+}
+
+function parseServerSentEvents(chunk: string, onEvent: (event: string, data: string) => void) {
+  const lines = chunk.split(/\r?\n/);
+  let event = "message";
+  const data: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+  }
+  if (data.length) onEvent(event, data.join("\n"));
 }
 
 async function fetchThirtyUpIntraday(securityId: string, force = false, endpoint = "thirty-up-screener") {
@@ -2116,33 +2127,55 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       setLiveFeedStatus("idle");
       return;
     }
-    const liveRows = rows.slice(0, thirtyInThirtyLiveFeedLimit);
-    setLiveFeedStatus("connecting", `Starting ${liveRows.length} of ${rows.length} 30 in 30 live feed`);
-    const ids = liveRows.map((row) => row.security_id).join(",");
-    const source = new EventSource(`/api/thirty-in-thirty-screener/live?ids=${encodeURIComponent(ids)}`);
-    source.onopen = () => setLiveFeedStatus("connecting", "Waiting for Dhan websocket status");
-    source.addEventListener("status", (event) => {
-      const status = JSON.parse((event as MessageEvent).data) as LiveFeedStatusUpdate;
-      if (status.state === "idle" || status.state === "connecting" || status.state === "live" || status.state === "error") setLiveFeedStatus(status.state, status.message);
-    });
-    source.addEventListener("snapshot", (event) => {
-      const ticks = JSON.parse((event as MessageEvent).data) as LiveTick[];
-      if (ticks.length) {
-        setLiveTicks((current) => ({ ...current, ...Object.fromEntries(ticks.map((tick) => [tick.securityId, tick])) }));
+    const liveRows = rows.slice(0, Math.min(tileLimit, thirtyInThirtyLiveFeedLimit));
+    const ids = liveRows.map((row) => row.security_id);
+    const controller = new AbortController();
+    setLiveFeedStatus("connecting", `Starting ${ids.length} of ${rows.length} 30 in 30 live feed`);
+
+    const handleEvent = (event: string, data: string) => {
+      if (event === "status") {
+        const status = JSON.parse(data) as LiveFeedStatusUpdate;
+        if (status.state === "idle" || status.state === "connecting" || status.state === "live" || status.state === "error") setLiveFeedStatus(status.state, status.message);
+      } else if (event === "snapshot") {
+        const ticks = JSON.parse(data) as LiveTick[];
+        if (ticks.length) {
+          setLiveTicks((current) => ({ ...current, ...Object.fromEntries(ticks.map((tick) => [tick.securityId, tick])) }));
+          setLiveFeedStatus("live", "30 in 30 live prices streaming");
+        }
+      } else if (event === "tick") {
+        const tick = JSON.parse(data) as LiveTick;
+        setLiveTicks((current) => ({ ...current, [tick.securityId]: tick }));
         setLiveFeedStatus("live", "30 in 30 live prices streaming");
       }
+    };
+
+    void fetch("/api/thirty-in-thirty-screener/live", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok || !response.body) throw new Error(`30 in 30 live feed failed: HTTP ${response.status}`);
+      setLiveFeedStatus("connecting", "Waiting for Dhan websocket status");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (!controller.signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split(/\n\n|\r\n\r\n/);
+        buffer = events.pop() ?? "";
+        events.forEach((chunk) => parseServerSentEvents(chunk, handleEvent));
+      }
+    }).catch((error) => {
+      if (!controller.signal.aborted) setLiveFeedStatus("error", error instanceof Error ? error.message : "30 in 30 live feed disconnected");
     });
-    source.addEventListener("tick", (event) => {
-      const tick = JSON.parse((event as MessageEvent).data) as LiveTick;
-      setLiveTicks((current) => ({ ...current, [tick.securityId]: tick }));
-      setLiveFeedStatus("live", "30 in 30 live prices streaming");
-    });
-    source.onerror = () => setLiveFeedStatus("error", "30 in 30 live feed disconnected");
     return () => {
-      source.close();
+      controller.abort();
       setLiveFeedStatus("idle");
     };
-  }, [data, setLiveFeedStatus]);
+  }, [data, setLiveFeedStatus, tileLimit]);
   useEffect(() => {
     const rows = liveRows.slice(0, 180).filter((row) => !(row.security_id in hourlyStops));
     if (!rows.length) return;

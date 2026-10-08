@@ -15,3 +15,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Live feed unavailable" }, { status: 500 });
   }
 }
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const ids = Array.isArray(body.ids) ? body.ids.map((id: unknown) => String(id).trim()).filter(Boolean) : [];
+    if (!ids.length) return NextResponse.json({ error: "No security IDs provided." }, { status: 400 });
+
+    return createDhanLiveStream(request, ids);
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Live feed unavailable" }, { status: 500 });
+  }
+}
