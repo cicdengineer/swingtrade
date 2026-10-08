@@ -2140,7 +2140,6 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         const ticks = JSON.parse(data) as LiveTick[];
         if (ticks.length) {
           setLiveTicks((current) => ({ ...current, ...Object.fromEntries(ticks.map((tick) => [tick.securityId, tick])) }));
-          setLiveFeedStatus("live", "30 in 30 live prices streaming");
         }
       } else if (event === "tick") {
         const tick = JSON.parse(data) as LiveTick;

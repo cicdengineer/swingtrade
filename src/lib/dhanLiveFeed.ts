@@ -40,6 +40,7 @@ class DhanLiveFeed {
   private retryDelayMs = 1500;
   private currentErrorIsFatal = false;
   private ticks = new Map<string, LiveTick>();
+  private previousCloses = new Map<string, number>();
   private listeners = new Set<Listener>();
   private statusListeners = new Set<StatusListener>();
   private status: LiveFeedStatus = { state: "idle", message: "Live feed idle", updatedAt: Date.now() };
@@ -183,8 +184,10 @@ class DhanLiveFeed {
     if (responseCode === 6) {
       const prevClose = view.getFloat32(8, true);
       if (!Number.isFinite(prevClose) || prevClose <= 0) return;
+      this.previousCloses.set(securityId, prevClose);
       const current = this.ticks.get(securityId);
-      const tick = { ...current, securityId, ltp: current?.ltp ?? prevClose, prevClose, lastTradeTime: current?.lastTradeTime, receivedAt: Date.now() };
+      if (!current?.ltp) return;
+      const tick = { ...current, securityId, ltp: current.ltp, prevClose, lastTradeTime: current.lastTradeTime, receivedAt: Date.now() };
       this.ticks.set(securityId, tick);
       this.listeners.forEach((listener) => listener(tick));
       return;
@@ -221,7 +224,7 @@ class DhanLiveFeed {
     if (!Number.isFinite(ltp) || ltp <= 0) return;
 
     const current = this.ticks.get(securityId);
-    const tick = { ...current, securityId, ltp, prevClose: current?.prevClose, lastTradeTime, receivedAt: Date.now() };
+    const tick = { ...current, securityId, ltp, prevClose: current?.prevClose ?? this.previousCloses.get(securityId), lastTradeTime, receivedAt: Date.now() };
     this.ticks.set(securityId, tick);
     this.listeners.forEach((listener) => listener(tick));
   }
