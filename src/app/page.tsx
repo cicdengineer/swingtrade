@@ -302,7 +302,7 @@ const isActiveDataJob = (job?: DataDownloadJob | null) => {
 const intradayCache = new Map<string, { rows: DailyChartPoint[]; fetchedAt: number }>();
 const intradayRequests = new Map<string, Promise<DailyChartPoint[]>>();
 const intradayCacheMs = 60_000;
-const thirtyInThirtyLiveFeedLimit = 80;
+const thirtyInThirtyLiveFeedLimit = 500;
 const currentWindow = () => {
   const month = new Date().getMonth();
   const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -517,6 +517,7 @@ const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): Th
   };
 };
 const todayReturnPct = (row: ThirtyInThirtyRow, tick?: LiveTick) => {
+  if (!tick && row.current_date !== liveTradeDate()) return undefined;
   const previousClose = tick?.prevClose ?? previousDailyRow(row)?.close;
   return previousClose ? pctChange(previousClose, row.current_close) : undefined;
 };
@@ -2109,7 +2110,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings }: { selecte
 function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings }: { data: ThirtyInThirtyResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: (row: ThirtyInThirtyRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null }) {
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
-  const [tileLimit, setTileLimit] = useState(80);
+  const [tileLimit, setTileLimit] = useState(9999);
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
   const [hourlyStops, setHourlyStops] = useState<Record<string, number | undefined>>({});
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
@@ -2223,8 +2224,45 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
   }, [pinnedRows, sortedRows, tileLimit]);
+  const visibleSecurityKey = useMemo(() => visibleRows.map((row) => row.security_id).join(","), [visibleRows]);
   const togglePinned = (securityId: string) => setPinnedIds((current) => current.includes(securityId) ? current.filter((id) => id !== securityId) : [...current, securityId]);
   const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "hourly_sl_pct" ? "asc" : "desc" });
+
+  useEffect(() => {
+    const rows = visibleRows.filter((row) => row.current_date !== liveTradeDate() || !liveTicks[row.security_id]);
+    if (!rows.length) return;
+    let cancelled = false;
+    const hydrateRow = async (row: ThirtyInThirtyRow) => {
+      try {
+        const candles = await fetchThirtyUpIntraday(row.security_id, false, "thirty-in-thirty-screener");
+        if (cancelled) return;
+        const liveDaily = aggregateIntradayDaily(candles);
+        if (!liveDaily) return;
+        const previousClose = previousDailyRow(row)?.close;
+        setLiveTicks((current) => current[row.security_id]?.receivedAt && current[row.security_id].receivedAt > Date.now() - 5000 ? current : {
+          ...current,
+          [row.security_id]: {
+            securityId: row.security_id,
+            ltp: liveDaily.close,
+            prevClose: previousClose,
+            dayOpen: liveDaily.open,
+            dayHigh: liveDaily.high,
+            dayLow: liveDaily.low,
+            volume: liveDaily.volume,
+            receivedAt: Date.now(),
+          },
+        });
+      } catch {}
+    };
+    const run = async () => {
+      for (let index = 0; index < rows.length; index += 12) {
+        if (cancelled) return;
+        await Promise.all(rows.slice(index, index + 12).map(hydrateRow));
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, [visibleSecurityKey]);
 
   return <section className="research-page thirty-in-thirty-page">
     <div className="thirty-hero thirty-in-thirty-hero">
