@@ -1337,7 +1337,6 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
     });
     source.addEventListener("error", () => {
       setLiveFeedStatus("error", "Portfolio live feed disconnected");
-      source.close();
     });
     return () => {
       source.close();
@@ -1429,7 +1428,6 @@ function DryVolumeBreakoutScreenerView({ data, filters, loading, onRun, onTradeC
     });
     source.onerror = () => {
       setLiveFeedStatus("error", "Live feed stream disconnected");
-      source.close();
     };
     return () => {
       source.close();
@@ -1527,7 +1525,6 @@ function ThirtyUpScreenerViewEnhanced({ data, filters, setFilters, loading, onRu
     });
     source.onerror = () => {
       setLiveFeedStatus("error", "Live feed stream disconnected");
-      source.close();
     };
     return () => {
       source.close();
@@ -1654,7 +1651,6 @@ function ThirtyUpScreenerViewRevamped({ data, filters, setFilters, loading, onRu
     });
     source.onerror = () => {
       setLiveFeedStatus("error", "Live feed stream disconnected");
-      source.close();
     };
     return () => {
       source.close();
@@ -1738,7 +1734,7 @@ function ThirtyUpScreenerViewSimple({ data, filters, setFilters, loading, onRun,
     source.addEventListener("status", (event) => { const status = JSON.parse((event as MessageEvent).data) as LiveFeedStatusUpdate; if (status.state === "idle" || status.state === "connecting" || status.state === "live" || status.state === "error") setLiveFeedStatus(status.state, status.message); });
     source.addEventListener("snapshot", (event) => { const ticks = JSON.parse((event as MessageEvent).data) as LiveTick[]; setLiveTicks((current) => ({ ...current, ...Object.fromEntries(ticks.map((tick) => [tick.securityId, tick])) })); });
     source.addEventListener("tick", (event) => { setLiveFeedStatus("live", "Receiving Dhan ticks"); const tick = JSON.parse((event as MessageEvent).data) as LiveTick; setLiveTicks((current) => ({ ...current, [tick.securityId]: tick })); });
-    source.onerror = () => { setLiveFeedStatus("error", "Live feed stream disconnected"); source.close(); };
+    source.onerror = () => { setLiveFeedStatus("error", "Live feed stream disconnected"); };
     return () => { source.close(); setLiveFeedStatus("idle"); };
   }, [data, setLiveFeedStatus]);
   useEffect(() => {
@@ -1839,7 +1835,6 @@ function EarlyBreakoutScreenerView({ data, filters, setFilters, loading, onRun, 
     });
     source.onerror = () => {
       setLiveFeedStatus("error", "Live feed stream disconnected");
-      source.close();
     };
     return () => {
       source.close();
@@ -1953,7 +1948,6 @@ function MomentumContractionScreenerView({ data, filters, setFilters, loading, o
     });
     source.onerror = () => {
       setLiveFeedStatus("error", "Live feed stream disconnected");
-      source.close();
     };
     return () => {
       source.close();
@@ -2455,7 +2449,6 @@ function HourlyBreakoutScreenerView({ data, filters, setFilters, loading, onRun,
     });
     source.addEventListener("error", () => {
       setLiveFeedStatus("error", "Live feed stream disconnected");
-      source.close();
     });
     return () => {
       source.close();

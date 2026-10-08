@@ -36,6 +36,9 @@ class DhanLiveFeed {
   private connecting = false;
   private subscribed = new Set<string>();
   private pending = new Set<string>();
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryDelayMs = 1500;
+  private currentErrorIsFatal = false;
   private ticks = new Map<string, LiveTick>();
   private listeners = new Set<Listener>();
   private statusListeners = new Set<StatusListener>();
@@ -70,15 +73,28 @@ class DhanLiveFeed {
   private connect() {
     if (this.connected || this.connecting) return;
     if (!hasDhanCredentials()) throw new Error("Dhan credentials are not configured.");
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     const token = encodeURIComponent(process.env.DHAN_ACCESS_TOKEN!);
     const clientId = encodeURIComponent(process.env.DHAN_CLIENT_ID!);
     this.connecting = true;
+    this.currentErrorIsFatal = false;
     this.setStatus("connecting", "Connecting to Dhan websocket");
     this.ws = new WebSocket(`${feedUrl}&token=${token}&clientId=${clientId}`);
     this.ws.binaryType = "arraybuffer";
+    const connectTimeout = setTimeout(() => {
+      if (this.connecting && !this.connected) {
+        this.setStatus("error", "Dhan websocket connection timed out");
+        this.ws?.close();
+      }
+    }, 10000);
     this.ws.addEventListener("open", () => {
+      clearTimeout(connectTimeout);
       this.connected = true;
       this.connecting = false;
+      this.retryDelayMs = 1500;
       this.setStatus("live", "Dhan websocket live");
       this.flushSubscriptions();
     });
@@ -86,21 +102,36 @@ class DhanLiveFeed {
       void this.handleMessage(event.data);
     });
     this.ws.addEventListener("close", (event) => {
+      clearTimeout(connectTimeout);
+      const idsToRestore = new Set([...this.subscribed, ...this.pending]);
       this.connected = false;
       this.connecting = false;
       this.ws = null;
       this.subscribed.clear();
+      this.pending = idsToRestore;
       if (this.status.state !== "error") {
         const reason = event.reason ? `Dhan websocket closed: ${event.reason}` : `Dhan websocket closed (${event.code})`;
         this.setStatus(this.pending.size ? "connecting" : "error", reason);
       }
-      if (this.pending.size) setTimeout(() => this.connect(), 1500);
+      if (this.pending.size && !this.currentErrorIsFatal) this.scheduleReconnect();
     });
     this.ws.addEventListener("error", (event) => {
       this.connecting = false;
       const message = "message" in event && typeof event.message === "string" && event.message ? event.message : "Dhan websocket transport error";
       this.setStatus("error", message);
+      this.ws?.close();
     });
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer || this.connected || this.connecting) return;
+    const delay = this.retryDelayMs;
+    this.retryDelayMs = Math.min(this.retryDelayMs * 2, 30000);
+    this.setStatus("connecting", `Reconnecting to Dhan websocket in ${Math.round(delay / 1000)}s`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   private setStatus(state: LiveFeedStatus["state"], message: string) {
@@ -137,6 +168,7 @@ class DhanLiveFeed {
     if (responseCode === 50) {
       if (view.byteLength >= 10) {
         const errorCode = view.getUint16(8, true);
+        this.currentErrorIsFatal = errorCode >= 806 && errorCode <= 809;
         this.setStatus("error", `${disconnectMessages[errorCode] ?? "Dhan server disconnected live feed"} (${errorCode})`);
       } else {
         this.setStatus("error", "Dhan server disconnected live feed");
