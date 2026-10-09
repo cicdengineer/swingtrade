@@ -10,6 +10,7 @@
     "test:seasonality": "node scripts/seasonality-engine-tests.mjs",
     "test:swing": "node scripts/swing-screener-tests.mjs",
     "test:thirty-up": "node scripts/thirty-up-screener-tests.mjs",
+    "test:ema-reversal": "node scripts/ema-reversal-pullback-tests.mjs",
     "test:trade-management": "node scripts/trade-management-tests.mjs",
     "test:market-data": "node scripts/market-data-refresh-tests.mjs"
   },

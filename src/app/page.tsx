@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import type { SeasonalObservationRecord, SeasonalStatisticsRecord, Security, Summary, UniverseName } from "@/lib/types";
 
-type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "Dry Breakout" | "Portfolio" | "Backtest" | "Settings";
+type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "50 EMA Reversal" | "Dry Breakout" | "Portfolio" | "Backtest" | "Settings";
 type DataSummary = { universe_name: UniverseName; total_constituents: number; mapped: number; stocks_downloaded: number; stocks_pending: number; stocks_failed: number; earliest_data_date: string | null; latest_data_date: string | null; total_ohlcv_rows: number; last_refresh: string | null; historical_sessions: number; latest_official?: number; latest_provisional?: number };
 type DataDownloadJob = { id?: string; status: string; total: number; completed: number; remaining: number; successful: number; failed: number; current_stock?: string; current_status?: string; progress: number; started_at?: string; finished_at?: string; last_successful_update?: string; data_through_date?: string; notice?: string; pending_eod_count?: number; trading_date?: string; historical_candles_backfilled?: number; official_candles_updated?: number; provisional_candles_created?: number; provisional_candles_reconciled?: number; already_up_to_date?: number; errors: string[] };
 type DataStatus = { dhan_connected: boolean; dhan_profile?: { ok: boolean; dhanClientId?: string; tokenValidity?: string; activeSegment?: string; dataPlan?: string; dataValidity?: string; error?: string }; database_size_bytes: number; price_adjustment_status: string; latest_market_data: null | { trading_date: string; official: number; provisional: number; data_status: string }; latest_job: null | DataDownloadJob; summaries: DataSummary[]; failures: { symbol: string; security_id: string; error_message: string; attempt_count: number; last_attempt: string }[]; quality_issues: unknown[]; universe_sources: Record<string, { label: string; url: string }> };
@@ -70,6 +70,10 @@ type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: num
 type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "hourly_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
+type EmaReversalFilters = { universe: "ALL" | UniverseName; emaPeriod: number; downtrendLookback: number; minBelowEmaPct: number; minHistoricalDeclinePct: number; emaSlopeLookback: number; breakoutVolumeMultiplier: number; minPostBreakoutAdvancePct: number; minPullbackPct: number; maxPullbackPct: number; minPullbackDays: number; maxPullbackDays: number; maxEmaDownsideTolerancePct: number; minBreakoutAge: number; maxBreakoutAge: number; requireVolumeContraction: boolean; firstPullbackOnly: boolean; allowSidewaysConsolidation: boolean; allowReacceleration: boolean; maxCompletedPullbacks: number; minSetupScore: number; showAll: boolean };
+type EmaReversalSortKey = "score" | "symbol" | "stage" | "breakout_recent" | "advance" | "pullback" | "ema_dist" | "volume_dryness" | "setup_recent";
+type EmaReversalRow = { status: "FIRST_PULLBACK" | "TIGHT_CONSOLIDATION" | "REACCELERATION" | "INVALIDATED" | "NO_SETUP" | "INSUFFICIENT_DATA"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema50: number; distance_from_ema_pct: number; breakout_date?: string; breakout_close?: number; breakout_volume_ratio?: number; confirmation_date?: string; confirmation_volume_ratio?: number; post_breakout_high_date?: string; post_breakout_high?: number; advance_pct?: number; pullback_start_date?: string; pullback_pct?: number; pullback_volume_ratio?: number; days_in_pullback?: number; completed_pullback_count: number; setup_score: number; score_breakdown: Record<string, number>; downtrend_below_ema_pct?: number; historical_decline_pct?: number; ema50_slope_pct?: number; average_volume_5?: number; average_volume_20?: number; setup_type?: "Pullback" | "Sideways Consolidation" | "Reacceleration"; reason: string; recent: DailyChartPoint[] };
+type EmaReversalResponse = { filters: EmaReversalFilters; evaluated: number; insufficient: number; qualified: number; statusSummary: Record<string, number>; snapshotDate: string | null; results: EmaReversalRow[]; generatedAt: string };
 type DryVolumeBreakoutFilters = { universe: "ALL" | UniverseName; minMovePct: number; moveWindowDays: number; impulseLookbackDays: number; minImpulseVolumeRatio: number; minPullbackDays: number; maxPullbackDays: number; minPullbackPct: number; maxPullbackPct: number; dryVolumeRatio: number; dryVolumeLookbackDays: number; breakoutWithinDays: number; stopBufferPct: number; maxDistanceToEntryPct: number; minAverageDailyTradedValue: number; showAll: boolean };
 type DryVolumeBreakoutSortKey = "status" | "score" | "symbol" | "universe" | "ltp" | "entry" | "distance" | "sl_pct" | "dry_volume" | "days" | "impulse" | "pullback" | "ema10";
 type DryVolumeBreakoutRow = { status: "WAIT" | "ENTRY"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; entry_price?: number; stop_loss?: number; sl_pct?: number; ltp_to_entry_pct?: number; dry_candle_date?: string; dry_candle_high?: number; dry_candle_low?: number; dry_candle_volume_ratio?: number; days_since_dry_candle?: number; impulse_return_pct?: number; impulse_volume_ratio?: number; pullback_pct?: number; pullback_days?: number; pullback_volume_ratio?: number; ema10?: number; distance_from_10ema_pct?: number; score: number; rank: number; averageDailyTradedValue: number; reason: string; recent: Array<DailyChartPoint & { ema10?: number; volume_ratio?: number }> };
@@ -108,6 +112,7 @@ const nav: { name: View; icon: typeof Activity }[] = [
   { name: "Stock Search", icon: Search },
   { name: "Data Status", icon: Database },
   { name: "30 in 30", icon: TrendingUp },
+  { name: "50 EMA Reversal", icon: Activity },
   { name: "Dry Breakout", icon: ShieldCheck },
   { name: "Backtest", icon: BarChart3 },
   { name: "Settings", icon: Settings },
@@ -218,6 +223,30 @@ const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   decliningVolumeOnly: false,
   dryVolumeOnly: false,
   redCandleOnly: false,
+  showAll: false,
+};
+const defaultEmaReversalFilters: EmaReversalFilters = {
+  universe: "ALL",
+  emaPeriod: 50,
+  downtrendLookback: 90,
+  minBelowEmaPct: 70,
+  minHistoricalDeclinePct: 20,
+  emaSlopeLookback: 20,
+  breakoutVolumeMultiplier: 1.5,
+  minPostBreakoutAdvancePct: 10,
+  minPullbackPct: 3,
+  maxPullbackPct: 12,
+  minPullbackDays: 3,
+  maxPullbackDays: 25,
+  maxEmaDownsideTolerancePct: 2,
+  minBreakoutAge: 10,
+  maxBreakoutAge: 100,
+  requireVolumeContraction: false,
+  firstPullbackOnly: true,
+  allowSidewaysConsolidation: true,
+  allowReacceleration: false,
+  maxCompletedPullbacks: 0,
+  minSetupScore: 0,
   showAll: false,
 };
 const defaultDryVolumeBreakoutFilters: DryVolumeBreakoutFilters = {
@@ -2338,6 +2367,77 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   </section>;
 }
 
+function EmaReversalScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, updatedAt }: { data: EmaReversalResponse | null; filters: EmaReversalFilters; setFilters: (filters: EmaReversalFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: EmaReversalRow | null; setSelected: (row: EmaReversalRow | null) => void; updatedAt?: string | null }) {
+  const [sort, setSort] = useState<{ key: EmaReversalSortKey; direction: "asc" | "desc" }>({ key: "score", direction: "desc" });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const setNumber = (key: keyof EmaReversalFilters, value: number) => setFilters({ ...filters, [key]: value });
+  const sortBy = (key: EmaReversalSortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "pullback" || key === "ema_dist" || key === "volume_dryness" ? "asc" : "desc" });
+  const sortedRows = useMemo(() => {
+    const valueFor = (row: EmaReversalRow): string | number => {
+      if (sort.key === "symbol") return row.symbol;
+      if (sort.key === "stage") return row.status;
+      if (sort.key === "breakout_recent") return row.breakout_date ?? "";
+      if (sort.key === "advance") return row.advance_pct ?? -Infinity;
+      if (sort.key === "pullback") return row.pullback_pct ?? Infinity;
+      if (sort.key === "ema_dist") return Math.abs(row.distance_from_ema_pct);
+      if (sort.key === "volume_dryness") return row.pullback_volume_ratio ?? Infinity;
+      if (sort.key === "setup_recent") return row.pullback_start_date ?? row.confirmation_date ?? "";
+      return row.setup_score;
+    };
+    return [...(data?.results ?? [])].sort((a, b) => {
+      const av = valueFor(a);
+      const bv = valueFor(b);
+      const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+      return sort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [data, sort]);
+
+  return <section className="research-page thirty-up-page momentum-page">
+    <div className="notice"><AlertTriangle size={18}/><span>Uses completed daily candles from the local database. Provisional/current candles are excluded from the EOD setup scan.</span></div>
+    <div className="thirty-hero momentum-hero">
+      <div>
+        <p className="eyebrow">50 EMA Reversal Pullback</p>
+        <h2>Downtrend reversal, first pullback</h2>
+        <small>Finds stocks that reclaimed the 50 EMA on volume, advanced, and are now in their first pullback or tight consolidation.</small>
+      </div>
+      <div className="thirty-hero-actions">
+        <div className="refresh-status"><span className={data ? "ready" : "pending"} /><b>{data?.snapshotDate ?? "Last run"}</b><small>{formatTime(updatedAt)}</small></div>
+        <button className="primary" onClick={() => onRun()} disabled={loading}><Activity size={15}/>Run Scanner</button>
+        <button className="secondary compact" onClick={() => setSettingsOpen(true)}><Settings size={14}/>Settings</button>
+        <button className="secondary compact" onClick={onReset}>Reset</button>
+      </div>
+    </div>
+    <div className="momentum-filter-bar thirty-in-thirty-filters">
+      <label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as EmaReversalFilters["universe"] })}><option value="ALL">All</option><option value="MIDCAP">Nifty Midcap</option><option value="SMALLCAP">Nifty Smallcap</option></select></label>
+      <label>Downtrend<input className="plain-input" type="number" value={filters.downtrendLookback} onChange={(e) => setNumber("downtrendLookback", Number(e.target.value))}/></label>
+      <label>Breakout Age<input className="plain-input" type="text" value={`${filters.minBreakoutAge}-${filters.maxBreakoutAge}`} readOnly/></label>
+      <label>Advance %<input className="plain-input" type="number" value={filters.minPostBreakoutAdvancePct} onChange={(e) => setNumber("minPostBreakoutAdvancePct", Number(e.target.value))}/></label>
+      <label>Pullback %<input className="plain-input" type="text" value={`${filters.minPullbackPct}-${filters.maxPullbackPct}`} readOnly/></label>
+      <label>Min Score<input className="plain-input" type="number" value={filters.minSetupScore} onChange={(e) => setNumber("minSetupScore", Number(e.target.value))}/></label>
+      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as EmaReversalSortKey)}><option value="score">Setup Score</option><option value="breakout_recent">Most Recent Breakout</option><option value="pullback">Smallest Pullback</option><option value="advance">Largest Advance</option><option value="ema_dist">Closest To EMA50</option><option value="volume_dryness">Lowest Pullback Volume</option><option value="setup_recent">Most Recent Setup</option><option value="symbol">Symbol</option><option value="stage">Stage</option></select></label>
+      <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
+    </div>
+    <div className="thirty-in-thirty-switches">
+      <label><input type="checkbox" checked={filters.requireVolumeContraction} onChange={(e) => setFilters({ ...filters, requireVolumeContraction: e.target.checked })}/><span>Volume contraction</span></label>
+      <label><input type="checkbox" checked={filters.firstPullbackOnly} onChange={(e) => setFilters({ ...filters, firstPullbackOnly: e.target.checked })}/><span>First pullback only</span></label>
+      <label><input type="checkbox" checked={filters.allowSidewaysConsolidation} onChange={(e) => setFilters({ ...filters, allowSidewaysConsolidation: e.target.checked })}/><span>Sideways</span></label>
+      <label><input type="checkbox" checked={filters.allowReacceleration} onChange={(e) => setFilters({ ...filters, allowReacceleration: e.target.checked })}/><span>Reacceleration</span></label>
+      <label><input type="checkbox" checked={filters.showAll} onChange={(e) => setFilters({ ...filters, showAll: e.target.checked })}/><span>Show all</span></label>
+    </div>
+    {data && <>
+      <div className="thirty-scoreboard">
+        <div><span>Evaluated</span><b>{data.evaluated}</b></div>
+        <div><span>Setups</span><b>{data.qualified}</b></div>
+        <div><span>Insufficient</span><b>{data.insufficient}</b></div>
+        <div><span>Shown</span><b>{sortedRows.length}</b></div>
+      </div>
+      <section className="panel thirty-panel">{sortedRows.length ? <div className="table-wrap"><table className="thirty-table"><thead><tr><th><SortHead label="Stage" column="stage" sort={sort} onSort={sortBy}/></th><th><SortHead label="Stock" column="symbol" sort={sort} onSort={sortBy}/></th><th>Chart</th><th><SortHead label="Breakout" column="breakout_recent" sort={sort} onSort={sortBy}/></th><th>Breakout Vol</th><th><SortHead label="Advance" column="advance" sort={sort} onSort={sortBy}/></th><th><SortHead label="Pullback" column="pullback" sort={sort} onSort={sortBy}/></th><th><SortHead label="EMA50 Dist" column="ema_dist" sort={sort} onSort={sortBy}/></th><th><SortHead label="PB Vol" column="volume_dryness" sort={sort} onSort={sortBy}/></th><th>Days</th><th><SortHead label="Score" column="score" sort={sort} onSort={sortBy}/></th></tr></thead><tbody>{sortedRows.map((row) => <tr key={row.security_id} className="click-row" onClick={() => setSelected(row)}><td><span className={row.qualifies ? "eligible" : "count"}>{row.setup_type ?? row.status}</span></td><td className="window">{row.symbol}<small>{row.universe_name}</small></td><td><SetupSparkline row={row} onOpen={() => setSelected(row)} /></td><td>{row.breakout_date ?? "—"}</td><td>{row.confirmation_volume_ratio === undefined ? "—" : `${row.confirmation_volume_ratio.toFixed(1)}x`}</td><td className={(row.advance_pct ?? 0) >= 0 ? "positive" : "negative"}>{row.advance_pct === undefined ? "—" : pct(row.advance_pct)}</td><td>{row.pullback_pct === undefined ? "—" : pct(-row.pullback_pct)}</td><td className={row.distance_from_ema_pct >= 0 ? "positive" : "negative"}>{pct(row.distance_from_ema_pct)}</td><td>{row.pullback_volume_ratio === undefined ? "—" : `${row.pullback_volume_ratio.toFixed(2)}x`}</td><td>{row.days_in_pullback ?? "—"}</td><td><b>{row.setup_score}</b></td></tr>)}</tbody></table></div> : <p className="panel-empty">No stocks currently match the 50 EMA reversal pullback criteria.</p>}</section>
+    </>}
+    {settingsOpen && <div className="drawer"><div className="drawer-card narrow-drawer"><button className="icon-button drawer-close" onClick={() => setSettingsOpen(false)}>×</button><p className="eyebrow">Scanner Settings</p><h2>50 EMA reversal thresholds</h2><div className="settings-grid compact-form"><label>EMA Period<input className="plain-input" type="number" value={filters.emaPeriod} onChange={(e) => setNumber("emaPeriod", Number(e.target.value))}/></label><label>Below EMA %<input className="plain-input" type="number" value={filters.minBelowEmaPct} onChange={(e) => setNumber("minBelowEmaPct", Number(e.target.value))}/></label><label>Historical Decline %<input className="plain-input" type="number" value={filters.minHistoricalDeclinePct} onChange={(e) => setNumber("minHistoricalDeclinePct", Number(e.target.value))}/></label><label>EMA Slope Lookback<input className="plain-input" type="number" value={filters.emaSlopeLookback} onChange={(e) => setNumber("emaSlopeLookback", Number(e.target.value))}/></label><label>Breakout Volume<input className="plain-input" type="number" step="0.1" value={filters.breakoutVolumeMultiplier} onChange={(e) => setNumber("breakoutVolumeMultiplier", Number(e.target.value))}/></label><label>Min Pullback<input className="plain-input" type="number" value={filters.minPullbackPct} onChange={(e) => setNumber("minPullbackPct", Number(e.target.value))}/></label><label>Max Pullback<input className="plain-input" type="number" value={filters.maxPullbackPct} onChange={(e) => setNumber("maxPullbackPct", Number(e.target.value))}/></label><label>Min Pullback Days<input className="plain-input" type="number" value={filters.minPullbackDays} onChange={(e) => setNumber("minPullbackDays", Number(e.target.value))}/></label><label>Max Pullback Days<input className="plain-input" type="number" value={filters.maxPullbackDays} onChange={(e) => setNumber("maxPullbackDays", Number(e.target.value))}/></label><label>EMA Tolerance %<input className="plain-input" type="number" value={filters.maxEmaDownsideTolerancePct} onChange={(e) => setNumber("maxEmaDownsideTolerancePct", Number(e.target.value))}/></label><label>Min Breakout Age<input className="plain-input" type="number" value={filters.minBreakoutAge} onChange={(e) => setNumber("minBreakoutAge", Number(e.target.value))}/></label><label>Max Breakout Age<input className="plain-input" type="number" value={filters.maxBreakoutAge} onChange={(e) => setNumber("maxBreakoutAge", Number(e.target.value))}/></label><label>Max Completed PB<input className="plain-input" type="number" value={filters.maxCompletedPullbacks} onChange={(e) => setNumber("maxCompletedPullbacks", Number(e.target.value))}/></label></div><div className="toolbar-actions"><button className="primary" onClick={() => { setSettingsOpen(false); onRun(); }}>Apply Settings</button><button className="secondary" onClick={onReset}>Reset To Defaults</button></div></div></div>}
+    {selected && <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={() => setSelected(null)}>×</button><p className="eyebrow">{selected.setup_type ?? selected.status} · Score {selected.setup_score}</p><h2>{selected.symbol} · {selected.company_name}</h2><p className="muted">{selected.reason}</p><ThirtyUpChartPanel selected={selected} intradayEndpoint="ema-reversal-pullback-screener" showTradePreview={false} /><div className="stats-grid compact-stats"><Stat label="Breakout" value={selected.breakout_date ?? "—"} sub={selected.confirmation_volume_ratio === undefined ? undefined : `${selected.confirmation_volume_ratio.toFixed(1)}x volume`}/><Stat label="Advance" value={selected.advance_pct === undefined ? "—" : pct(selected.advance_pct)} sub={selected.post_breakout_high_date}/><Stat label="Pullback" value={selected.pullback_pct === undefined ? "—" : pct(-selected.pullback_pct)} sub={`${selected.days_in_pullback ?? "—"} sessions`}/><Stat label="EMA50" value={money(selected.ema50)} sub={pct(selected.distance_from_ema_pct)}/></div><div className="stats-grid compact-stats">{Object.entries(selected.score_breakdown).map(([key, value]) => <Stat key={key} label={key.replace(/([A-Z])/g, " $1")} value={`${value}`} />)}</div><h3>Recent daily rows</h3><div className="table-wrap"><table><thead><tr><th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>EMA50</th><th>Volume</th><th>Rel Vol</th></tr></thead><tbody>{selected.recent.map((row) => <tr key={row.trade_date}><td>{row.trade_date}</td><td>{money(row.open)}</td><td>{money(row.high)}</td><td>{money(row.low)}</td><td>{money(row.close)}</td><td>{row.ema50 ? money(row.ema50) : "—"}</td><td>{row.volume.toLocaleString("en-IN")}</td><td>{row.volume_ratio ? `${row.volume_ratio.toFixed(1)}x` : "—"}</td></tr>)}</tbody></table></div></div></div>}
+  </section>;
+}
+
 function calculateHourlyZoneSignal(rows: DailyChartPoint[], filters: HourlyBreakoutFilters): HourlySignal {
   if (rows.length < Math.max(10, filters.minConsolidationDays * 3)) return { state: "error", label: "Not enough hourly candles" };
   const latest = rows.at(-1);
@@ -2620,6 +2720,8 @@ export default function Home() {
   const [momentumContractionUpdatedAt, setMomentumContractionUpdatedAt] = useState<string | null>(null);
   const [thirtyInThirty, setThirtyInThirty] = useState<ThirtyInThirtyResponse | null>(null);
   const [thirtyInThirtyUpdatedAt, setThirtyInThirtyUpdatedAt] = useState<string | null>(null);
+  const [emaReversal, setEmaReversal] = useState<EmaReversalResponse | null>(null);
+  const [emaReversalUpdatedAt, setEmaReversalUpdatedAt] = useState<string | null>(null);
   const [dryVolumeBreakout, setDryVolumeBreakout] = useState<DryVolumeBreakoutResponse | null>(null);
   const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
   const [tradingSettings, setTradingSettings] = useState<TradingSettings | null>(null);
@@ -2645,6 +2747,8 @@ export default function Home() {
   const [selectedMomentumContraction, setSelectedMomentumContraction] = useState<MomentumContractionRow | null>(null);
   const [thirtyInThirtyFilters, setThirtyInThirtyFilters] = useState<ThirtyInThirtyFilters>(defaultThirtyInThirtyFilters);
   const [selectedThirtyInThirty, setSelectedThirtyInThirty] = useState<ThirtyInThirtyRow | null>(null);
+  const [emaReversalFilters, setEmaReversalFilters] = useState<EmaReversalFilters>(defaultEmaReversalFilters);
+  const [selectedEmaReversal, setSelectedEmaReversal] = useState<EmaReversalRow | null>(null);
   const [dryVolumeBreakoutFilters, setDryVolumeBreakoutFilters] = useState<DryVolumeBreakoutFilters>(defaultDryVolumeBreakoutFilters);
   const [basketBacktestFilters, setBasketBacktestFilters] = useState<BasketBacktestFilters>(defaultBasketBacktestFilters);
   const [basketBacktest, setBasketBacktest] = useState<BasketBacktestResult | null>(null);
@@ -2669,7 +2773,7 @@ export default function Home() {
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("seasonal-edge-theme", theme); }, [theme]);
   useEffect(() => { localStorage.setItem("momentum-contraction-filters", JSON.stringify(momentumContractionFilters)); }, [momentumContractionFilters]);
-  useEffect(() => { if (!isAuthenticated) return; if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "Dry Breakout" && !dryVolumeBreakout) runDryVolumeBreakoutScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured, isAuthenticated]);
+  useEffect(() => { if (!isAuthenticated) return; if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "50 EMA Reversal") runEmaReversalScreener(); if (view === "Dry Breakout" && !dryVolumeBreakout) runDryVolumeBreakoutScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured, isAuthenticated]);
   useEffect(() => {
     if (!isAuthenticated || view !== "Data Status") return;
     let fallbackId: number | undefined;
@@ -2719,6 +2823,7 @@ export default function Home() {
   async function runHourlyBreakoutScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/hourly-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: hourlyBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setHourlyBreakout(d); setHourlyBreakoutUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Hourly Breakout screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runMomentumContractionScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/momentum-contraction-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: momentumContractionFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setMomentumContraction(d); setMomentumContractionUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Momentum Tight scanner unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runThirtyInThirtyScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/thirty-in-thirty-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: thirtyInThirtyFilters }) }); const d = await readJsonResponse<ThirtyInThirtyResponse>(r, "30 in 30 screener unavailable"); setThirtyInThirty(d); setThirtyInThirtyUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "30 in 30 screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
+  async function runEmaReversalScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/ema-reversal-pullback-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: emaReversalFilters }) }); const d = await readJsonResponse<EmaReversalResponse>(r, "50 EMA Reversal scanner unavailable"); setEmaReversal(d); setEmaReversalUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "50 EMA Reversal scanner unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runDryVolumeBreakoutScreener() { setLoading(true); try { const r = await fetch("/api/dry-volume-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: dryVolumeBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setDryVolumeBreakout(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Dry Breakout screener unavailable"); } finally { setLoading(false); } }
   async function runBasketBacktest() { setLoading(true); try { const r = await fetch("/api/basket-backtest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: basketBacktestFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setBasketBacktest(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Basket backtest unavailable"); } finally { setLoading(false); } }
   async function loadPortfolio() { setLoading(true); setError(""); try { const r = await fetch("/api/portfolio"); const d = await r.json(); if (!r.ok) throw new Error(d.error); setPortfolio(d); if (d.tradeManagement?.settings) setTradingSettings(d.tradeManagement.settings); } catch (e) { setError(e instanceof Error ? e.message : "Portfolio unavailable"); } finally { setLoading(false); } }
@@ -2762,11 +2867,12 @@ export default function Home() {
     {view === "Hourly Breakout" && <HourlyBreakoutScreenerView data={hourlyBreakout} filters={hourlyBreakoutFilters} setFilters={setHourlyBreakoutFilters} loading={loading} onRun={runHourlyBreakoutScreener} onReset={() => setHourlyBreakoutFilters(defaultHourlyBreakoutFilters)} selected={selectedHourlyBreakout} setSelected={setSelectedHourlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={hourlyBreakoutUpdatedAt} />}
     {view === "Momentum Tight" && <MomentumContractionScreenerView data={momentumContraction} filters={momentumContractionFilters} setFilters={setMomentumContractionFilters} loading={loading} onRun={runMomentumContractionScreener} onReset={() => setMomentumContractionFilters(defaultMomentumContractionFilters)} selected={selectedMomentumContraction} setSelected={setSelectedMomentumContraction} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={momentumContractionUpdatedAt} />}
     {view === "30 in 30" && <ThirtyInThirtyScreenerView data={thirtyInThirty} filters={thirtyInThirtyFilters} setFilters={setThirtyInThirtyFilters} loading={loading} onRun={runThirtyInThirtyScreener} onReset={() => setThirtyInThirtyFilters(defaultThirtyInThirtyFilters)} selected={selectedThirtyInThirty} setSelected={setSelectedThirtyInThirty} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={thirtyInThirtyUpdatedAt} settings={tradingSettings} />}
+    {view === "50 EMA Reversal" && <EmaReversalScreenerView data={emaReversal} filters={emaReversalFilters} setFilters={setEmaReversalFilters} loading={loading} onRun={runEmaReversalScreener} onReset={() => setEmaReversalFilters(defaultEmaReversalFilters)} selected={selectedEmaReversal} setSelected={setSelectedEmaReversal} updatedAt={emaReversalUpdatedAt} />}
     {view === "Dry Breakout" && <DryVolumeBreakoutScreenerView data={dryVolumeBreakout} filters={dryVolumeBreakoutFilters} loading={loading} onRun={runDryVolumeBreakoutScreener} onTradeCreated={loadPortfolio} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Backtest" && <BasketBacktestView filters={basketBacktestFilters} setFilters={setBasketBacktestFilters} data={basketBacktest} loading={loading} onRun={runBasketBacktest} />}
     {view === "Stock Search" && <><section className="search-card"><div className="search-copy"><p className="eyebrow">01 / Research a security</p><h2>Find an Indian equity</h2><p>Search the Dhan security master by symbol or company name.</p></div><div className="search-area"><form onSubmit={(e) => { e.preventDefault(); runSearch(); }}><div className="search-row"><div className="search-input"><Search size={18} /><input placeholder="Search RELIANCE, TCS, INFY…" value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>Enter</kbd></div><button className="primary search-button" type="submit" disabled={loading}>{loading ? "Searching…" : "Search"}</button></div></form>{results.length > 0 && <div className="results">{results.map((s) => <button key={`${s.securityId}-${s.segment}`} onClick={() => { setSecurity(s); setQuery(""); setResults([]); setAnalysis(null); }}><div><b>{s.symbol}</b><span>{s.name}</span></div><small>{s.exchange} · {s.securityId}</small></button>)}</div>}<div className="search-hint"><Database size={14} /><span>Security IDs are resolved from Dhan’s master—not ticker text alone.</span></div></div></section>{!configured && <section className="setup"><div className="setup-icon"><ShieldCheck size={25} /></div><div><p className="eyebrow">Secure data connection</p><h2>Connect your Dhan account to begin</h2><p>Market data and calculated statistics remain empty until server-side Dhan credentials are configured.</p></div><code>DHAN_CLIENT_ID= · DHAN_ACCESS_TOKEN=</code></section>}{!security && <section className="empty"><div className="empty-art"><CalendarDays size={30} /></div><p className="eyebrow">Awaiting a selection</p><h2>Start with a security search</h2><p>Select an equity to load its daily OHLCV history and derive seasonality statistics.</p></section>}{security && <><section className="stock-header"><div><div className="ticker-row"><span className="ticker">{security.symbol}</span><span className="exchange">{security.exchange}</span></div><h2>{security.name}</h2><p>Security ID {security.securityId} · Daily OHLCV · {analysis ? `${analysis.candles.length} trading sessions` : "Not loaded"}</p></div><button className="primary" onClick={() => analyze()} disabled={loading || !configured}>{loading ? <><RefreshCw size={16} className="spin" /> Calculating…</> : <><BarChart3 size={16} /> Load seasonality</>}</button></section>{analysis && <><section className="stats-grid"><Stat label="Current close" value={latest ? money(latest.close) : "—"} sub={latest?.date} /><Stat label="History available" value={`${new Set(analysis.candles.map((c) => c.date.slice(0, 4))).size} years`} sub="Complete years used" /><Stat label="Data through" value={latest?.date || "—"} sub="Cached locally" /><Stat label="Method" value="Daily OHLCV" sub="Adjusted data must be verified" /></section></>}</>}</>}
     {view === "Settings" && <TradingSettingsView settings={tradingSettings} onSaved={setTradingSettings} />}
-    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Dry Breakout", "Backtest", "Settings"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
+    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "50 EMA Reversal", "Dry Breakout", "Backtest", "Settings"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
   </div></main>;
 }
 
