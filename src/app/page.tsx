@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import type { SeasonalObservationRecord, SeasonalStatisticsRecord, Security, Summary, UniverseName } from "@/lib/types";
 
-type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "StochRSI" | "Dry Breakout" | "Portfolio" | "Backtest" | "Settings";
+type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "20 EMA Base" | "30 in 30" | "StochRSI" | "Dry Breakout" | "Portfolio" | "Backtest" | "Settings";
 type DataSummary = { universe_name: UniverseName; total_constituents: number; mapped: number; stocks_downloaded: number; stocks_pending: number; stocks_failed: number; earliest_data_date: string | null; latest_data_date: string | null; total_ohlcv_rows: number; last_refresh: string | null; historical_sessions: number; latest_official?: number; latest_provisional?: number };
 type DataDownloadJob = { id?: string; status: string; total: number; completed: number; remaining: number; successful: number; failed: number; current_stock?: string; current_status?: string; progress: number; started_at?: string; finished_at?: string; last_successful_update?: string; data_through_date?: string; notice?: string; pending_eod_count?: number; trading_date?: string; historical_candles_backfilled?: number; official_candles_updated?: number; provisional_candles_created?: number; provisional_candles_reconciled?: number; already_up_to_date?: number; errors: string[] };
 type DataStatus = { dhan_connected: boolean; dhan_profile?: { ok: boolean; dhanClientId?: string; tokenValidity?: string; activeSegment?: string; dataPlan?: string; dataValidity?: string; error?: string }; database_size_bytes: number; price_adjustment_status: string; latest_market_data: null | { trading_date: string; official: number; provisional: number; data_status: string }; latest_job: null | DataDownloadJob; summaries: DataSummary[]; failures: { symbol: string; security_id: string; error_message: string; attempt_count: number; last_attempt: string }[]; quality_issues: unknown[]; universe_sources: Record<string, { label: string; url: string }> };
@@ -66,6 +66,10 @@ type MomentumSetupType = "MOMENTUM_CONTRACTION" | "TRENDING_TIGHT";
 type MomentumContractionFilters = { universe: "ALL" | UniverseName; setupType: "ALL" | MomentumSetupType; emaLength: number; emaSlopeLookback: number; momentumLookback: number; minPriorMovePct: number; volumeAverageLength: number; expansionRelativeVolume: number; atrLength: number; tightRangeAtr: number; lowVolumeLookback: number; dryVolumeRatio: number; contractionLookback: number; minAverageDailyTradedValue: number; maxDistanceFromEmaPct: number; requireRisingEma: boolean; minSetupScore: number; showAll: boolean; debug: boolean };
 type MomentumContractionRow = { status: MomentumSetupType | "BELOW_EMA" | "NO_MOMENTUM" | "NOT_TIGHT" | "VOLUME_NOT_DRY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; setupType: MomentumSetupType; setupScore: number; current_date: string; current_close: number; ema50: number; emaSlope: number; distance_from_ema_pct: number; priorMovePct: number; momentumRelativeVolume: number; atr14: number; rangeCompression: number; currentVolume: number; volumeSMA20: number; volumeSMA50: number; relativeVolume: number; volumePercentile: number; lowestVolume10: boolean; lowestVolume20: boolean; avgVolume5: number; avgVolume20: number; volumeContractionRatio: number; trendStructure: "HIGHER_HIGH_LOW" | "RISING" | "SIDEWAYS" | "WEAK"; averageDailyTradedValue: number; reason: string; diagnostics: { pass: boolean; label: string }[]; recent: DailyChartPoint[] };
 type MomentumContractionResponse = { filters: MomentumContractionFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: MomentumContractionRow[]; generatedAt: string };
+type EmaConsolidationFilters = { universe: "ALL" | UniverseName; emaLength: number; lookbackDays: number; priorMoveLookbackDays: number; minPriorMovePct: number; consolidationDays: number; minConsolidationDays: number; maxRangePct: number; maxDistanceFromEmaPct: number; maxEmaToRangeMidPct: number; minAboveEmaDaysPct: number; minAverageDailyTradedValue: number; requireRisingEma: boolean; showAll: boolean };
+type EmaConsolidationSortKey = "score" | "today_return" | "symbol" | "company" | "prior_move" | "range" | "ema_distance" | "ema_catchup" | "above_ema" | "breakout_distance" | "volume";
+type EmaConsolidationRow = { status: "SETUP" | "WATCHLIST" | "NO_PRIOR_MOVE" | "BELOW_20EMA" | "TOO_WIDE" | "EMA_NOT_READY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema20: number; ema50: number; distance_from_20ema_pct: number; ema20_slope_pct: number; prior_move_pct: number; prior_low_date?: string; prior_low_close?: number; consolidation_start_date: string; consolidation_end_date: string; consolidation_days: number; range_high: number; range_low: number; range_pct: number; breakout_distance_pct: number; ema_to_range_mid_pct: number; above_ema_days_pct: number; current_volume_ratio?: number; averageDailyTradedValue: number; setup_score: number; reason: string; recent: Array<DailyChartPoint & { ema20?: number }> };
+type EmaConsolidationResponse = { filters: EmaConsolidationFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: EmaConsolidationRow[]; generatedAt: string };
 type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; showAll: boolean };
 type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "hourly_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
@@ -119,6 +123,7 @@ const nav: { name: View; icon: typeof Activity }[] = [
   { name: "Stock Search", icon: Search },
   { name: "Data Status", icon: Database },
   { name: "30 in 30", icon: TrendingUp },
+  { name: "20 EMA Base", icon: Activity },
   { name: "StochRSI", icon: Activity },
   { name: "Dry Breakout", icon: ShieldCheck },
   { name: "Backtest", icon: BarChart3 },
@@ -230,6 +235,22 @@ const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   decliningVolumeOnly: false,
   dryVolumeOnly: false,
   redCandleOnly: false,
+  showAll: false,
+};
+const defaultEmaConsolidationFilters: EmaConsolidationFilters = {
+  universe: "ALL",
+  emaLength: 20,
+  lookbackDays: 126,
+  priorMoveLookbackDays: 70,
+  minPriorMovePct: 18,
+  consolidationDays: 18,
+  minConsolidationDays: 8,
+  maxRangePct: 14,
+  maxDistanceFromEmaPct: 8,
+  maxEmaToRangeMidPct: 7,
+  minAboveEmaDaysPct: 65,
+  minAverageDailyTradedValue: 0,
+  requireRisingEma: true,
   showAll: false,
 };
 const defaultStochRsiFilters: StochRsiFilters = {
@@ -2628,6 +2649,301 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   </section>;
 }
 
+const liveAdjustedEmaConsolidation = (row: EmaConsolidationRow, tick?: LiveTick): EmaConsolidationRow => {
+  if (!tick?.ltp) return row;
+  const liveClose = tick.ltp;
+  const today = liveTradeDate();
+  const recent = [...row.recent];
+  const last = recent.at(-1);
+  const liveDaily = {
+    trade_date: today,
+    open: tick.dayOpen ?? tick.prevClose ?? liveClose,
+    high: Math.max(tick.dayHigh ?? liveClose, liveClose),
+    low: Math.min(tick.dayLow ?? liveClose, liveClose),
+    close: liveClose,
+    ema20: row.ema20,
+    ema50: row.ema50,
+    volume: tick.volume ?? 0,
+    volume_ratio: tick.volume !== undefined ? tick.volume / Math.max(1, average(recent.slice(-20).map((point) => point.volume))) : undefined,
+  };
+  if (last?.trade_date === today) recent[recent.length - 1] = { ...last, ...liveDaily, high: Math.max(last.high, liveDaily.high), low: Math.min(last.low, liveDaily.low), volume: tick.volume ?? last.volume };
+  else if (!last || today > last.trade_date) recent.push(liveDaily);
+  const baseRows = recent.slice(-row.consolidation_days);
+  const rangeHigh = baseRows.length ? Math.max(...baseRows.map((point) => point.high)) : row.range_high;
+  const rangeLow = baseRows.length ? Math.min(...baseRows.map((point) => point.low)) : row.range_low;
+  const rangeMid = (rangeHigh + rangeLow) / 2;
+  return {
+    ...row,
+    current_date: today,
+    current_close: liveClose,
+    distance_from_20ema_pct: pctChange(row.ema20, liveClose),
+    range_high: rangeHigh,
+    range_low: rangeLow,
+    range_pct: pctChange(rangeLow, rangeHigh),
+    breakout_distance_pct: pctChange(rangeHigh, liveClose),
+    ema_to_range_mid_pct: Math.abs(pctChange(rangeMid, row.ema20)),
+    recent,
+  };
+};
+
+const emaConsolidationTodayReturnPct = (row: EmaConsolidationRow, tick?: LiveTick) => {
+  if (!tick && row.current_date !== liveTradeDate()) return undefined;
+  const previous = row.recent.at(-2) ?? row.recent.at(-1);
+  const previousClose = tick?.prevClose ?? previous?.close;
+  return previousClose ? pctChange(previousClose, row.current_close) : undefined;
+};
+
+function EmaConsolidationTileChart({ row, chartMonths, onOpen }: { row: EmaConsolidationRow; chartMonths: 3 | 6; onOpen: () => void }) {
+  const chartRows = lastTradingMonths(row.recent, chartMonths === 6 ? 126 : 63);
+  const closes = chartRows.map((point) => point.close);
+  const trendUp = closes.length > 1 && closes.at(-1)! >= closes[0];
+  return <span className="thirty-in-thirty-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="img" aria-label={`${row.symbol} 20 EMA base chart`}>
+    <svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true">
+      <path className="spark-area" d={`${polylinePath(closes, 220, 82)} L220 82 L0 82 Z`} />
+      <path className={trendUp ? "spark-line up" : "spark-line down"} d={polylinePath(closes, 220, 82)} />
+    </svg>
+  </span>;
+}
+
+function EmaConsolidationChartPanel({ selected, chartMonths }: { selected: EmaConsolidationRow; chartMonths: 3 | 6 }) {
+  const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
+  const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
+  const [hourlyLoading, setHourlyLoading] = useState(false);
+  const [hourlyError, setHourlyError] = useState("");
+  const [liveDailyRow, setLiveDailyRow] = useState<DailyChartPoint | null>(null);
+  const [dailyError, setDailyError] = useState("");
+
+  useEffect(() => {
+    setTimeframe("daily");
+    setHourlyRows([]);
+    setHourlyLoading(false);
+    setHourlyError("");
+    setLiveDailyRow(null);
+    setDailyError("");
+  }, [selected.security_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadIntraday = async (showLoading: boolean) => {
+      if (showLoading) setHourlyLoading(true);
+      setHourlyError("");
+      setDailyError("");
+      try {
+        const rows = await fetchThirtyUpIntraday(selected.security_id, !showLoading, "ema-consolidation-screener");
+        if (cancelled) return;
+        setHourlyRows(rows);
+        setLiveDailyRow(aggregateIntradayDaily(rows));
+      } catch (error) {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : "Intraday data unavailable";
+        if (timeframe === "hourly") setHourlyError(message);
+        else setDailyError(message);
+      } finally {
+        if (!cancelled && showLoading) setHourlyLoading(false);
+      }
+    };
+    void loadIntraday(timeframe === "hourly" && !hourlyRows.length);
+    const timer = window.setInterval(() => void loadIntraday(false), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [selected.security_id, timeframe]);
+
+  const dailyRows = lastTradingMonths(mergeLiveDailyCandle(selected.recent, liveDailyRow) as Array<DailyChartPoint & { ema20?: number }>, chartMonths === 6 ? 126 : 63).map((row) => ({ ...row, ema50: row.ema20 ?? row.ema50 }));
+  const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
+  return <div className="chart-shell">
+    <div className="chart-toolbar">
+      <div>
+        <p className="eyebrow">Chart timeframe</p>
+        <span>{timeframe === "daily" ? `Last ${chartMonths} months with 20 EMA${liveDailyRow ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
+      </div>
+      <div className="chart-toolbar-actions">
+        <a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer" title={`Open ${selected.symbol} in TradingView`}>
+          <ArrowUpRight size={14}/>TradingView
+        </a>
+        <div className="segmented-control" role="group" aria-label="Chart timeframe">
+          <button className={timeframe === "daily" ? "active" : ""} onClick={() => setTimeframe("daily")}>Daily</button>
+          <button className={timeframe === "hourly" ? "active" : ""} onClick={() => setTimeframe("hourly")}>Hourly</button>
+        </div>
+      </div>
+    </div>
+    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaLabel={timeframe === "daily" ? "20 EMA" : "50 EMA"} />
+    {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
+  </div>;
+}
+
+function EmaConsolidationScoreTiles({ selected }: { selected: EmaConsolidationRow }) {
+  return <div className="strategy-stat-grid">
+    <StrategyStat label="Setup Score" value={`${selected.setup_score}`} tone={toneFromRange(selected.setup_score, (value) => value >= 70, (value) => value >= 50)} />
+    <StrategyStat label="Prior Move" value={pct(selected.prior_move_pct)} sub={selected.prior_low_date} tone={toneFromRange(selected.prior_move_pct, (value) => value >= 25, (value) => value >= 18)} />
+    <StrategyStat label="Base Range" value={pct(selected.range_pct)} sub={`${selected.consolidation_days} sessions`} tone={toneFromRange(selected.range_pct, (value) => value <= 10, (value) => value <= 14)} />
+    <StrategyStat label="20 EMA Distance" value={pct(selected.distance_from_20ema_pct)} sub={`slope ${pct(selected.ema20_slope_pct)}`} tone={toneFromRange(Math.abs(selected.distance_from_20ema_pct), (value) => value <= 4, (value) => value <= 8)} />
+    <StrategyStat label="EMA Catchup" value={pct(selected.ema_to_range_mid_pct)} sub="to base midpoint" tone={toneFromRange(selected.ema_to_range_mid_pct, (value) => value <= 4, (value) => value <= 7)} />
+    <StrategyStat label="Above EMA Days" value={pct(selected.above_ema_days_pct)} tone={toneFromRange(selected.above_ema_days_pct, (value) => value >= 80, (value) => value >= 65)} />
+    <StrategyStat label="Range High" value={money(selected.range_high)} sub={pct(selected.breakout_distance_pct)} tone={toneFromRange(selected.breakout_distance_pct, (value) => value >= -4 && value <= 2, (value) => value >= -8 && value <= 4)} />
+    <StrategyStat label="Current Volume" value={selected.current_volume_ratio === undefined ? "-" : `${selected.current_volume_ratio.toFixed(2)}x`} tone="neutral" />
+  </div>;
+}
+
+function EmaConsolidationScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt }: { data: EmaConsolidationResponse | null; filters: EmaConsolidationFilters; setFilters: (filters: EmaConsolidationFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: EmaConsolidationRow | null; setSelected: (row: EmaConsolidationRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null }) {
+  const [sort, setSort] = useState<{ key: EmaConsolidationSortKey; direction: "asc" | "desc" }>({ key: "score", direction: "desc" });
+  const [chartMonths, setChartMonths] = useState<3 | 6>(3);
+  const [tileLimit, setTileLimit] = useState(9999);
+  const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  const setNumber = (key: keyof EmaConsolidationFilters, value: number) => setFilters({ ...filters, [key]: value });
+  const liveRows = useMemo(() => (data?.results ?? []).map((row) => liveAdjustedEmaConsolidation(row, liveTicks[row.security_id])), [data, liveTicks]);
+  useEffect(() => {
+    if (!selected) return;
+    const replacement = liveRows.find((row) => row.security_id === selected.security_id);
+    if (replacement && replacement !== selected) setSelected(replacement);
+  }, [liveRows, selected, setSelected]);
+  useEffect(() => {
+    const rows = data?.results ?? [];
+    if (!rows.length) {
+      setLiveTicks({});
+      setLiveFeedStatus("idle");
+      return;
+    }
+    const ids = rows.slice(0, Math.min(tileLimit, thirtyInThirtyLiveFeedLimit)).map((row) => row.security_id);
+    const controller = new AbortController();
+    setLiveFeedStatus("connecting", `Starting ${ids.length} of ${rows.length} 20 EMA Base live feed`);
+    const handleEvent = (event: string, value: string) => {
+      if (event === "status") {
+        const status = JSON.parse(value) as LiveFeedStatusUpdate;
+        if (status.state === "idle" || status.state === "connecting" || status.state === "live" || status.state === "error") setLiveFeedStatus(status.state, status.message);
+      } else if (event === "snapshot") {
+        const ticks = JSON.parse(value) as LiveTick[];
+        if (ticks.length) setLiveTicks((current) => ({ ...current, ...Object.fromEntries(ticks.map((tick) => [tick.securityId, tick])) }));
+      } else if (event === "tick") {
+        const tick = JSON.parse(value) as LiveTick;
+        setLiveTicks((current) => ({ ...current, [tick.securityId]: tick }));
+        setLiveFeedStatus("live", "20 EMA Base live prices streaming");
+      }
+    };
+    void fetch("/api/ema-consolidation-screener/live", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok || !response.body) throw new Error(`20 EMA Base live feed failed: HTTP ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (!controller.signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() ?? "";
+        events.forEach((chunk) => parseServerSentEvents(chunk, handleEvent));
+      }
+    }).catch((error) => {
+      if (!controller.signal.aborted) setLiveFeedStatus("error", error instanceof Error ? error.message : "20 EMA Base live feed disconnected");
+    });
+    return () => {
+      controller.abort();
+      setLiveFeedStatus("idle");
+    };
+  }, [data, setLiveFeedStatus, tileLimit]);
+
+  const sortRows = useCallback((rows: EmaConsolidationRow[]) => {
+    const valueFor = (row: EmaConsolidationRow): string | number => {
+      if (sort.key === "symbol") return row.symbol;
+      if (sort.key === "company") return row.company_name;
+      if (sort.key === "today_return") return emaConsolidationTodayReturnPct(row, liveTicks[row.security_id]) ?? -Infinity;
+      if (sort.key === "prior_move") return row.prior_move_pct;
+      if (sort.key === "range") return -row.range_pct;
+      if (sort.key === "ema_distance") return -Math.abs(row.distance_from_20ema_pct);
+      if (sort.key === "ema_catchup") return -row.ema_to_range_mid_pct;
+      if (sort.key === "above_ema") return row.above_ema_days_pct;
+      if (sort.key === "breakout_distance") return -Math.abs(row.breakout_distance_pct);
+      if (sort.key === "volume") return row.current_volume_ratio ?? -Infinity;
+      return row.setup_score;
+    };
+    return [...rows].sort((a, b) => {
+      const av = valueFor(a);
+      const bv = valueFor(b);
+      const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+      return sort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [liveTicks, sort]);
+  const sortedRows = useMemo(() => sortRows(liveRows), [liveRows, sortRows]);
+  const pinnedRows = useMemo(() => sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id))), [liveRows, pinnedIds, sortRows]);
+  const visibleRows = useMemo(() => {
+    const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
+    return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
+  }, [pinnedRows, sortedRows, tileLimit]);
+  const togglePinned = (securityId: string) => setPinnedIds((current) => current.includes(securityId) ? current.filter((id) => id !== securityId) : [...current, securityId]);
+  const sortBy = (key: EmaConsolidationSortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "range" || key === "ema_distance" || key === "ema_catchup" || key === "breakout_distance" ? "asc" : "desc" });
+
+  return <section className="research-page thirty-in-thirty-page">
+    <div className="thirty-hero thirty-in-thirty-hero">
+      <div>
+        <p className="eyebrow">20 EMA Base Screener</p>
+        <h2>Above 20 EMA, tight base, EMA catching up</h2>
+        <small>Finds stocks like the attached charts: prior advance, narrow consolidation, price holding above the 20 EMA, and the 20 EMA moving closer to the base.</small>
+      </div>
+      <div className="thirty-hero-actions">
+        <div className="refresh-status"><span className={Object.keys(liveTicks).length ? "ready" : "pending"} /><b>{Object.keys(liveTicks).length ? "Live prices" : "Last run"}</b><small>{Object.keys(liveTicks).length ? `${Object.keys(liveTicks).length} ticking` : formatTime(updatedAt)}</small></div>
+        <button className="primary" onClick={() => onRun()} disabled={loading}><Activity size={15}/>Run Screener</button>
+        <button className="secondary compact" onClick={onReset}>Reset</button>
+      </div>
+    </div>
+    <div className="momentum-filter-bar thirty-in-thirty-filters">
+      <label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as EmaConsolidationFilters["universe"] })}><option value="ALL">All</option><option value="MIDCAP">Nifty Midcap</option><option value="SMALLCAP">Nifty Smallcap</option></select></label>
+      <label>Prior Move %<input className="plain-input" type="number" value={filters.minPriorMovePct} onChange={(e) => setNumber("minPriorMovePct", Number(e.target.value))}/></label>
+      <label>Base Days<input className="plain-input" type="number" value={filters.consolidationDays} onChange={(e) => setNumber("consolidationDays", Number(e.target.value))}/></label>
+      <label>Max Range %<input className="plain-input" type="number" value={filters.maxRangePct} onChange={(e) => setNumber("maxRangePct", Number(e.target.value))}/></label>
+      <label>EMA Max %<input className="plain-input" type="number" value={filters.maxDistanceFromEmaPct} onChange={(e) => setNumber("maxDistanceFromEmaPct", Number(e.target.value))}/></label>
+      <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
+      <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
+      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as EmaConsolidationSortKey)}><option value="score">Setup Score</option><option value="today_return">Today Live Gain</option><option value="prior_move">Prior Move</option><option value="range">Tightest Range</option><option value="ema_distance">Closest To 20 EMA</option><option value="ema_catchup">EMA Catchup</option><option value="above_ema">Above EMA Days</option><option value="breakout_distance">Closest To Range High</option><option value="volume">Current Volume</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
+      <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
+    </div>
+    <div className="thirty-in-thirty-switches">
+      <label><input type="checkbox" checked={filters.requireRisingEma} onChange={(e) => setFilters({ ...filters, requireRisingEma: e.target.checked })}/><span>Rising 20 EMA</span></label>
+      <label><input type="checkbox" checked={filters.showAll} onChange={(e) => setFilters({ ...filters, showAll: e.target.checked })}/><span>Show failed rows</span></label>
+      <label>Min Above EMA %<input className="plain-input" type="number" value={filters.minAboveEmaDaysPct} onChange={(e) => setNumber("minAboveEmaDaysPct", Number(e.target.value))}/></label>
+      <label>EMA To Mid %<input className="plain-input" type="number" value={filters.maxEmaToRangeMidPct} onChange={(e) => setNumber("maxEmaToRangeMidPct", Number(e.target.value))}/></label>
+      <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
+    </div>
+    {data && <>
+      <div className="thirty-scoreboard">
+        <div><span>Evaluated</span><b>{data.evaluated}</b></div>
+        <div><span>Setups</span><b>{data.qualified}</b></div>
+        <div><span>Too Wide</span><b>{data.statusSummary.TOO_WIDE ?? 0}</b></div>
+        <div><span>Shown</span><b>{visibleRows.length} / {sortedRows.length}</b></div>
+      </div>
+      <section className="screenshot-tile-grid">
+        {visibleRows.length ? visibleRows.map((row) => {
+          const todayReturn = emaConsolidationTodayReturnPct(row, liveTicks[row.security_id]);
+          const pinned = pinnedIds.includes(row.security_id);
+          return <div key={row.security_id} className={`screenshot-tile ${pinned ? "pinned" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={`${row.prior_move_pct.toFixed(1)}% prior move, ${row.range_pct.toFixed(1)}% base range`}>
+            <span className="tile-badges"><i>{row.setup_score}</i><span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span>
+            <b>{row.symbol}</b>
+            <small>{row.company_name}</small>
+            {todayReturn !== undefined && <span className={`tile-today-return ${todayReturn >= 0 ? "positive" : "negative"}`}>{pct2(todayReturn)}</span>}
+            <EmaConsolidationTileChart row={row} chartMonths={chartMonths} onOpen={() => setSelected(row)} />
+          </div>;
+        }) : <p className="panel-empty">No stocks matched the selected 20 EMA Base criteria.</p>}
+      </section>
+    </>}
+    {selected && <div className="drawer" onClick={() => setSelected(null)}>
+      <div className="drawer-card chart-drawer" onClick={(event) => event.stopPropagation()}>
+        <button className="icon-button drawer-close" onClick={() => setSelected(null)}>×</button>
+        <p className="eyebrow">20 EMA Base · Score {selected.setup_score}</p>
+        <h2>{selected.symbol} · {selected.company_name}</h2>
+        <p className="muted">{selected.reason}</p>
+        <EmaConsolidationChartPanel selected={selected} chartMonths={chartMonths} />
+        <EmaConsolidationScoreTiles selected={selected} />
+      </div>
+    </div>}
+  </section>;
+}
+
 function liveAdjustedStochRsi(row: StochRsiRow, tick?: LiveTick): StochRsiRow {
   if (!tick?.ltp) return row;
   const dayHigh = tick.dayHigh && tick.dayHigh > 0 ? Math.max(tick.dayHigh, row.current_daily_high) : row.current_daily_high;
@@ -3070,7 +3386,7 @@ function liveAdjustedHourlyBreakout(row: HourlyBreakoutRow, liveTick?: LiveTick)
   return { liveClose, todayChange, emaDistance, breakoutDistance, pullbackFromZone };
 }
 
-function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63 }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number }) {
+function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaLabel = "50 EMA" }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaLabel?: string }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -3092,7 +3408,7 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   const volumeSma = smaValues(chartRows.map((row) => row.volume), 20);
   const emaPath = chartEmaValues.map((value, index) => ({ value, x: index * candleSlot + candleSlot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
   return <div className="clean-chart">
-    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>
+    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span><span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart`}>
       {chartRows.map((row, index) => {
         const x = index * candleSlot + candleSlot / 2;
@@ -3318,6 +3634,8 @@ export default function Home() {
   const [hourlyBreakoutUpdatedAt, setHourlyBreakoutUpdatedAt] = useState<string | null>(null);
   const [momentumContraction, setMomentumContraction] = useState<MomentumContractionResponse | null>(null);
   const [momentumContractionUpdatedAt, setMomentumContractionUpdatedAt] = useState<string | null>(null);
+  const [emaConsolidation, setEmaConsolidation] = useState<EmaConsolidationResponse | null>(null);
+  const [emaConsolidationUpdatedAt, setEmaConsolidationUpdatedAt] = useState<string | null>(null);
   const [thirtyInThirty, setThirtyInThirty] = useState<ThirtyInThirtyResponse | null>(null);
   const [thirtyInThirtyUpdatedAt, setThirtyInThirtyUpdatedAt] = useState<string | null>(null);
   const [stochRsi, setStochRsi] = useState<StochRsiResponse | null>(null);
@@ -3345,6 +3663,8 @@ export default function Home() {
   const [selectedHourlyBreakout, setSelectedHourlyBreakout] = useState<HourlyBreakoutRow | null>(null);
   const [momentumContractionFilters, setMomentumContractionFilters] = useState<MomentumContractionFilters>(defaultMomentumContractionFilters);
   const [selectedMomentumContraction, setSelectedMomentumContraction] = useState<MomentumContractionRow | null>(null);
+  const [emaConsolidationFilters, setEmaConsolidationFilters] = useState<EmaConsolidationFilters>(defaultEmaConsolidationFilters);
+  const [selectedEmaConsolidation, setSelectedEmaConsolidation] = useState<EmaConsolidationRow | null>(null);
   const [thirtyInThirtyFilters, setThirtyInThirtyFilters] = useState<ThirtyInThirtyFilters>(defaultThirtyInThirtyFilters);
   const [selectedThirtyInThirty, setSelectedThirtyInThirty] = useState<ThirtyInThirtyRow | null>(null);
   const [stochRsiFilters, setStochRsiFilters] = useState<StochRsiFilters>(defaultStochRsiFilters);
@@ -3371,9 +3691,17 @@ export default function Home() {
       setMomentumContractionFilters({ ...defaultMomentumContractionFilters, ...JSON.parse(saved) });
     } catch {}
   }, []);
+  useEffect(() => {
+    const saved = localStorage.getItem("ema-consolidation-filters");
+    if (!saved) return;
+    try {
+      setEmaConsolidationFilters({ ...defaultEmaConsolidationFilters, ...JSON.parse(saved) });
+    } catch {}
+  }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("seasonal-edge-theme", theme); }, [theme]);
   useEffect(() => { localStorage.setItem("momentum-contraction-filters", JSON.stringify(momentumContractionFilters)); }, [momentumContractionFilters]);
-  useEffect(() => { if (!isAuthenticated) return; if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "StochRSI") runStochRsiScreener(); if (view === "Dry Breakout" && !dryVolumeBreakout) runDryVolumeBreakoutScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured, isAuthenticated]);
+  useEffect(() => { localStorage.setItem("ema-consolidation-filters", JSON.stringify(emaConsolidationFilters)); }, [emaConsolidationFilters]);
+  useEffect(() => { if (!isAuthenticated) return; if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "20 EMA Base") runEmaConsolidationScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "StochRSI") runStochRsiScreener(); if (view === "Dry Breakout" && !dryVolumeBreakout) runDryVolumeBreakoutScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured, isAuthenticated]);
   useEffect(() => {
     if (!isAuthenticated || view !== "Data Status") return;
     let fallbackId: number | undefined;
@@ -3422,6 +3750,7 @@ export default function Home() {
   async function runEarlyBreakoutScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/early-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: earlyBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setEarlyBreakout(d); setEarlyBreakoutUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Early Breakout screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runHourlyBreakoutScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/hourly-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: hourlyBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setHourlyBreakout(d); setHourlyBreakoutUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Hourly Breakout screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runMomentumContractionScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/momentum-contraction-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: momentumContractionFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setMomentumContraction(d); setMomentumContractionUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Momentum Tight scanner unavailable"); } finally { if (!options.silent) setLoading(false); } }
+  async function runEmaConsolidationScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/ema-consolidation-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: emaConsolidationFilters }) }); const d = await readJsonResponse<EmaConsolidationResponse>(r, "20 EMA Base screener unavailable"); setEmaConsolidation(d); setEmaConsolidationUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "20 EMA Base screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runThirtyInThirtyScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/thirty-in-thirty-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: thirtyInThirtyFilters }) }); const d = await readJsonResponse<ThirtyInThirtyResponse>(r, "30 in 30 screener unavailable"); setThirtyInThirty(d); setThirtyInThirtyUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "30 in 30 screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runStochRsiScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/stoch-rsi-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: stochRsiFilters }) }); const d = await readJsonResponse<StochRsiResponse>(r, "StochRSI screener unavailable"); setStochRsi(d); setStochRsiUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "StochRSI screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runDryVolumeBreakoutScreener() { setLoading(true); try { const r = await fetch("/api/dry-volume-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: dryVolumeBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setDryVolumeBreakout(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Dry Breakout screener unavailable"); } finally { setLoading(false); } }
@@ -3466,13 +3795,14 @@ export default function Home() {
     {view === "Early Breakout" && <EarlyBreakoutScreenerView data={earlyBreakout} filters={earlyBreakoutFilters} setFilters={setEarlyBreakoutFilters} loading={loading} onRun={runEarlyBreakoutScreener} onReset={() => setEarlyBreakoutFilters(defaultEarlyBreakoutFilters)} selected={selectedEarlyBreakout} setSelected={setSelectedEarlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={earlyBreakoutUpdatedAt} onTradeCreated={loadPortfolio} />}
     {view === "Hourly Breakout" && <HourlyBreakoutScreenerView data={hourlyBreakout} filters={hourlyBreakoutFilters} setFilters={setHourlyBreakoutFilters} loading={loading} onRun={runHourlyBreakoutScreener} onReset={() => setHourlyBreakoutFilters(defaultHourlyBreakoutFilters)} selected={selectedHourlyBreakout} setSelected={setSelectedHourlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={hourlyBreakoutUpdatedAt} />}
     {view === "Momentum Tight" && <MomentumContractionScreenerView data={momentumContraction} filters={momentumContractionFilters} setFilters={setMomentumContractionFilters} loading={loading} onRun={runMomentumContractionScreener} onReset={() => setMomentumContractionFilters(defaultMomentumContractionFilters)} selected={selectedMomentumContraction} setSelected={setSelectedMomentumContraction} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={momentumContractionUpdatedAt} />}
+    {view === "20 EMA Base" && <EmaConsolidationScreenerView data={emaConsolidation} filters={emaConsolidationFilters} setFilters={setEmaConsolidationFilters} loading={loading} onRun={runEmaConsolidationScreener} onReset={() => setEmaConsolidationFilters(defaultEmaConsolidationFilters)} selected={selectedEmaConsolidation} setSelected={setSelectedEmaConsolidation} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={emaConsolidationUpdatedAt} />}
     {view === "30 in 30" && <ThirtyInThirtyScreenerView data={thirtyInThirty} filters={thirtyInThirtyFilters} setFilters={setThirtyInThirtyFilters} loading={loading} onRun={runThirtyInThirtyScreener} onReset={() => setThirtyInThirtyFilters(defaultThirtyInThirtyFilters)} selected={selectedThirtyInThirty} setSelected={setSelectedThirtyInThirty} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={thirtyInThirtyUpdatedAt} settings={tradingSettings} />}
     {view === "StochRSI" && <StochRsiScreenerView data={stochRsi} filters={stochRsiFilters} setFilters={setStochRsiFilters} loading={loading} onRun={runStochRsiScreener} onReset={() => setStochRsiFilters(defaultStochRsiFilters)} selected={selectedStochRsi} setSelected={setSelectedStochRsi} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={stochRsiUpdatedAt} settings={tradingSettings} />}
     {view === "Dry Breakout" && <DryVolumeBreakoutScreenerView data={dryVolumeBreakout} filters={dryVolumeBreakoutFilters} loading={loading} onRun={runDryVolumeBreakoutScreener} onTradeCreated={loadPortfolio} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Backtest" && <BasketBacktestView filters={basketBacktestFilters} setFilters={setBasketBacktestFilters} data={basketBacktest} loading={loading} onRun={runBasketBacktest} />}
     {view === "Stock Search" && <><section className="search-card"><div className="search-copy"><p className="eyebrow">01 / Research a security</p><h2>Find an Indian equity</h2><p>Search the Dhan security master by symbol or company name.</p></div><div className="search-area"><form onSubmit={(e) => { e.preventDefault(); runSearch(); }}><div className="search-row"><div className="search-input"><Search size={18} /><input placeholder="Search RELIANCE, TCS, INFY…" value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>Enter</kbd></div><button className="primary search-button" type="submit" disabled={loading}>{loading ? "Searching…" : "Search"}</button></div></form>{results.length > 0 && <div className="results">{results.map((s) => <button key={`${s.securityId}-${s.segment}`} onClick={() => { setSecurity(s); setQuery(""); setResults([]); setAnalysis(null); }}><div><b>{s.symbol}</b><span>{s.name}</span></div><small>{s.exchange} · {s.securityId}</small></button>)}</div>}<div className="search-hint"><Database size={14} /><span>Security IDs are resolved from Dhan’s master—not ticker text alone.</span></div></div></section>{!configured && <section className="setup"><div className="setup-icon"><ShieldCheck size={25} /></div><div><p className="eyebrow">Secure data connection</p><h2>Connect your Dhan account to begin</h2><p>Market data and calculated statistics remain empty until server-side Dhan credentials are configured.</p></div><code>DHAN_CLIENT_ID= · DHAN_ACCESS_TOKEN=</code></section>}{!security && <section className="empty"><div className="empty-art"><CalendarDays size={30} /></div><p className="eyebrow">Awaiting a selection</p><h2>Start with a security search</h2><p>Select an equity to load its daily OHLCV history and derive seasonality statistics.</p></section>}{security && <><section className="stock-header"><div><div className="ticker-row"><span className="ticker">{security.symbol}</span><span className="exchange">{security.exchange}</span></div><h2>{security.name}</h2><p>Security ID {security.securityId} · Daily OHLCV · {analysis ? `${analysis.candles.length} trading sessions` : "Not loaded"}</p></div><button className="primary" onClick={() => analyze()} disabled={loading || !configured}>{loading ? <><RefreshCw size={16} className="spin" /> Calculating…</> : <><BarChart3 size={16} /> Load seasonality</>}</button></section>{analysis && <><section className="stats-grid"><Stat label="Current close" value={latest ? money(latest.close) : "—"} sub={latest?.date} /><Stat label="History available" value={`${new Set(analysis.candles.map((c) => c.date.slice(0, 4))).size} years`} sub="Complete years used" /><Stat label="Data through" value={latest?.date || "—"} sub="Cached locally" /><Stat label="Method" value="Daily OHLCV" sub="Adjusted data must be verified" /></section></>}</>}</>}
     {view === "Settings" && <TradingSettingsView settings={tradingSettings} onSaved={setTradingSettings} />}
-    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "StochRSI", "Dry Breakout", "Backtest", "Settings"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
+    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "20 EMA Base", "30 in 30", "StochRSI", "Dry Breakout", "Backtest", "Settings"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
   </div></main>;
 }
 
