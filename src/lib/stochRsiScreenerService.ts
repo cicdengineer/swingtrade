@@ -221,7 +221,7 @@ function analyzeStock(input: {
   if (!current || !previous || !latest.setup_type || latest.daily_stoch_d === undefined || latest.weekly_stoch_d === undefined) return null;
   const recentSignal = [...enriched.entries()]
     .reverse()
-    .find(([index, point]) => currentIndex - index < 5 && point.entry_signal && point.entry_signal !== "NONE");
+    .find(([index, point]) => currentIndex - index < 15 && point.entry_signal && point.entry_signal !== "NONE");
   if (!recentSignal) return null;
   const [signalIndex, signalPoint] = recentSignal;
   const signalRow = rows[signalIndex];

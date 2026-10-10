@@ -75,7 +75,7 @@ type StochRsiSortKey = "entry" | "symbol" | "setup" | "daily_d" | "weekly_d" | "
 type StochRsiRecentPoint = DailyChartPoint & { daily_stoch_d?: number; weekly_stoch_d?: number; setup_type?: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal?: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; new_lowest_candle?: boolean; lowest_price_in_zone?: number };
 type StochRsiRow = { status: "GREEN_SETUP" | "BLUE_SETUP"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; weekly_stoch_d: number; daily_stoch_d: number; setup_type: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; current_daily_high: number; previous_daily_high: number; previous_close: number; current_daily_low: number; latest_signal_date: string; latest_signal_high: number; latest_signal_type: "GREEN_ENTRY" | "BLUE_ENTRY"; latest_signal_age: number; new_lowest_candle: boolean; lowest_price_in_zone: number; ema10?: number; ema20?: number; ema50?: number; ema200?: number; data_freshness: string; candle_completed: boolean; provisional: boolean; reason: string; recent: StochRsiRecentPoint[] };
 type StochRsiResponse = { filters: StochRsiFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; snapshotDate: string | null; results: StochRsiRow[]; generatedAt: string };
-type StochRsiDisplayFilters = { signal: "ALL" | "LATEST_CLOSED"; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean };
+type StochRsiDisplayFilters = { signal: "LAST_5" | "LAST_15" | "LATEST_CLOSED"; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean };
 type EmaReversalFilters = { universe: "ALL" | UniverseName; emaPeriod: number; downtrendLookback: number; minBelowEmaPct: number; minHistoricalDeclinePct: number; emaSlopeLookback: number; breakoutVolumeMultiplier: number; minPostBreakoutAdvancePct: number; minPullbackPct: number; maxPullbackPct: number; minPullbackDays: number; maxPullbackDays: number; maxEmaDownsideTolerancePct: number; minBreakoutAge: number; maxBreakoutAge: number; requireVolumeContraction: boolean; firstPullbackOnly: boolean; allowSidewaysConsolidation: boolean; allowReacceleration: boolean; maxCompletedPullbacks: number; minSetupScore: number; showAll: boolean };
 type EmaReversalSortKey = "score" | "symbol" | "stage" | "breakout_recent" | "advance" | "pullback" | "ema_dist" | "volume_dryness" | "setup_recent";
 type EmaReversalRow = { status: "FIRST_PULLBACK" | "TIGHT_CONSOLIDATION" | "REACCELERATION" | "INVALIDATED" | "NO_SETUP" | "INSUFFICIENT_DATA"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema50: number; distance_from_ema_pct: number; breakout_date?: string; breakout_close?: number; breakout_volume_ratio?: number; confirmation_date?: string; confirmation_volume_ratio?: number; post_breakout_high_date?: string; post_breakout_high?: number; advance_pct?: number; pullback_start_date?: string; pullback_pct?: number; pullback_volume_ratio?: number; days_in_pullback?: number; completed_pullback_count: number; setup_score: number; score_breakdown: Record<string, number>; downtrend_below_ema_pct?: number; historical_decline_pct?: number; ema50_slope_pct?: number; average_volume_5?: number; average_volume_20?: number; setup_type?: "Pullback" | "Sideways Consolidation" | "Reacceleration"; reason: string; recent: DailyChartPoint[] };
@@ -243,7 +243,7 @@ const defaultStochRsiFilters: StochRsiFilters = {
   showAll: false,
 };
 const defaultStochRsiDisplayFilters: StochRsiDisplayFilters = {
-  signal: "ALL",
+  signal: "LAST_5",
   above50EmaOnly: false,
   nearPreviousDayHighOnly: false,
   upTodayOnly: false,
@@ -718,7 +718,8 @@ const matchesStochRsiFilters = (row: StochRsiRow, filters: StochRsiDisplayFilter
   (!filters.decliningVolumeOnly || stochDryVolumeStreak(row)) &&
   (!filters.dryVolumeOnly || stochDryVolumeRatio(row)) &&
   (!filters.redCandleOnly || stochClosedRedPreviousSession(row)) &&
-  (filters.signal === "ALL" || latestCompletedStochSignal(row)?.trade_date === row.recent.filter((point) => point.trade_date !== liveTradeDate()).at(-1)?.trade_date);
+  (filters.signal === "LAST_15" || row.latest_signal_age < 5) &&
+  (filters.signal !== "LATEST_CLOSED" || latestCompletedStochSignal(row)?.trade_date === row.recent.filter((point) => point.trade_date !== liveTradeDate()).at(-1)?.trade_date);
 
 function SetupSparkline({ row, onOpen }: { row: BreakoutChartRow; onOpen: () => void }) {
   const chartRows = lastTradingMonths(row.recent);
@@ -2532,13 +2533,20 @@ function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signal
   </div>;
 }
 
-function StochRsiRiskTiles({ selected, activeRows, hourlyRows, hourlyLoading, hourlyError, settings }: { selected: StochRsiRow; activeRows: StochRsiRecentPoint[]; hourlyRows: DailyChartPoint[]; hourlyLoading: boolean; hourlyError?: string; settings?: TradingSettings | null }) {
+const signalSwingLowStop = (rows: StochRsiRecentPoint[], signalDate: string) => {
+  const signalIndex = rows.findIndex((row) => row.trade_date === signalDate);
+  if (signalIndex <= 0) return undefined;
+  const swingRows = rows.slice(Math.max(0, signalIndex - 5), signalIndex);
+  return swingRows.length ? Math.min(...swingRows.map((row) => row.low)) : undefined;
+};
+
+function StochRsiRiskTiles({ selected, activeRows, settings }: { selected: StochRsiRow; activeRows: StochRsiRecentPoint[]; settings?: TradingSettings | null }) {
   const entry = selected.current_close;
   const dailyStop = latestDailyStop(activeRows.length ? activeRows : selected.recent);
-  const hourlyStop = latestHourlyStop(hourlyRows);
+  const swingStop = signalSwingLowStop(selected.recent, selected.latest_signal_date);
   return <div className="entry-sizing-grid">
     <EntrySizingTile title="Daily Sizing" entry={entry} stop={dailyStop} settings={settings} />
-    <EntrySizingTile title="Hourly Sizing" entry={entry} stop={hourlyStop} settings={settings} loading={!hourlyError && (hourlyLoading || !hourlyRows.length)} />
+    <EntrySizingTile title="Swing Low Sizing" entry={entry} stop={swingStop} settings={settings} />
   </div>;
 }
 
@@ -2590,7 +2598,7 @@ function StochRsiChartPanel({ selected, chartMonths, settings }: { selected: Sto
   const dailyRows = lastTradingMonths(mergeLiveDailyCandle(selected.recent, liveDailyRow) as StochRsiRecentPoint[], chartMonths === 6 ? 126 : 63);
   const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
   return <div className="chart-shell">
-    <StochRsiRiskTiles selected={selected} activeRows={dailyRows} hourlyRows={hourlyRows} hourlyLoading={hourlyLoading} hourlyError={hourlyError} settings={settings} />
+    <StochRsiRiskTiles selected={selected} activeRows={dailyRows} settings={settings} />
     <div className="chart-toolbar">
       <div>
         <p className="eyebrow">Chart timeframe</p>
@@ -2726,7 +2734,7 @@ function StochRsiScreenerView({ data, filters, setFilters, loading, onRun, onRes
       <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
     </div>
     <div className="thirty-in-thirty-switches stoch-rsi-switches">
-      <label>Signal<select value={displayFilters.signal} onChange={(e) => setDisplayFilters({ ...displayFilters, signal: e.target.value as StochRsiDisplayFilters["signal"] })}><option value="ALL">Last 5 days</option><option value="LATEST_CLOSED">Latest closed</option></select></label>
+      <label>Signal<select value={displayFilters.signal} onChange={(e) => setDisplayFilters({ ...displayFilters, signal: e.target.value as StochRsiDisplayFilters["signal"] })}><option value="LAST_5">Last 5 days</option><option value="LAST_15">Last 15 days</option><option value="LATEST_CLOSED">Latest closed</option></select></label>
       <label><input type="checkbox" checked={displayFilters.above50EmaOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, above50EmaOnly: e.target.checked })}/><span>Above 50EMA</span></label>
       <label><input type="checkbox" checked={displayFilters.nearPreviousDayHighOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, nearPreviousDayHighOnly: e.target.checked })}/><span>Near PD High</span></label>
       <label><input type="checkbox" checked={displayFilters.upTodayOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, upTodayOnly: e.target.checked })}/><span>Up</span></label>
