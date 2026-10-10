@@ -1212,9 +1212,14 @@ function PortfolioStopInput({ holding, onSaved }: { holding: PortfolioHolding; o
   }
   return <div className="portfolio-sl-control">
     <input className="plain-input" type="number" step="0.05" value={value} onChange={(event) => setValue(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === "Enter") void save(); }} />
-    <small className={holding.riskFree ? "risk-free-label" : holdingRisk(holding) > 0 ? "risk-live-label" : ""}>{holding.riskFree ? "Risk-free" : holding.stopLoss === undefined ? "Enter SL" : `Risk ${rupees(holdingRisk(holding))}`}</small>
     {saving && <span>Saving</span>}
   </div>;
+}
+
+function RiskCell({ holding }: { holding: PortfolioHolding }) {
+  if (holding.riskFree) return <span className="risk-free-pill">RiskFree</span>;
+  const risk = holdingRisk(holding);
+  return <span className={risk > 0 ? "portfolio-risk-value negative" : "portfolio-risk-value"}>{holding.stopLoss === undefined ? "—" : rupees(risk)}</span>;
 }
 
 function SwingHighPill({ holding }: { holding: PortfolioHolding }) {
@@ -1345,7 +1350,7 @@ function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHold
     {holdings.length ? <div className="table-wrap">
       <table className="portfolio-holdings-table">
         <thead>
-          <tr><th>Symbol</th><th>Chart</th><th>Qty</th><th>Days</th><th>Avg Cost</th><th>SL / Risk</th><th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>10 EMA</th><th>50 EMA</th><th>Swing High</th></tr>
+          <tr><th>Symbol</th><th>Chart</th><th>Qty</th><th>Days</th><th>Avg Cost</th><th>SL</th><th>Risk</th><th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>10 EMA</th><th>50 EMA</th><th>Swing High</th></tr>
         </thead>
         <tbody>
           {holdings.map((holding) => {
@@ -1361,6 +1366,7 @@ function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHold
               <td>{days === undefined ? "—" : days}<small className="sample-warning">trading days</small></td>
               <td>{money(holding.avgCostPrice)}</td>
               <td><PortfolioStopInput holding={holding} onSaved={onStopLossSaved} /></td>
+              <td><RiskCell holding={holding} /></td>
               <td>{rupees(holding.invested)}</td>
               <td className={`portfolio-live-price ${todayTone}`}>{holding.currentPrice === undefined ? "—" : money(holding.currentPrice)}<small>{holding.todayChangePct === undefined ? "waiting tick" : "live tick"}</small></td>
               <td className={`portfolio-live-change ${todayTone}`}>{holding.todayChangePct === undefined ? "—" : pct2(holding.todayChangePct)}</td>
