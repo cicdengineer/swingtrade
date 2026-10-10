@@ -2468,7 +2468,7 @@ function StochRsiTileChart({ row, chartMonths, onOpen }: { row: StochRsiRow; cha
     <svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true">
       <path className="spark-area" d={`${polylinePath(closes, 220, 82)} L220 82 L0 82 Z`} />
       <path className={trendUp ? "spark-line up" : "spark-line down"} d={polylinePath(closes, 220, 82)} />
-      {chartRows.map((point, index) => point.entry_signal && point.entry_signal !== "NONE" ? <polygon key={point.trade_date} className={point.entry_signal === "GREEN_ENTRY" ? "signal-triangle green" : "signal-triangle blue"} points={`${index * (220 / Math.max(1, chartRows.length - 1))},70 ${index * (220 / Math.max(1, chartRows.length - 1)) - 4},78 ${index * (220 / Math.max(1, chartRows.length - 1)) + 4},78`} /> : null)}
+      {chartRows.map((point, index) => point.entry_signal && point.entry_signal !== "NONE" ? <polygon key={point.trade_date} className={point.entry_signal === "GREEN_ENTRY" ? "signal-triangle green" : "signal-triangle blue"} points={`${index * (220 / Math.max(1, chartRows.length - 1))},73 ${index * (220 / Math.max(1, chartRows.length - 1)) - 3},78 ${index * (220 / Math.max(1, chartRows.length - 1)) + 3},78`} /> : null)}
     </svg>
   </span>;
 }
@@ -2515,7 +2515,7 @@ function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signal
           <title>{`${chartDateLabel(row.trade_date, timeframe)} O ${row.open.toFixed(2)} H ${row.high.toFixed(2)} L ${row.low.toFixed(2)} C ${row.close.toFixed(2)}${row.entry_signal && row.entry_signal !== "NONE" ? ` ${row.entry_signal}` : ""}`}</title>
           <line x1={x} x2={x} y1={highY} y2={lowY} />
           <rect x={x - bodyWidth / 2} y={bodyY} width={bodyWidth} height={bodyHeight} rx="1" />
-          {signalClass && <polygon className={`signal-triangle ${signalClass}`} points={`${x},${Math.min(priceHeight - 8, lowY + 12)} ${x - 5},${Math.min(priceHeight - 18, lowY + 2)} ${x + 5},${Math.min(priceHeight - 18, lowY + 2)}`} />}
+          {signalClass && <polygon className={`signal-triangle ${signalClass}`} points={`${x},${Math.min(priceHeight - 12, lowY + 4)} ${x - 3.5},${Math.min(priceHeight - 6, lowY + 11)} ${x + 3.5},${Math.min(priceHeight - 6, lowY + 11)}`} />}
         </g>;
       })}
       <path className="ema-line" d={emaPath} />
