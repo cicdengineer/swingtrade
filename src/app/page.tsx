@@ -87,7 +87,7 @@ type DryVolumeBreakoutResponse = { filters: DryVolumeBreakoutFilters; evaluated:
 type BreakoutChartRow = { security_id: string; symbol: string; company_name: string; current_date: string; current_close: number; ema50: number; distance_from_ema_pct: number; reason: string; recent: DailyChartPoint[] };
 type FilterKey = "minAverage" | "minMedian" | "minWinRate" | "minN" | "maxAvgMedianGap" | "minMaeP75" | "minWorstReturn";
 type Filters = Record<FilterKey, { enabled: boolean; value: number }>;
-type PortfolioHolding = { exchange: string; tradingSymbol: string; securityId: string; isin: string; totalQty: number; dpQty: number; t1Qty: number; availableQty: number; collateralQty: number; avgCostPrice: number; invested: number; unrealizedPnl: number; dayPnl: number; productType: string; positionType: string; currentPrice?: number; todayChangePct?: number; stopLoss?: number; accountRisk?: number; riskFree?: boolean; ema50?: number; distanceFrom50EmaPct?: number; recent?: DailyChartPoint[]; brokerEntryDate?: string; brokerCalendarDaysHeld?: number; brokerTradingDaysHeld?: number; brokerOpenLots?: number };
+type PortfolioHolding = { exchange: string; tradingSymbol: string; securityId: string; isin: string; totalQty: number; dpQty: number; t1Qty: number; availableQty: number; collateralQty: number; avgCostPrice: number; invested: number; unrealizedPnl: number; dayPnl: number; productType: string; positionType: string; currentPrice?: number; todayChangePct?: number; stopLoss?: number; accountRisk?: number; riskFree?: boolean; ema10?: number; distanceFrom10EmaPct?: number; ema50?: number; distanceFrom50EmaPct?: number; recent?: DailyChartPoint[]; brokerEntryDate?: string; brokerCalendarDaysHeld?: number; brokerTradingDaysHeld?: number; brokerOpenLots?: number };
 type ClosedTrade = { date: string; symbol: string; securityId: string; quantity: number; buyPrice: number; sellPrice: number; grossPnl: number; charges: number; netPnl: number };
 type TradingSettings = { id: "default"; totalCapital: number; riskPercent: number; defaultStopSource: "Setup Candle Low" | "Manual"; defaultManagementTimeframe: "Daily" | "Hourly"; initialManagementDays: number; partialStartDay: number; partialEndDay: number; partialPercent: number; partialMinR: number; defaultTrailMA: "10 EMA" | "20 EMA" | "Manual"; moveStopToBreakevenAfterPartial: boolean; exitConfirmationRule: "Close below EMA" | "Intraday break" | "2 closes below EMA"; portfolioRiskNormalPct: number; portfolioRiskElevatedPct: number; portfolioRiskHighPct: number };
 type TradeEvent = { id: string; managedTradeId: string; eventType: string; timestamp: string; price?: number; quantity?: number; notes?: string; source: string };
@@ -904,6 +904,7 @@ function liveAdjustedPortfolio(portfolio: PortfolioResponse | null, liveTicks: R
       currentPrice: tick.ltp,
       todayChangePct: tick.prevClose && tick.prevClose > 0 ? ((tick.ltp / tick.prevClose) - 1) * 100 : holding.todayChangePct,
       unrealizedPnl: (tick.ltp - holding.avgCostPrice) * holding.totalQty,
+      distanceFrom10EmaPct: holding.ema10 ? ((tick.ltp - holding.ema10) / holding.ema10) * 100 : holding.distanceFrom10EmaPct,
       distanceFrom50EmaPct: holding.ema50 ? ((tick.ltp - holding.ema50) / holding.ema50) * 100 : holding.distanceFrom50EmaPct,
     };
   });
@@ -913,6 +914,18 @@ function liveAdjustedPortfolio(portfolio: PortfolioResponse | null, liveTicks: R
 
 const holdingRisk = (holding: PortfolioHolding) => holding.stopLoss === undefined || holding.stopLoss >= holding.avgCostPrice ? 0 : Math.max(0, holding.avgCostPrice - holding.stopLoss) * holding.totalQty;
 const portfolioAccountRisk = (holdings: PortfolioHolding[]) => holdings.reduce((sum, holding) => sum + holdingRisk(holding), 0);
+const previousSwingHigh = (holding: PortfolioHolding, lookback = 20) => {
+  const rows = holding.recent ?? [];
+  const previous = rows.slice(Math.max(0, rows.length - lookback - 1), -1);
+  const high = previous.length ? Math.max(...previous.map((row) => row.high)) : undefined;
+  return high && Number.isFinite(high) ? high : undefined;
+};
+const isBreakingSwingHigh = (holding: PortfolioHolding) => {
+  const high = previousSwingHigh(holding);
+  const price = holding.currentPrice ?? holding.recent?.at(-1)?.close;
+  return Boolean(high && price && price >= high);
+};
+const needsMoveSlToCost = (holding: PortfolioHolding) => Boolean(holding.ema10 && holding.ema10 > holding.avgCostPrice && !holding.riskFree);
 
 function LiveFeedStatusIndicator({ status, message, view, dataJob }: { status: LiveFeedStatus; message?: string; view: View; dataJob?: DataDownloadJob | null }) {
   if (view === "Data Status") {
@@ -1199,9 +1212,21 @@ function PortfolioStopInput({ holding, onSaved }: { holding: PortfolioHolding; o
   }
   return <div className="portfolio-sl-control">
     <input className="plain-input" type="number" step="0.05" value={value} onChange={(event) => setValue(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === "Enter") void save(); }} />
-    <small>{holding.riskFree ? "Risk-free" : holding.stopLoss === undefined ? "Enter SL" : rupees(holdingRisk(holding))}</small>
+    <small className={holding.riskFree ? "risk-free-label" : holdingRisk(holding) > 0 ? "risk-live-label" : ""}>{holding.riskFree ? "Risk-free" : holding.stopLoss === undefined ? "Enter SL" : `Risk ${rupees(holdingRisk(holding))}`}</small>
     {saving && <span>Saving</span>}
   </div>;
+}
+
+function SwingHighPill({ holding }: { holding: PortfolioHolding }) {
+  const swingHigh = previousSwingHigh(holding);
+  const breaking = isBreakingSwingHigh(holding);
+  return <span className={`swing-high-pill ${breaking ? "breaking" : "waiting"}`}><b>{breaking ? "Breaking" : "Below"}</b><small>{swingHigh === undefined ? "No swing" : money(swingHigh)}</small></span>;
+}
+
+function TenEmaCell({ holding }: { holding: PortfolioHolding }) {
+  const alert = needsMoveSlToCost(holding);
+  if (holding.ema10 === undefined) return "—";
+  return <span className={`portfolio-ema-pill ten-ema ${alert ? "move-sl" : "above"}`}><b>{money(holding.ema10)}</b><small>{alert ? "Move SL to cost" : holding.distanceFrom10EmaPct === undefined ? "10 EMA" : pct2(holding.distanceFrom10EmaPct)}</small></span>;
 }
 
 function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
@@ -1214,17 +1239,52 @@ function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
   const recentRanges = rows.slice(-5).map((row) => row.high - row.low);
   const priorRanges = rows.slice(-25, -5).map((row) => row.high - row.low);
   const contraction = recentRanges.length > 0 && priorRanges.length > 0 && average(recentRanges) < average(priorRanges) * 0.75;
+  const above10 = holding.distanceFrom10EmaPct !== undefined && holding.distanceFrom10EmaPct >= 0;
   const above50 = holding.distanceFrom50EmaPct !== undefined && holding.distanceFrom50EmaPct >= 0;
   const extremeMove = Boolean(previous?.close && last && Math.abs(((last.close / previous.close) - 1) * 100) >= 5);
+  const swingBreak = isBreakingSwingHigh(holding);
+  const moveSl = needsMoveSlToCost(holding);
   const tiles = [
     { label: "3 Green", value: last3Green ? "Yes" : "No", good: last3Green },
     { label: "High Vol", value: highVol ? `${last?.volume_ratio?.toFixed(1)}x` : "No", good: highVol },
     { label: "Contraction", value: contraction ? "Yes" : "No", good: contraction },
-    { label: "Above Avgs", value: above50 ? "Yes" : "No", good: above50 },
+    { label: "Above 10/50", value: above10 && above50 ? "Yes" : "No", good: above10 && above50 },
+    { label: "Swing High", value: swingBreak ? "Breaking" : "Below", good: swingBreak },
+    { label: "10 EMA SL Cue", value: moveSl ? "Move SL" : "No cue", good: moveSl || holding.riskFree },
     { label: "Extreme Move", value: extremeMove ? "Yes" : "No", good: !extremeMove },
     { label: "Open Risk", value: holding.riskFree ? "Risk-free" : rupees(holdingRisk(holding)), good: holdingRisk(holding) === 0 },
   ];
   return <div className="portfolio-decision-grid">{tiles.map((tile) => <div key={tile.label} className={tile.good ? "good" : "watch"}><span>{tile.label}</span><b>{tile.value}</b></div>)}</div>;
+}
+
+function HoldingDecisionMeter({ holding }: { holding: PortfolioHolding }) {
+  const rows = holding.recent ?? [];
+  const last = rows.at(-1);
+  const previous = rows.at(-2);
+  const last3Green = rows.slice(-3).length === 3 && rows.slice(-3).every((row) => row.close >= row.open);
+  const highVol = Boolean(last?.volume_ratio && last.volume_ratio >= 1.5);
+  const above10 = holding.distanceFrom10EmaPct !== undefined && holding.distanceFrom10EmaPct >= 0;
+  const above50 = holding.distanceFrom50EmaPct !== undefined && holding.distanceFrom50EmaPct >= 0;
+  const swingBreak = isBreakingSwingHigh(holding);
+  const riskFree = holding.riskFree || holdingRisk(holding) === 0;
+  const extremeMove = Boolean(previous?.close && last && Math.abs(((last.close / previous.close) - 1) * 100) >= 5);
+  const score = Math.max(0, Math.min(100,
+    (above50 ? 20 : 0) +
+    (above10 ? 15 : 0) +
+    (swingBreak ? 20 : 0) +
+    (last3Green ? 12 : 0) +
+    (highVol ? 10 : 0) +
+    (riskFree ? 15 : 0) +
+    (!extremeMove ? 8 : -10),
+  ));
+  const action = score >= 75 ? "Hold / Trail" : score >= 55 ? "Hold, tighten risk" : score >= 38 ? "Book partial" : "Exit watch";
+  const tone = score >= 75 ? "good" : score >= 55 ? "watch" : score >= 38 ? "partial" : "danger";
+  const note = score >= 75 ? "Trend and risk are aligned." : score >= 55 ? "Trade is working, but keep protection active." : score >= 38 ? "Momentum is mixed; reduce exposure if price stalls." : "Weak score; protect capital first.";
+  return <div className={`decision-meter ${tone}`}>
+    <div><span>Overall Meter</span><b>{action}</b><small>{note}</small></div>
+    <strong>{score}</strong>
+    <div className="decision-track"><i style={{ width: `${score}%` }} /></div>
+  </div>;
 }
 
 function PortfolioHoldingChart({ holding }: { holding: PortfolioHolding }) {
@@ -1272,7 +1332,7 @@ function PortfolioHoldingChart({ holding }: { holding: PortfolioHolding }) {
 }
 
 function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHolding; onClose: () => void }) {
-  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{holding.tradingSymbol}</h2><p className="muted">50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={holding} /><HoldingDecisionTiles holding={holding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={holding.currentPrice === undefined ? "—" : money(holding.currentPrice)} sub={holding.todayChangePct === undefined ? undefined : pct2(holding.todayChangePct)} /><Stat label="Avg Cost" value={money(holding.avgCostPrice)} sub={`Qty ${holding.totalQty}`} /><Stat label="50 EMA" value={holding.ema50 === undefined ? "—" : money(holding.ema50)} sub={holding.distanceFrom50EmaPct === undefined ? undefined : pct2(holding.distanceFrom50EmaPct)} /><Stat label="SL" value={holding.stopLoss === undefined ? "—" : money(holding.stopLoss)} sub={holding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
+  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{holding.tradingSymbol}</h2><p className="muted">50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={holding} /><HoldingDecisionTiles holding={holding} /><HoldingDecisionMeter holding={holding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={holding.currentPrice === undefined ? "—" : money(holding.currentPrice)} sub={holding.todayChangePct === undefined ? undefined : pct2(holding.todayChangePct)} /><Stat label="Avg Cost" value={money(holding.avgCostPrice)} sub={`Qty ${holding.totalQty}`} /><Stat label="10 EMA" value={holding.ema10 === undefined ? "—" : money(holding.ema10)} sub={needsMoveSlToCost(holding) ? "Move SL to cost" : undefined} /><Stat label="50 EMA" value={holding.ema50 === undefined ? "—" : money(holding.ema50)} sub={holding.distanceFrom50EmaPct === undefined ? undefined : pct2(holding.distanceFrom50EmaPct)} /><Stat label="SL" value={holding.stopLoss === undefined ? "—" : money(holding.stopLoss)} sub={holding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
 }
 
 function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHolding[]; onStopLossSaved: () => Promise<void> | void }) {
@@ -1285,14 +1345,13 @@ function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHold
     {holdings.length ? <div className="table-wrap">
       <table className="portfolio-holdings-table">
         <thead>
-          <tr><th>Symbol</th><th>Chart</th><th>Qty</th><th>Days</th><th>Available</th><th>Avg Cost</th><th>SL</th><th>Risk</th><th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>50 EMA</th><th>Actions</th></tr>
+          <tr><th>Symbol</th><th>Chart</th><th>Qty</th><th>Days</th><th>Avg Cost</th><th>SL / Risk</th><th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>10 EMA</th><th>50 EMA</th><th>Swing High</th></tr>
         </thead>
         <tbody>
           {holdings.map((holding) => {
             const days = holding.brokerTradingDaysHeld;
             const daysLeft = days === undefined ? undefined : Math.max(3 - days, 0);
             const exitDue = daysLeft === 0;
-            const actionTone = exitDue ? "exit" : daysLeft === 1 ? "danger" : daysLeft === 2 ? "good" : "neutral";
             const above50Ema = holding.distanceFrom50EmaPct !== undefined && holding.distanceFrom50EmaPct >= 0;
             const todayTone = holding.todayChangePct === undefined ? "neutral" : holding.todayChangePct >= 0 ? "positive" : "negative";
             return <tr key={holding.securityId} className={exitDue ? "portfolio-exit-row" : ""}>
@@ -1300,16 +1359,15 @@ function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHold
               <td><HoldingMiniChart holding={holding} onOpen={() => setSelected(holding)} /></td>
               <td>{holding.totalQty}</td>
               <td>{days === undefined ? "—" : days}<small className="sample-warning">trading days</small></td>
-              <td>{holding.availableQty}</td>
               <td>{money(holding.avgCostPrice)}</td>
               <td><PortfolioStopInput holding={holding} onSaved={onStopLossSaved} /></td>
-              <td className={holdingRisk(holding) > 0 ? "negative" : "positive"}>{holding.riskFree ? "Risk-free" : rupees(holdingRisk(holding))}</td>
               <td>{rupees(holding.invested)}</td>
               <td className={`portfolio-live-price ${todayTone}`}>{holding.currentPrice === undefined ? "—" : money(holding.currentPrice)}<small>{holding.todayChangePct === undefined ? "waiting tick" : "live tick"}</small></td>
               <td className={`portfolio-live-change ${todayTone}`}>{holding.todayChangePct === undefined ? "—" : pct2(holding.todayChangePct)}</td>
               <td className={`portfolio-pnl ${holding.unrealizedPnl >= 0 ? "positive" : "negative"}`}>{rupees(holding.unrealizedPnl)}</td>
+              <td><TenEmaCell holding={holding} /></td>
               <td>{holding.ema50 === undefined || holding.distanceFrom50EmaPct === undefined ? "—" : <span className={`portfolio-ema-pill ${above50Ema ? "above" : "below"}`}><b>{above50Ema ? "Above" : "Below"}</b><small>{money(holding.ema50)}</small></span>}</td>
-              <td><span className={`portfolio-action-pill ${actionTone}`}>{exitDue ? "EXIT CHECK" : daysLeft === undefined ? "REVIEW" : `${daysLeft}D LEFT`}</span></td>
+              <td><SwingHighPill holding={holding} /></td>
             </tr>;
           })}
         </tbody>

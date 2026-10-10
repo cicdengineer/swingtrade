@@ -236,6 +236,7 @@ function latestEma(prices: DailyPrice[], securityId: string, period: number) {
 function recentChartRows(prices: DailyPrice[], securityId: string) {
   const rows = securityPrices(prices, securityId).slice(-120);
   const closes = rows.map((row) => row.close);
+  const ema10 = calculateEma(closes, 10);
   const ema50 = calculateEma(closes, 50);
   return rows.map((row, index) => {
     const previousVolume = rows.slice(Math.max(0, index - 20), index).map((item) => item.volume ?? 0).filter((volume) => volume > 0);
@@ -246,6 +247,7 @@ function recentChartRows(prices: DailyPrice[], securityId: string) {
       high: row.high ?? row.close,
       low: row.low ?? row.close,
       close: row.close,
+      ema10: ema10[index],
       ema50: ema50[index],
       volume: row.volume ?? 0,
       volume_ratio: averageVolume > 0 && row.volume ? row.volume / averageVolume : undefined,
@@ -285,6 +287,7 @@ function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: nu
   const brokerEntryDate = holdingEntryDate(openLots) ?? today;
   const invested = input.totalQty * input.avgCostPrice;
   const ltp = holdingLtp(input, position, position ? undefined : latestPrice(prices, input.securityId));
+  const ema10 = latestEma(prices, input.securityId, 10);
   const ema50 = latestEma(prices, input.securityId, 50);
   const holdingPnl = numberField(input, ["unrealizedProfit", "unrealizedPnl", "pnl", "totalPnl"]);
   const positionPnl = position && openBuyQty(position) > 0 ? position.unrealizedProfit : undefined;
@@ -301,7 +304,9 @@ function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: nu
     stopLoss,
     accountRisk,
     riskFree,
+    ema10,
     ema50,
+    distanceFrom10EmaPct: ema10 && ltp ? ((ltp - ema10) / ema10) * 100 : undefined,
     distanceFrom50EmaPct: ema50 && ltp ? ((ltp - ema50) / ema50) * 100 : undefined,
     recent: recentChartRows(prices, input.securityId),
     productType: position?.productType ?? "CNC",
