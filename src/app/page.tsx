@@ -87,7 +87,7 @@ type DryVolumeBreakoutResponse = { filters: DryVolumeBreakoutFilters; evaluated:
 type BreakoutChartRow = { security_id: string; symbol: string; company_name: string; current_date: string; current_close: number; ema50: number; distance_from_ema_pct: number; reason: string; recent: DailyChartPoint[] };
 type FilterKey = "minAverage" | "minMedian" | "minWinRate" | "minN" | "maxAvgMedianGap" | "minMaeP75" | "minWorstReturn";
 type Filters = Record<FilterKey, { enabled: boolean; value: number }>;
-type PortfolioHolding = { exchange: string; tradingSymbol: string; securityId: string; isin: string; totalQty: number; dpQty: number; t1Qty: number; availableQty: number; collateralQty: number; avgCostPrice: number; invested: number; unrealizedPnl: number; dayPnl: number; productType: string; positionType: string; currentPrice?: number; todayChangePct?: number; ema10?: number; distanceFrom10EmaPct?: number; brokerEntryDate?: string; brokerCalendarDaysHeld?: number; brokerTradingDaysHeld?: number; brokerOpenLots?: number };
+type PortfolioHolding = { exchange: string; tradingSymbol: string; securityId: string; isin: string; totalQty: number; dpQty: number; t1Qty: number; availableQty: number; collateralQty: number; avgCostPrice: number; invested: number; unrealizedPnl: number; dayPnl: number; productType: string; positionType: string; currentPrice?: number; todayChangePct?: number; stopLoss?: number; accountRisk?: number; riskFree?: boolean; ema50?: number; distanceFrom50EmaPct?: number; recent?: DailyChartPoint[]; brokerEntryDate?: string; brokerCalendarDaysHeld?: number; brokerTradingDaysHeld?: number; brokerOpenLots?: number };
 type ClosedTrade = { date: string; symbol: string; securityId: string; quantity: number; buyPrice: number; sellPrice: number; grossPnl: number; charges: number; netPnl: number };
 type TradingSettings = { id: "default"; totalCapital: number; riskPercent: number; defaultStopSource: "Setup Candle Low" | "Manual"; defaultManagementTimeframe: "Daily" | "Hourly"; initialManagementDays: number; partialStartDay: number; partialEndDay: number; partialPercent: number; partialMinR: number; defaultTrailMA: "10 EMA" | "20 EMA" | "Manual"; moveStopToBreakevenAfterPartial: boolean; exitConfirmationRule: "Close below EMA" | "Intraday break" | "2 closes below EMA"; portfolioRiskNormalPct: number; portfolioRiskElevatedPct: number; portfolioRiskHighPct: number };
 type TradeEvent = { id: string; managedTradeId: string; eventType: string; timestamp: string; price?: number; quantity?: number; notes?: string; source: string };
@@ -107,6 +107,7 @@ type PortfolioResponse = {
   closedTrades: ClosedTrade[];
   equityCurve: { date: string; pnl: number; cumulative: number }[];
   monthlyPnl: { month: string; pnl: number }[];
+  marketIndexes?: { label: string; changePct?: number }[];
   stats: { financialYear: string; from: string; to: string; totalTrades: number; closedTrades: number; realizedPnl: number; grossPnl: number; charges: number; unrealizedPnl: number; totalInvested: number; portfolioPnl: number; winners: number; losers: number; winRate: number; averageWin: number; averageLoss: number; maxProfit: number; maxLoss: number; drawdown: number; winLossRatio: number };
   tradeManagement?: TradeManagementSnapshot;
   source?: { tradeHistoryFrom: string; tradeHistoryTo: string; inventoryHistoryFrom?: string; rawTrades: number; closedLots: number };
@@ -903,12 +904,15 @@ function liveAdjustedPortfolio(portfolio: PortfolioResponse | null, liveTicks: R
       currentPrice: tick.ltp,
       todayChangePct: tick.prevClose && tick.prevClose > 0 ? ((tick.ltp / tick.prevClose) - 1) * 100 : holding.todayChangePct,
       unrealizedPnl: (tick.ltp - holding.avgCostPrice) * holding.totalQty,
-      distanceFrom10EmaPct: holding.ema10 ? ((tick.ltp - holding.ema10) / holding.ema10) * 100 : holding.distanceFrom10EmaPct,
+      distanceFrom50EmaPct: holding.ema50 ? ((tick.ltp - holding.ema50) / holding.ema50) * 100 : holding.distanceFrom50EmaPct,
     };
   });
   const unrealizedPnl = holdings.reduce((sum, holding) => sum + holding.unrealizedPnl, 0);
   return { ...portfolio, holdings, stats: { ...portfolio.stats, unrealizedPnl, portfolioPnl: portfolio.stats.realizedPnl + unrealizedPnl } };
 }
+
+const holdingRisk = (holding: PortfolioHolding) => holding.stopLoss === undefined || holding.stopLoss >= holding.avgCostPrice ? 0 : Math.max(0, holding.avgCostPrice - holding.stopLoss) * holding.totalQty;
+const portfolioAccountRisk = (holdings: PortfolioHolding[]) => holdings.reduce((sum, holding) => sum + holdingRisk(holding), 0);
 
 function LiveFeedStatusIndicator({ status, message, view, dataJob }: { status: LiveFeedStatus; message?: string; view: View; dataJob?: DataDownloadJob | null }) {
   if (view === "Data Status") {
@@ -1164,7 +1168,115 @@ function ManageHoldingDrawer({ holding, onClose, onCreated }: { holding: Portfol
   return <div className="drawer"><div className="drawer-card narrow-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Add to Trade Management</p><h2>{holding.tradingSymbol}</h2><p className="muted">This enrolls an existing broker holding without placing any order. Entry date is prefilled from Dhan FIFO open lots when available.</p><div className="settings-grid compact-form"><label>Entry Date<input className="plain-input" type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)}/></label><label>Strategy<input className="plain-input" value={strategy} onChange={(e) => setStrategy(e.target.value)}/></label><label>Broker Open Since<input className="plain-input" value={holding.brokerEntryDate ?? "Unavailable"} readOnly /></label><label>Broker Days<input className="plain-input" value={holding.brokerCalendarDaysHeld === undefined ? "—" : `${holding.brokerCalendarDaysHeld}`} readOnly /></label><label>Avg Entry<input className="plain-input" value={money(holding.avgCostPrice)} readOnly /></label><label>Quantity<input className="plain-input" value={`${holding.totalQty}`} readOnly /></label><label>Initial Stop<input className="plain-input" type="number" step="0.05" value={initialStop} onChange={(e) => setInitialStop(Number(e.target.value))}/></label><label>Management Timeframe<select value={timeframe} onChange={(e) => setTimeframe(e.target.value as "Daily" | "Hourly")}><option>Daily</option><option>Hourly</option></select></label><label>Trail Method<select value={trail} onChange={(e) => setTrail(e.target.value as "10 EMA" | "20 EMA" | "Manual")}><option>10 EMA</option><option>20 EMA</option><option>Manual</option></select></label></div><button className="primary" onClick={create} disabled={saving || initialStop <= 0 || initialStop >= holding.avgCostPrice}>{saving ? "Adding..." : "Add Managed Trade"}</button></div></div>;
 }
 
-function PortfolioTable({ holdings }: { holdings: PortfolioHolding[] }) {
+function HoldingMiniChart({ holding, onOpen }: { holding: PortfolioHolding; onOpen: () => void }) {
+  const rows = lastTradingMonths(holding.recent ?? [], 63);
+  const closes = rows.map((row) => row.close);
+  const trendUp = closes.length > 1 && closes.at(-1)! >= closes[0];
+  return <button className="setup-sparkline portfolio-mini-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} title={`${holding.tradingSymbol} chart`}>
+    <svg viewBox="0 0 86 28" preserveAspectRatio="none" aria-hidden="true">
+      <path className="spark-area" d={closes.length ? `${polylinePath(closes, 86, 28)} L86 28 L0 28 Z` : ""} />
+      <path className={trendUp ? "spark-line up" : "spark-line down"} d={closes.length ? polylinePath(closes, 86, 28) : ""} />
+    </svg>
+  </button>;
+}
+
+function PortfolioStopInput({ holding, onSaved }: { holding: PortfolioHolding; onSaved: () => void }) {
+  const [value, setValue] = useState(holding.stopLoss === undefined ? "" : String(holding.stopLoss));
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setValue(holding.stopLoss === undefined ? "" : String(holding.stopLoss)), [holding.securityId, holding.stopLoss]);
+  async function save() {
+    const stopLoss = Number(value);
+    if (!Number.isFinite(stopLoss) || stopLoss <= 0) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/portfolio", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ securityId: holding.securityId, tradingSymbol: holding.tradingSymbol, isin: holding.isin, stopLoss }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error);
+      await onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+  return <div className="portfolio-sl-control">
+    <input className="plain-input" type="number" step="0.05" value={value} onChange={(event) => setValue(event.target.value)} onBlur={save} onKeyDown={(event) => { if (event.key === "Enter") void save(); }} />
+    <small>{holding.riskFree ? "Risk-free" : holding.stopLoss === undefined ? "Enter SL" : rupees(holdingRisk(holding))}</small>
+    {saving && <span>Saving</span>}
+  </div>;
+}
+
+function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
+  const rows = holding.recent ?? [];
+  const last = rows.at(-1);
+  const previous = rows.at(-2);
+  const last3 = rows.slice(-3);
+  const last3Green = last3.length === 3 && last3.every((row) => row.close >= row.open);
+  const highVol = Boolean(last?.volume_ratio && last.volume_ratio >= 1.5);
+  const recentRanges = rows.slice(-5).map((row) => row.high - row.low);
+  const priorRanges = rows.slice(-25, -5).map((row) => row.high - row.low);
+  const contraction = recentRanges.length > 0 && priorRanges.length > 0 && average(recentRanges) < average(priorRanges) * 0.75;
+  const above50 = holding.distanceFrom50EmaPct !== undefined && holding.distanceFrom50EmaPct >= 0;
+  const extremeMove = Boolean(previous?.close && last && Math.abs(((last.close / previous.close) - 1) * 100) >= 5);
+  const tiles = [
+    { label: "3 Green", value: last3Green ? "Yes" : "No", good: last3Green },
+    { label: "High Vol", value: highVol ? `${last?.volume_ratio?.toFixed(1)}x` : "No", good: highVol },
+    { label: "Contraction", value: contraction ? "Yes" : "No", good: contraction },
+    { label: "Above Avgs", value: above50 ? "Yes" : "No", good: above50 },
+    { label: "Extreme Move", value: extremeMove ? "Yes" : "No", good: !extremeMove },
+    { label: "Open Risk", value: holding.riskFree ? "Risk-free" : rupees(holdingRisk(holding)), good: holdingRisk(holding) === 0 },
+  ];
+  return <div className="portfolio-decision-grid">{tiles.map((tile) => <div key={tile.label} className={tile.good ? "good" : "watch"}><span>{tile.label}</span><b>{tile.value}</b></div>)}</div>;
+}
+
+function PortfolioHoldingChart({ holding }: { holding: PortfolioHolding }) {
+  const rows = lastTradingMonths(holding.recent ?? [], 90);
+  if (rows.length < 5) return <div className="chart-empty">Not enough rows for charting.</div>;
+  const width = 780;
+  const priceHeight = 260;
+  const volumeHeight = 70;
+  const gap = 18;
+  const totalHeight = priceHeight + volumeHeight + gap;
+  const values = [...rows.flatMap((row) => [row.high, row.low]), ...rows.map((row) => row.ema50).filter((value): value is number => value !== undefined), holding.avgCostPrice, holding.stopLoss ?? holding.avgCostPrice];
+  const priceMin = Math.min(...values);
+  const priceMax = Math.max(...values);
+  const slot = width / rows.length;
+  const bodyWidth = Math.max(3, Math.min(8, slot * 0.48));
+  const maxVolume = Math.max(...rows.map((row) => row.volume), 1);
+  const emaPath = rows.map((row, index) => ({ value: row.ema50, x: index * slot + slot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
+  const entryY = scaleValue(holding.avgCostPrice, priceMin, priceMax, priceHeight, 8);
+  const slY = holding.stopLoss ? scaleValue(holding.stopLoss, priceMin, priceMax, priceHeight, 8) : undefined;
+  return <div className="candle-chart portfolio-popup-chart">
+    <div className="chart-legend"><span><i className="legend-candle" />Daily candles</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume</span><span><i className="legend-entry" />Entry</span><span><i className="legend-stop" />SL</span></div>
+    <svg viewBox={`0 0 ${width} ${totalHeight}`} role="img" aria-label={`${holding.tradingSymbol} chart with 50 EMA, volume, entry and stop loss`}>
+      {rows.map((row, index) => {
+        const x = index * slot + slot / 2;
+        const openY = scaleValue(row.open, priceMin, priceMax, priceHeight, 8);
+        const closeY = scaleValue(row.close, priceMin, priceMax, priceHeight, 8);
+        const highY = scaleValue(row.high, priceMin, priceMax, priceHeight, 8);
+        const lowY = scaleValue(row.low, priceMin, priceMax, priceHeight, 8);
+        const up = row.close >= row.open;
+        const volumeBarHeight = Math.max(1, (row.volume / maxVolume) * volumeHeight);
+        return <g key={row.trade_date} className={up ? "candle up" : "candle down"}>
+          <title>{`${row.trade_date} O ${row.open.toFixed(2)} H ${row.high.toFixed(2)} L ${row.low.toFixed(2)} C ${row.close.toFixed(2)}`}</title>
+          <rect className="volume-bar" x={x - bodyWidth / 2} y={priceHeight + gap + volumeHeight - volumeBarHeight} width={bodyWidth} height={volumeBarHeight} rx="1" />
+          <line x1={x} x2={x} y1={highY} y2={lowY} />
+          <rect x={x - bodyWidth / 2} y={Math.min(openY, closeY)} width={bodyWidth} height={Math.max(1, Math.abs(closeY - openY))} rx="1" />
+        </g>;
+      })}
+      <path className="ema-line" d={emaPath} />
+      <line className="entry-line" x1="0" x2={width} y1={entryY} y2={entryY} />
+      {slY !== undefined && <line className="stop-line" x1="0" x2={width} y1={slY} y2={slY} />}
+      <text className="chart-label" x="0" y={Math.max(12, entryY - 4)}>Entry {money(holding.avgCostPrice)}</text>
+      {slY !== undefined && <text className="chart-label stop-label" x="0" y={Math.max(12, slY - 4)}>SL {money(holding.stopLoss!)}</text>}
+    </svg>
+  </div>;
+}
+
+function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHolding; onClose: () => void }) {
+  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{holding.tradingSymbol}</h2><p className="muted">50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={holding} /><HoldingDecisionTiles holding={holding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={holding.currentPrice === undefined ? "—" : money(holding.currentPrice)} sub={holding.todayChangePct === undefined ? undefined : pct2(holding.todayChangePct)} /><Stat label="Avg Cost" value={money(holding.avgCostPrice)} sub={`Qty ${holding.totalQty}`} /><Stat label="50 EMA" value={holding.ema50 === undefined ? "—" : money(holding.ema50)} sub={holding.distanceFrom50EmaPct === undefined ? undefined : pct2(holding.distanceFrom50EmaPct)} /><Stat label="SL" value={holding.stopLoss === undefined ? "—" : money(holding.stopLoss)} sub={holding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
+}
+
+function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHolding[]; onStopLossSaved: () => Promise<void> | void }) {
+  const [selected, setSelected] = useState<PortfolioHolding | null>(null);
   return <section className="panel portfolio-holdings-panel">
     <div className="panel-head">
       <div><p className="eyebrow">Portfolio</p><h2>Dhan holdings</h2></div>
@@ -1173,7 +1285,7 @@ function PortfolioTable({ holdings }: { holdings: PortfolioHolding[] }) {
     {holdings.length ? <div className="table-wrap">
       <table className="portfolio-holdings-table">
         <thead>
-          <tr><th>Symbol</th><th>Qty</th><th>Days</th><th>Available</th><th>Avg Cost</th><th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>10 EMA</th><th>Actions</th></tr>
+          <tr><th>Symbol</th><th>Chart</th><th>Qty</th><th>Days</th><th>Available</th><th>Avg Cost</th><th>SL</th><th>Risk</th><th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>50 EMA</th><th>Actions</th></tr>
         </thead>
         <tbody>
           {holdings.map((holding) => {
@@ -1181,25 +1293,29 @@ function PortfolioTable({ holdings }: { holdings: PortfolioHolding[] }) {
             const daysLeft = days === undefined ? undefined : Math.max(3 - days, 0);
             const exitDue = daysLeft === 0;
             const actionTone = exitDue ? "exit" : daysLeft === 1 ? "danger" : daysLeft === 2 ? "good" : "neutral";
-            const above10Ema = holding.distanceFrom10EmaPct !== undefined && holding.distanceFrom10EmaPct >= 0;
+            const above50Ema = holding.distanceFrom50EmaPct !== undefined && holding.distanceFrom50EmaPct >= 0;
             const todayTone = holding.todayChangePct === undefined ? "neutral" : holding.todayChangePct >= 0 ? "positive" : "negative";
             return <tr key={holding.securityId} className={exitDue ? "portfolio-exit-row" : ""}>
               <td className="window">{holding.tradingSymbol}<small className="sample-warning">{holding.brokerEntryDate ? `Since ${holding.brokerEntryDate}` : "Entry date unavailable"}</small></td>
+              <td><HoldingMiniChart holding={holding} onOpen={() => setSelected(holding)} /></td>
               <td>{holding.totalQty}</td>
               <td>{days === undefined ? "—" : days}<small className="sample-warning">trading days</small></td>
               <td>{holding.availableQty}</td>
               <td>{money(holding.avgCostPrice)}</td>
+              <td><PortfolioStopInput holding={holding} onSaved={onStopLossSaved} /></td>
+              <td className={holdingRisk(holding) > 0 ? "negative" : "positive"}>{holding.riskFree ? "Risk-free" : rupees(holdingRisk(holding))}</td>
               <td>{rupees(holding.invested)}</td>
               <td className={`portfolio-live-price ${todayTone}`}>{holding.currentPrice === undefined ? "—" : money(holding.currentPrice)}<small>{holding.todayChangePct === undefined ? "waiting tick" : "live tick"}</small></td>
               <td className={`portfolio-live-change ${todayTone}`}>{holding.todayChangePct === undefined ? "—" : pct2(holding.todayChangePct)}</td>
               <td className={`portfolio-pnl ${holding.unrealizedPnl >= 0 ? "positive" : "negative"}`}>{rupees(holding.unrealizedPnl)}</td>
-              <td>{holding.ema10 === undefined || holding.distanceFrom10EmaPct === undefined ? "—" : <span className={`portfolio-ema-pill ${above10Ema ? "above" : "below"}`}><b>{above10Ema ? "Above" : "Below"}</b><small>{money(holding.ema10)}</small></span>}</td>
+              <td>{holding.ema50 === undefined || holding.distanceFrom50EmaPct === undefined ? "—" : <span className={`portfolio-ema-pill ${above50Ema ? "above" : "below"}`}><b>{above50Ema ? "Above" : "Below"}</b><small>{money(holding.ema50)}</small></span>}</td>
               <td><span className={`portfolio-action-pill ${actionTone}`}>{exitDue ? "EXIT CHECK" : daysLeft === undefined ? "REVIEW" : `${daysLeft}D LEFT`}</span></td>
             </tr>;
           })}
         </tbody>
       </table>
     </div> : <p className="panel-empty">No holdings returned by Dhan.</p>}
+    {selected && <PortfolioHoldingDrawer holding={selected} onClose={() => setSelected(null)} />}
   </section>;
 }
 
@@ -1218,7 +1334,7 @@ function DashboardView({ portfolio, loading, onRefresh }: { portfolio: Portfolio
   const lastTrades = portfolio?.closedTrades.slice(-3).reverse() ?? [];
   const settings = portfolio?.tradeManagement?.settings;
   const riskUnit = portfolio?.tradeManagement?.summary.riskUnit ?? (settings ? settings.totalCapital * settings.riskPercent / 100 : 0);
-  const accountRisk = (portfolio?.holdings.length ?? 0) * riskUnit;
+  const accountRisk = portfolio ? portfolioAccountRisk(portfolio.holdings) : 0;
   const totalCapital = settings?.totalCapital ?? 0;
   const accountRiskPct = totalCapital > 0 ? (accountRisk / totalCapital) * 100 : 0;
   const avgTrade = stats?.closedTrades ? stats.realizedPnl / stats.closedTrades : 0;
@@ -1481,13 +1597,13 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
   const settings = livePortfolio?.tradeManagement?.settings;
   const riskUnit = livePortfolio?.tradeManagement?.summary.riskUnit ?? (settings ? settings.totalCapital * settings.riskPercent / 100 : 0);
   const liveHoldings = livePortfolio?.holdings.length ?? 0;
-  const accountRisk = liveHoldings * riskUnit;
+  const accountRisk = livePortfolio ? portfolioAccountRisk(livePortfolio.holdings) : 0;
   const totalCapital = settings?.totalCapital ?? 0;
   const accountRiskPct = totalCapital > 0 ? (accountRisk / totalCapital) * 100 : 0;
   const riskTone = accountRiskPct > 0.7 ? "danger" : accountRiskPct > 0.5 ? "warn" : "good";
   const exitChecks = livePortfolio?.holdings.filter((holding) => (holding.brokerTradingDaysHeld ?? 0) >= 3).length ?? 0;
   const liveTickCount = Object.keys(liveTicks).length;
-  return <section className="portfolio-page"><div className="data-toolbar portfolio-hero"><div><p className="eyebrow">Connected portfolio</p><h2>Dhan holdings</h2><small>{livePortfolio ? `Live P&L ${liveTickCount ? `on for ${liveTickCount}/${liveHoldings}` : "connecting"} · trading-day age and account risk.` : "Live holdings, trading-day age, and account risk."}</small></div><button className="primary" onClick={onRefresh} disabled={loading}><WalletCards size={15} />Refresh Portfolio</button></div>{!livePortfolio ? <section className="empty"><div className="empty-art"><WalletCards size={30} /></div><p className="eyebrow">Portfolio</p><h2>Fetch your Dhan holdings</h2><p>Your Dhan access token remains server-side. This view will populate with live holdings and account risk.</p></section> : <><div className="portfolio-risk-strip"><div><span>Invested</span><b>{rupees(livePortfolio.stats.totalInvested)}</b><small>{liveHoldings} live holdings</small></div><div><span>Risk Unit</span><b>{rupees(riskUnit)}</b><small>{settings ? `${settings.riskPercent.toFixed(2)}% per holding` : "Settings unavailable"}</small></div><div><span>Open P&amp;L</span><b className={livePortfolio.stats.unrealizedPnl >= 0 ? "positive" : "negative"}>{rupees(livePortfolio.stats.unrealizedPnl)}</b><small>Live broker ticks</small></div><div className={`account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div></div>{exitChecks > 0 && <div className="notice danger-notice"><AlertTriangle size={17}/><span>{exitChecks} open holding{exitChecks === 1 ? "" : "s"} reached the 3rd trading day. Review the Actions column for exit checks.</span></div>}<PortfolioTable holdings={livePortfolio.holdings} /></>}</section>;
+  return <section className="portfolio-page"><div className="data-toolbar portfolio-hero"><div><p className="eyebrow">Connected portfolio</p><h2>Dhan holdings</h2><small>{livePortfolio ? `Live P&L ${liveTickCount ? `on for ${liveTickCount}/${liveHoldings}` : "connecting"} · trading-day age and SL-based account risk.` : "Live holdings, trading-day age, and account risk."}</small></div><button className="primary" onClick={onRefresh} disabled={loading}><WalletCards size={15} />Refresh Portfolio</button></div>{!livePortfolio ? <section className="empty"><div className="empty-art"><WalletCards size={30} /></div><p className="eyebrow">Portfolio</p><h2>Fetch your Dhan holdings</h2><p>Your Dhan access token remains server-side. This view will populate with live holdings and account risk.</p></section> : <><div className="portfolio-risk-strip"><div><span>Invested</span><b>{rupees(livePortfolio.stats.totalInvested)}</b><small>{liveHoldings} live holdings</small></div><div><span>Risk Unit</span><b>{rupees(riskUnit)}</b><small>{settings ? `${settings.riskPercent.toFixed(2)}% per holding` : "Settings unavailable"}</small></div><div><span>Open P&amp;L</span><b className={livePortfolio.stats.unrealizedPnl >= 0 ? "positive" : "negative"}>{rupees(livePortfolio.stats.unrealizedPnl)}</b><small>Live broker ticks</small></div><div className={`account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div></div>{livePortfolio.marketIndexes && <div className="market-index-strip">{livePortfolio.marketIndexes.map((index) => <div key={index.label} className={index.changePct === undefined ? "neutral" : index.changePct >= 0 ? "positive" : "negative"}><span>{index.label}</span><b>{index.changePct === undefined ? "—" : pct2(index.changePct)}</b></div>)}</div>}{exitChecks > 0 && <div className="notice danger-notice"><AlertTriangle size={17}/><span>{exitChecks} open holding{exitChecks === 1 ? "" : "s"} reached the 3rd trading day. Review the Actions column for exit checks.</span></div>}<PortfolioTable holdings={livePortfolio.holdings} onStopLossSaved={onRefresh} /></>}</section>;
 }
 
 function DataStatusView({ status, loading, onRefresh, onRefreshUniverse, onRetryFailures }: { status: DataStatus | null; loading: boolean; onRefresh: () => void; onRefreshUniverse: (universe?: UniverseName) => void; onRetryFailures: () => void }) {

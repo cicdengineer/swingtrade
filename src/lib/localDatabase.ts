@@ -9,6 +9,7 @@ import type {
   DownloadFailureRecord,
   InstrumentRecord,
   ManagedTradeRecord,
+  PortfolioStopLossRecord,
   SeasonalExclusionRecord,
   SeasonalObservationRecord,
   SeasonalityBuildRecord,
@@ -37,6 +38,7 @@ export type SeasonalityDatabase = {
   managed_trades: ManagedTradeRecord[];
   trade_tranches: TradeTrancheRecord[];
   trade_events: TradeEventRecord[];
+  portfolio_stop_losses: PortfolioStopLossRecord[];
 };
 
 const dbFile = path.join(process.cwd(), ".data", "seasonality-edge-db.json");
@@ -74,6 +76,7 @@ const databaseCollectionNames = [
   "managed_trades",
   "trade_tranches",
   "trade_events",
+  "portfolio_stop_losses",
 ] as const satisfies readonly DatabaseCollectionName[];
 
 const emptyDb = (): SeasonalityDatabase => {
@@ -96,6 +99,7 @@ const emptyDb = (): SeasonalityDatabase => {
     managed_trades: [],
     trade_tranches: [],
     trade_events: [],
+    portfolio_stop_losses: [],
   };
 };
 

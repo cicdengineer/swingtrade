@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getHoldings, getPositions, getTradeHistory, hasDhanCredentials, type DhanHolding, type DhanPosition, type DhanTrade } from "@/lib/dhan";
 import { getTradeManagementSnapshot } from "@/lib/tradeManagementStore";
-import { readDatabase } from "@/lib/localDatabase";
+import { readDatabase, writeDatabase } from "@/lib/localDatabase";
 import { calculateEma } from "@/lib/swingScreenerService";
 
 export const dynamic = "force-dynamic";
@@ -221,12 +221,54 @@ function latestPrice(prices: { security_id: string; trade_date: string; close: n
     .at(-1)?.close;
 }
 
-function latestEma10(prices: { security_id: string; trade_date: string; close: number }[], securityId: string) {
-  const closes = prices
+type DailyPrice = { security_id: string; symbol?: string; trade_date: string; open?: number; high?: number; low?: number; close: number; volume?: number };
+
+function securityPrices(prices: DailyPrice[], securityId: string) {
+  return prices
     .filter((row) => row.security_id === securityId)
-    .sort((a, b) => a.trade_date.localeCompare(b.trade_date))
-    .map((row) => row.close);
-  return calculateEma(closes, 10).at(-1);
+    .sort((a, b) => a.trade_date.localeCompare(b.trade_date));
+}
+
+function latestEma(prices: DailyPrice[], securityId: string, period: number) {
+  return calculateEma(securityPrices(prices, securityId).map((row) => row.close), period).at(-1);
+}
+
+function recentChartRows(prices: DailyPrice[], securityId: string) {
+  const rows = securityPrices(prices, securityId).slice(-120);
+  const closes = rows.map((row) => row.close);
+  const ema50 = calculateEma(closes, 50);
+  return rows.map((row, index) => {
+    const previousVolume = rows.slice(Math.max(0, index - 20), index).map((item) => item.volume ?? 0).filter((volume) => volume > 0);
+    const averageVolume = previousVolume.length ? previousVolume.reduce((sum, volume) => sum + volume, 0) / previousVolume.length : 0;
+    return {
+      trade_date: row.trade_date,
+      open: row.open ?? row.close,
+      high: row.high ?? row.close,
+      low: row.low ?? row.close,
+      close: row.close,
+      ema50: ema50[index],
+      volume: row.volume ?? 0,
+      volume_ratio: averageVolume > 0 && row.volume ? row.volume / averageVolume : undefined,
+    };
+  });
+}
+
+function currentDayMove(rows: DailyPrice[]) {
+  const latest = [...rows].sort((a, b) => a.trade_date.localeCompare(b.trade_date)).at(-1);
+  if (!latest) return undefined;
+  const base = latest.open && latest.open > 0 ? latest.open : rows.filter((row) => row.trade_date < latest.trade_date).at(-1)?.close;
+  return base ? ((latest.close - base) / base) * 100 : undefined;
+}
+
+function marketIndexTiles(prices: DailyPrice[]) {
+  const findRows = (match: (symbol: string) => boolean) => prices.filter((row) => match((row.symbol ?? "").toUpperCase()));
+  const tile = (label: string, rows: DailyPrice[]) => ({ label, changePct: currentDayMove(rows) });
+  const nifty50Rows = findRows((symbol) => ["NIFTY", "NIFTY50", "NIFTY 50", "NIFTY_INDEX"].includes(symbol));
+  return [
+    tile("Nifty 50", nifty50Rows),
+    tile("Nifty Midcap 150", findRows((symbol) => symbol.includes("MIDCAP")).length ? findRows((symbol) => symbol.includes("MIDCAP")) : []),
+    tile("Nifty Smallcap 250", findRows((symbol) => symbol.includes("SMALLCAP")).length ? findRows((symbol) => symbol.includes("SMALLCAP")) : []),
+  ];
 }
 
 function positionLtp(position: DhanPosition | undefined, fallback?: number) {
@@ -239,23 +281,29 @@ function holdingLtp(holding: DhanHolding, position: DhanPosition | undefined, fa
   return Number.isFinite(price) && price && price > 0 ? price : undefined;
 }
 
-function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: number }, position: DhanPosition | undefined, openLots: OpenLot[], today: string, prices: { security_id: string; trade_date: string; close: number }[]) {
+function enrichHolding(input: DhanHolding & { totalQty: number; availableQty: number }, position: DhanPosition | undefined, openLots: OpenLot[], today: string, prices: DailyPrice[], stopLoss?: number) {
   const brokerEntryDate = holdingEntryDate(openLots) ?? today;
   const invested = input.totalQty * input.avgCostPrice;
   const ltp = holdingLtp(input, position, position ? undefined : latestPrice(prices, input.securityId));
-  const ema10 = latestEma10(prices, input.securityId);
+  const ema50 = latestEma(prices, input.securityId, 50);
   const holdingPnl = numberField(input, ["unrealizedProfit", "unrealizedPnl", "pnl", "totalPnl"]);
   const positionPnl = position && openBuyQty(position) > 0 ? position.unrealizedProfit : undefined;
   const unrealizedPnl = holdingPnl ?? (ltp ? (ltp - input.avgCostPrice) * input.totalQty : positionPnl ?? 0);
   const dayPnl = position?.dayPnl ?? (position ? (position.daySellValue ?? 0) - (position.dayBuyValue ?? 0) : 0);
+  const riskFree = stopLoss !== undefined && stopLoss >= input.avgCostPrice;
+  const accountRisk = stopLoss === undefined || riskFree ? 0 : Math.max(0, input.avgCostPrice - stopLoss) * input.totalQty;
   return {
     ...input,
     invested,
     currentPrice: ltp,
     unrealizedPnl,
     dayPnl,
-    ema10,
-    distanceFrom10EmaPct: ema10 && ltp ? ((ltp - ema10) / ema10) * 100 : undefined,
+    stopLoss,
+    accountRisk,
+    riskFree,
+    ema50,
+    distanceFrom50EmaPct: ema50 && ltp ? ((ltp - ema50) / ema50) * 100 : undefined,
+    recent: recentChartRows(prices, input.securityId),
     productType: position?.productType ?? "CNC",
     positionType: position?.positionType ?? "HOLDING",
     brokerEntryDate,
@@ -292,6 +340,7 @@ export async function GET() {
     const openLotsBySecurity = calculateOpenLotsBySecurity(inventoryTrades);
     const tradeInstruments = new Map(inventoryTrades.map((trade) => [trade.securityId, trade.instrument]));
     const db = await readDatabase();
+    const stopLossBySecurity = new Map(db.portfolio_stop_losses.map((row) => [row.security_id, row.stop_loss]));
     const today = period.to;
     const holdingsBySecurity = new Set(holdings.map((holding) => holding.securityId));
     const adjustedHoldings = holdings.map((holding) => {
@@ -301,7 +350,7 @@ export async function GET() {
       const sellFromHoldingQty = todaySellFromHoldingQty(position);
       const effectiveQty = sellFromHoldingQty > 0 ? Math.max(0, holding.availableQty || holding.totalQty - sellFromHoldingQty) : holding.totalQty;
       if (effectiveQty <= 0) return null;
-      return enrichHolding({ ...holding, totalQty: effectiveQty, availableQty: Math.min(holding.availableQty || effectiveQty, effectiveQty) }, position, openLots, today, db.daily_prices);
+      return enrichHolding({ ...holding, totalQty: effectiveQty, availableQty: Math.min(holding.availableQty || effectiveQty, effectiveQty) }, position, openLots, today, db.daily_prices, stopLossBySecurity.get(holding.securityId));
     }).filter((holding): holding is NonNullable<typeof holding> => Boolean(holding));
     const boughtPositions = positions
       .filter((position) => !holdingsBySecurity.has(position.securityId) && isDeliveryPosition(position) && openBuyQty(position) > 0 && !isEtfLike(position.securityId, position.tradingSymbol, tradeInstruments))
@@ -320,7 +369,7 @@ export async function GET() {
           collateralQty: 0,
           avgCostPrice,
         };
-        return enrichHolding(holding, position, [{ date: today, quantity, price: avgCostPrice }], today, db.daily_prices);
+        return enrichHolding(holding, position, [{ date: today, quantity, price: avgCostPrice }], today, db.daily_prices, stopLossBySecurity.get(position.securityId));
       });
     const enrichedHoldings = [...adjustedHoldings, ...boughtPositions];
 
@@ -379,6 +428,7 @@ export async function GET() {
       closedTrades,
       equityCurve,
       monthlyPnl: monthlyPnl(closedTrades, trades),
+      marketIndexes: marketIndexTiles(db.daily_prices),
       stats,
       tradeManagement,
       source: {
@@ -391,5 +441,26 @@ export async function GET() {
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Portfolio unavailable" }, { status: 502 });
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json();
+    const securityId = String(body.securityId ?? "").trim();
+    const tradingSymbol = String(body.tradingSymbol ?? "").trim();
+    const isin = body.isin ? String(body.isin) : undefined;
+    const stopLoss = Number(body.stopLoss);
+    if (!securityId) return NextResponse.json({ error: "Security ID is required." }, { status: 400 });
+    if (!Number.isFinite(stopLoss) || stopLoss <= 0) return NextResponse.json({ error: "Stop loss must be greater than zero." }, { status: 400 });
+    const db = await readDatabase();
+    const now = new Date().toISOString();
+    const index = db.portfolio_stop_losses.findIndex((row) => row.security_id === securityId);
+    if (index >= 0) db.portfolio_stop_losses[index] = { ...db.portfolio_stop_losses[index], isin, trading_symbol: tradingSymbol, stop_loss: stopLoss, updated_at: now };
+    else db.portfolio_stop_losses.push({ security_id: securityId, isin, trading_symbol: tradingSymbol, stop_loss: stopLoss, created_at: now, updated_at: now });
+    await writeDatabase(db);
+    return NextResponse.json({ stopLoss: db.portfolio_stop_losses.find((row) => row.security_id === securityId) });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not save stop loss." }, { status: 400 });
   }
 }

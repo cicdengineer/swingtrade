@@ -61,6 +61,15 @@ export type DailyPriceRecord = {
   updated_at: string;
 };
 
+export type PortfolioStopLossRecord = {
+  security_id: string;
+  isin?: string;
+  trading_symbol: string;
+  stop_loss: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DataDownloadJobRecord = {
   id: string;
   universe_name?: UniverseName;
