@@ -11,6 +11,7 @@
     "test:swing": "node scripts/swing-screener-tests.mjs",
     "test:thirty-up": "node scripts/thirty-up-screener-tests.mjs",
     "test:ema-reversal": "node scripts/ema-reversal-pullback-tests.mjs",
+    "test:stoch-rsi": "node scripts/stoch-rsi-screener-tests.mjs",
     "test:trade-management": "node scripts/trade-management-tests.mjs",
     "test:market-data": "node scripts/market-data-refresh-tests.mjs"
   },

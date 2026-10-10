@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import type { SeasonalObservationRecord, SeasonalStatisticsRecord, Security, Summary, UniverseName } from "@/lib/types";
 
-type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "50 EMA Reversal" | "Dry Breakout" | "Portfolio" | "Backtest" | "Settings";
+type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "StochRSI" | "Dry Breakout" | "Portfolio" | "Backtest" | "Settings";
 type DataSummary = { universe_name: UniverseName; total_constituents: number; mapped: number; stocks_downloaded: number; stocks_pending: number; stocks_failed: number; earliest_data_date: string | null; latest_data_date: string | null; total_ohlcv_rows: number; last_refresh: string | null; historical_sessions: number; latest_official?: number; latest_provisional?: number };
 type DataDownloadJob = { id?: string; status: string; total: number; completed: number; remaining: number; successful: number; failed: number; current_stock?: string; current_status?: string; progress: number; started_at?: string; finished_at?: string; last_successful_update?: string; data_through_date?: string; notice?: string; pending_eod_count?: number; trading_date?: string; historical_candles_backfilled?: number; official_candles_updated?: number; provisional_candles_created?: number; provisional_candles_reconciled?: number; already_up_to_date?: number; errors: string[] };
 type DataStatus = { dhan_connected: boolean; dhan_profile?: { ok: boolean; dhanClientId?: string; tokenValidity?: string; activeSegment?: string; dataPlan?: string; dataValidity?: string; error?: string }; database_size_bytes: number; price_adjustment_status: string; latest_market_data: null | { trading_date: string; official: number; provisional: number; data_status: string }; latest_job: null | DataDownloadJob; summaries: DataSummary[]; failures: { symbol: string; security_id: string; error_message: string; attempt_count: number; last_attempt: string }[]; quality_issues: unknown[]; universe_sources: Record<string, { label: string; url: string }> };
@@ -70,6 +70,11 @@ type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: num
 type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "hourly_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
+type StochRsiFilters = { universe: "ALL" | UniverseName; rsiLength: number; stochLength: number; smoothK: number; smoothD: number; upperThreshold: number; lowerThreshold: number; minWeeklyCandles: number; showAll: boolean };
+type StochRsiSortKey = "entry" | "symbol" | "setup" | "daily_d" | "weekly_d" | "breakout" | "lowest" | "current_close";
+type StochRsiRecentPoint = DailyChartPoint & { daily_stoch_d?: number; weekly_stoch_d?: number; setup_type?: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal?: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; new_lowest_candle?: boolean; lowest_price_in_zone?: number };
+type StochRsiRow = { status: "GREEN_SETUP" | "BLUE_SETUP"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; weekly_stoch_d: number; daily_stoch_d: number; setup_type: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; current_daily_high: number; previous_daily_high: number; current_daily_low: number; new_lowest_candle: boolean; lowest_price_in_zone: number; ema10?: number; ema20?: number; ema50?: number; ema200?: number; data_freshness: string; candle_completed: boolean; provisional: boolean; reason: string; recent: StochRsiRecentPoint[] };
+type StochRsiResponse = { filters: StochRsiFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; snapshotDate: string | null; results: StochRsiRow[]; generatedAt: string };
 type EmaReversalFilters = { universe: "ALL" | UniverseName; emaPeriod: number; downtrendLookback: number; minBelowEmaPct: number; minHistoricalDeclinePct: number; emaSlopeLookback: number; breakoutVolumeMultiplier: number; minPostBreakoutAdvancePct: number; minPullbackPct: number; maxPullbackPct: number; minPullbackDays: number; maxPullbackDays: number; maxEmaDownsideTolerancePct: number; minBreakoutAge: number; maxBreakoutAge: number; requireVolumeContraction: boolean; firstPullbackOnly: boolean; allowSidewaysConsolidation: boolean; allowReacceleration: boolean; maxCompletedPullbacks: number; minSetupScore: number; showAll: boolean };
 type EmaReversalSortKey = "score" | "symbol" | "stage" | "breakout_recent" | "advance" | "pullback" | "ema_dist" | "volume_dryness" | "setup_recent";
 type EmaReversalRow = { status: "FIRST_PULLBACK" | "TIGHT_CONSOLIDATION" | "REACCELERATION" | "INVALIDATED" | "NO_SETUP" | "INSUFFICIENT_DATA"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema50: number; distance_from_ema_pct: number; breakout_date?: string; breakout_close?: number; breakout_volume_ratio?: number; confirmation_date?: string; confirmation_volume_ratio?: number; post_breakout_high_date?: string; post_breakout_high?: number; advance_pct?: number; pullback_start_date?: string; pullback_pct?: number; pullback_volume_ratio?: number; days_in_pullback?: number; completed_pullback_count: number; setup_score: number; score_breakdown: Record<string, number>; downtrend_below_ema_pct?: number; historical_decline_pct?: number; ema50_slope_pct?: number; average_volume_5?: number; average_volume_20?: number; setup_type?: "Pullback" | "Sideways Consolidation" | "Reacceleration"; reason: string; recent: DailyChartPoint[] };
@@ -112,7 +117,7 @@ const nav: { name: View; icon: typeof Activity }[] = [
   { name: "Stock Search", icon: Search },
   { name: "Data Status", icon: Database },
   { name: "30 in 30", icon: TrendingUp },
-  { name: "50 EMA Reversal", icon: Activity },
+  { name: "StochRSI", icon: Activity },
   { name: "Dry Breakout", icon: ShieldCheck },
   { name: "Backtest", icon: BarChart3 },
   { name: "Settings", icon: Settings },
@@ -223,6 +228,17 @@ const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   decliningVolumeOnly: false,
   dryVolumeOnly: false,
   redCandleOnly: false,
+  showAll: false,
+};
+const defaultStochRsiFilters: StochRsiFilters = {
+  universe: "ALL",
+  rsiLength: 14,
+  stochLength: 14,
+  smoothK: 3,
+  smoothD: 3,
+  upperThreshold: 80,
+  lowerThreshold: 20,
+  minWeeklyCandles: 40,
   showAll: false,
 };
 const defaultEmaReversalFilters: EmaReversalFilters = {
@@ -401,7 +417,7 @@ function BrandLogo({ compact = false }: { compact?: boolean }) {
   return <span className={`brand-logo ${compact ? "compact" : ""}`}><img src="/brand/jobpothe-logo-cropped.png" alt="JobPothe" /></span>;
 }
 
-const lastTradingMonths = (rows: DailyChartPoint[], sessions = 63) => rows.slice(-sessions);
+const lastTradingMonths = <T extends DailyChartPoint>(rows: T[], sessions = 63) => rows.slice(-sessions);
 const scaleValue = (value: number, min: number, max: number, height: number, pad = 3) => {
   const range = max - min || 1;
   return pad + ((max - value) / range) * (height - pad * 2);
@@ -2367,6 +2383,299 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   </section>;
 }
 
+function liveAdjustedStochRsi(row: StochRsiRow, tick?: LiveTick): StochRsiRow {
+  if (!tick?.ltp) return row;
+  const dayHigh = tick.dayHigh && tick.dayHigh > 0 ? Math.max(tick.dayHigh, row.current_daily_high) : row.current_daily_high;
+  const entrySignal = dayHigh > row.previous_daily_high ? row.setup_type === "GREEN_SETUP" ? "GREEN_ENTRY" : "BLUE_ENTRY" : row.entry_signal;
+  return {
+    ...row,
+    current_close: tick.ltp,
+    current_daily_high: dayHigh,
+    current_daily_low: tick.dayLow && tick.dayLow > 0 ? Math.min(tick.dayLow, row.current_daily_low) : row.current_daily_low,
+    entry_signal: entrySignal,
+  };
+}
+
+function StochRsiTileChart({ row, onOpen }: { row: StochRsiRow; onOpen: () => void }) {
+  const chartRows = lastTradingMonths(row.recent, 63);
+  const closes = chartRows.map((point) => point.close);
+  const trendUp = closes.length > 1 && closes.at(-1)! >= closes[0];
+  return <span className="thirty-in-thirty-chart stoch-tile-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="img" aria-label={`${row.symbol} StochRSI setup chart`}>
+    <svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true">
+      <path className="spark-area" d={`${polylinePath(closes, 220, 82)} L220 82 L0 82 Z`} />
+      <path className={trendUp ? "spark-line up" : "spark-line down"} d={polylinePath(closes, 220, 82)} />
+      {chartRows.map((point, index) => point.entry_signal && point.entry_signal !== "NONE" ? <polygon key={point.trade_date} className={point.entry_signal === "GREEN_ENTRY" ? "signal-triangle green" : "signal-triangle blue"} points={`${index * (220 / Math.max(1, chartRows.length - 1))},70 ${index * (220 / Math.max(1, chartRows.length - 1)) - 4},78 ${index * (220 / Math.max(1, chartRows.length - 1)) + 4},78`} /> : null)}
+    </svg>
+  </span>;
+}
+
+function SignalCandleChart({ rows, timeframe, loading, error, dailySessions = 63 }: { rows: StochRsiRecentPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; dailySessions?: number }) {
+  if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
+  if (error) return <div className="chart-empty">{error}</div>;
+  const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
+  if (chartRows.length < 5) return <div className="chart-empty">Not enough {timeframe} rows for charting.</div>;
+  const width = 780;
+  const priceHeight = 270;
+  const volumeHeight = 74;
+  const lows = chartRows.map((row) => row.low);
+  const highs = chartRows.map((row) => row.high);
+  const priceMin = Math.min(...lows);
+  const priceMax = Math.max(...highs);
+  const candleSlot = width / chartRows.length;
+  const bodyWidth = Math.max(3, Math.min(8, candleSlot * 0.48));
+  const maxVolume = Math.max(...chartRows.map((row) => row.volume));
+  return <div className="clean-chart signal-chart">
+    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-green-signal" />Green entry</span><span><i className="legend-blue-signal" />Blue entry</span><span><i className="legend-volume" />Volume strip</span></div>
+    <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart with StochRSI entry markers`}>
+      {chartRows.map((row, index) => {
+        const x = index * candleSlot + candleSlot / 2;
+        const openY = scaleValue(row.open, priceMin, priceMax, priceHeight, 8);
+        const closeY = scaleValue(row.close, priceMin, priceMax, priceHeight, 8);
+        const highY = scaleValue(row.high, priceMin, priceMax, priceHeight, 8);
+        const lowY = scaleValue(row.low, priceMin, priceMax, priceHeight, 8);
+        const up = row.close >= row.open;
+        const bodyY = Math.min(openY, closeY);
+        const bodyHeight = Math.max(1, Math.abs(closeY - openY));
+        const signalClass = row.entry_signal === "GREEN_ENTRY" ? "green" : row.entry_signal === "BLUE_ENTRY" ? "blue" : "";
+        return <g key={row.trade_date} className={up ? "candle up" : "candle down"}>
+          <title>{`${chartDateLabel(row.trade_date, timeframe)} O ${row.open.toFixed(2)} H ${row.high.toFixed(2)} L ${row.low.toFixed(2)} C ${row.close.toFixed(2)}${row.entry_signal && row.entry_signal !== "NONE" ? ` ${row.entry_signal}` : ""}`}</title>
+          <line x1={x} x2={x} y1={highY} y2={lowY} />
+          <rect x={x - bodyWidth / 2} y={bodyY} width={bodyWidth} height={bodyHeight} rx="1" />
+          {signalClass && <polygon className={`signal-triangle ${signalClass}`} points={`${x},${Math.max(8, highY - 11)} ${x - 5},${Math.max(16, highY - 1)} ${x + 5},${Math.max(16, highY - 1)}`} />}
+        </g>;
+      })}
+    </svg>
+    <div className="outside-volume" style={{ height: volumeHeight }}>
+      {chartRows.map((row) => {
+        const up = row.close >= row.open;
+        const height = Math.max(7, (row.volume / maxVolume) * (volumeHeight - 12));
+        return <span key={row.trade_date} className={`outside-volume-bar ${up ? "up" : "down"}`} style={{ height }} title={`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}`} />;
+      })}
+    </div>
+  </div>;
+}
+
+function StochRsiRiskTiles({ selected, activeRows, hourlyRows, hourlyLoading, hourlyError, settings }: { selected: StochRsiRow; activeRows: StochRsiRecentPoint[]; hourlyRows: DailyChartPoint[]; hourlyLoading: boolean; hourlyError?: string; settings?: TradingSettings | null }) {
+  const entry = selected.current_close;
+  const dailyStop = latestDailyStop(activeRows.length ? activeRows : selected.recent);
+  const hourlyStop = latestHourlyStop(hourlyRows);
+  return <div className="entry-sizing-grid">
+    <EntrySizingTile title="Daily Sizing" entry={entry} stop={dailyStop} settings={settings} />
+    <EntrySizingTile title="Hourly Sizing" entry={entry} stop={hourlyStop} settings={settings} loading={!hourlyError && (hourlyLoading || !hourlyRows.length)} />
+  </div>;
+}
+
+function StochRsiChartPanel({ selected, settings }: { selected: StochRsiRow; settings?: TradingSettings | null }) {
+  const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
+  const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
+  const [hourlyLoading, setHourlyLoading] = useState(false);
+  const [hourlyError, setHourlyError] = useState("");
+  const [liveDailyRow, setLiveDailyRow] = useState<DailyChartPoint | null>(null);
+  const [dailyError, setDailyError] = useState("");
+
+  useEffect(() => {
+    setTimeframe("daily");
+    setHourlyRows([]);
+    setHourlyLoading(false);
+    setHourlyError("");
+    setLiveDailyRow(null);
+    setDailyError("");
+  }, [selected.security_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadIntraday = async (showLoading: boolean) => {
+      if (showLoading) setHourlyLoading(true);
+      setHourlyError("");
+      setDailyError("");
+      try {
+        const rows = await fetchThirtyUpIntraday(selected.security_id, !showLoading, "stoch-rsi-screener");
+        if (cancelled) return;
+        setHourlyRows(rows);
+        setLiveDailyRow(aggregateIntradayDaily(rows));
+      } catch (error) {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : "Intraday data unavailable";
+        if (timeframe === "hourly") setHourlyError(message);
+        else setDailyError(message);
+      } finally {
+        if (!cancelled && showLoading) setHourlyLoading(false);
+      }
+    };
+    void loadIntraday(timeframe === "hourly" && !hourlyRows.length);
+    const timer = window.setInterval(() => void loadIntraday(false), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [selected.security_id, timeframe]);
+
+  const dailyRows = lastTradingMonths(mergeLiveDailyCandle(selected.recent, liveDailyRow) as StochRsiRecentPoint[], 63);
+  const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
+  return <div className="chart-shell">
+    <StochRsiRiskTiles selected={selected} activeRows={dailyRows} hourlyRows={hourlyRows} hourlyLoading={hourlyLoading} hourlyError={hourlyError} settings={settings} />
+    <div className="chart-toolbar">
+      <div>
+        <p className="eyebrow">Chart timeframe</p>
+        <span>{timeframe === "daily" ? `Last 3 months daily${liveDailyRow ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
+      </div>
+      <div className="chart-toolbar-actions">
+        <a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer" title={`Open ${selected.symbol} in TradingView`}><ArrowUpRight size={14}/>TradingView</a>
+        <div className="segmented-control" role="group" aria-label="Chart timeframe">
+          <button className={timeframe === "daily" ? "active" : ""} onClick={() => setTimeframe("daily")}>Daily</button>
+          <button className={timeframe === "hourly" ? "active" : ""} onClick={() => setTimeframe("hourly")}>Hourly</button>
+        </div>
+      </div>
+    </div>
+    <SignalCandleChart rows={activeRows as StochRsiRecentPoint[]} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} />
+    {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
+  </div>;
+}
+
+function StochRsiScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings }: { data: StochRsiResponse | null; filters: StochRsiFilters; setFilters: (filters: StochRsiFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: StochRsiRow | null; setSelected: (row: StochRsiRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null }) {
+  const [sort, setSort] = useState<{ key: StochRsiSortKey; direction: "asc" | "desc" }>({ key: "entry", direction: "desc" });
+  const [tileLimit, setTileLimit] = useState(9999);
+  const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
+  const setNumber = (key: keyof StochRsiFilters, value: number) => setFilters({ ...filters, [key]: value });
+  const rows = useMemo(() => (data?.results ?? []).map((row) => liveAdjustedStochRsi(row, liveTicks[row.security_id])), [data, liveTicks]);
+  useEffect(() => {
+    if (!selected) return;
+    const replacement = rows.find((row) => row.security_id === selected.security_id);
+    if (replacement && replacement !== selected) setSelected(replacement);
+  }, [rows, selected, setSelected]);
+  useEffect(() => {
+    const baseRows = data?.results ?? [];
+    if (!baseRows.length) {
+      setLiveTicks({});
+      setLiveFeedStatus("idle");
+      return;
+    }
+    const ids = baseRows.slice(0, Math.min(tileLimit, thirtyInThirtyLiveFeedLimit)).map((row) => row.security_id);
+    const controller = new AbortController();
+    setLiveFeedStatus("connecting", `Starting ${ids.length} StochRSI live prices`);
+    const handleEvent = (event: string, payload: string) => {
+      if (event === "status") {
+        const status = JSON.parse(payload) as LiveFeedStatusUpdate;
+        if (status.state === "idle" || status.state === "connecting" || status.state === "live" || status.state === "error") setLiveFeedStatus(status.state, status.message);
+      } else if (event === "snapshot") {
+        const ticks = JSON.parse(payload) as LiveTick[];
+        if (ticks.length) setLiveTicks((current) => ({ ...current, ...Object.fromEntries(ticks.map((tick) => [tick.securityId, tick])) }));
+      } else if (event === "tick") {
+        const tick = JSON.parse(payload) as LiveTick;
+        setLiveTicks((current) => ({ ...current, [tick.securityId]: tick }));
+        setLiveFeedStatus("live", "StochRSI live prices streaming");
+      }
+    };
+    void fetch("/api/stoch-rsi-screener/live", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok || !response.body) throw new Error(`StochRSI live feed failed: HTTP ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (!controller.signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split(/\n\n|\r\n\r\n/);
+        buffer = events.pop() ?? "";
+        events.forEach((chunk) => parseServerSentEvents(chunk, handleEvent));
+      }
+    }).catch((error) => {
+      if (!controller.signal.aborted) setLiveFeedStatus("error", error instanceof Error ? error.message : "StochRSI live feed disconnected");
+    });
+    return () => {
+      controller.abort();
+      setLiveFeedStatus("idle");
+    };
+  }, [data, setLiveFeedStatus, tileLimit]);
+
+  const sortedRows = useMemo(() => {
+    const valueFor = (row: StochRsiRow): string | number => {
+      if (sort.key === "symbol") return row.symbol;
+      if (sort.key === "setup") return row.setup_type;
+      if (sort.key === "daily_d") return row.daily_stoch_d;
+      if (sort.key === "weekly_d") return row.weekly_stoch_d;
+      if (sort.key === "breakout") return row.current_daily_high - row.previous_daily_high;
+      if (sort.key === "lowest") return row.new_lowest_candle ? 1 : 0;
+      if (sort.key === "current_close") return row.current_close;
+      return row.entry_signal === "NONE" ? 0 : 1;
+    };
+    return [...rows].sort((a, b) => {
+      const av = valueFor(a);
+      const bv = valueFor(b);
+      const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+      return sort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [rows, sort]);
+  const visibleRows = sortedRows.slice(0, tileLimit);
+  const sortBy = (key: StochRsiSortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_d" ? "asc" : "desc" });
+
+  return <section className="research-page thirty-in-thirty-page stoch-rsi-page">
+    <div className="thirty-hero stoch-rsi-hero">
+      <div>
+        <p className="eyebrow">Weekly + Daily StochRSI</p>
+        <h2>Green and blue previous-week setups</h2>
+        <small>Uses previous completed weekly %D against current daily %D, then marks strict previous-day-high entries.</small>
+      </div>
+      <div className="thirty-hero-actions">
+        <div className="refresh-status"><span className={data ? "ready" : "pending"} /><b>{data?.snapshotDate ?? "Last run"}</b><small>{formatTime(updatedAt)}</small></div>
+        <button className="primary" onClick={() => onRun()} disabled={loading}><Activity size={15}/>Run Screener</button>
+        <button className="secondary compact" onClick={onReset}>Reset</button>
+      </div>
+    </div>
+    <div className="momentum-filter-bar thirty-in-thirty-filters stoch-rsi-filters">
+      <label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as StochRsiFilters["universe"] })}><option value="ALL">All</option><option value="MIDCAP">Nifty Midcap</option><option value="SMALLCAP">Nifty Smallcap</option></select></label>
+      <label>RSI<input className="plain-input" type="number" value={filters.rsiLength} onChange={(e) => setNumber("rsiLength", Number(e.target.value))}/></label>
+      <label>Stoch<input className="plain-input" type="number" value={filters.stochLength} onChange={(e) => setNumber("stochLength", Number(e.target.value))}/></label>
+      <label>Upper<input className="plain-input" type="number" value={filters.upperThreshold} onChange={(e) => setNumber("upperThreshold", Number(e.target.value))}/></label>
+      <label>Lower<input className="plain-input" type="number" value={filters.lowerThreshold} onChange={(e) => setNumber("lowerThreshold", Number(e.target.value))}/></label>
+      <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
+      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as StochRsiSortKey)}><option value="entry">Entry First</option><option value="daily_d">Daily %D</option><option value="weekly_d">Weekly %D</option><option value="breakout">PDH Breakout</option><option value="lowest">New Low</option><option value="symbol">Symbol</option><option value="setup">Setup</option><option value="current_close">LTP</option></select></label>
+      <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
+    </div>
+    {data && <>
+      <div className="thirty-scoreboard">
+        <div><span>Evaluated</span><b>{data.evaluated}</b></div>
+        <div><span>Setups</span><b>{data.qualified}</b></div>
+        <div><span>Entries</span><b>{(data.statusSummary.GREEN_ENTRY ?? 0) + (data.statusSummary.BLUE_ENTRY ?? 0)}</b></div>
+        <div><span>Shown</span><b>{visibleRows.length} / {sortedRows.length}</b></div>
+      </div>
+      <section className="screenshot-tile-grid">
+        {visibleRows.length ? visibleRows.map((row) => {
+          const isGreen = row.setup_type === "GREEN_SETUP";
+          const tick = liveTicks[row.security_id];
+          return <div key={row.security_id} className={`screenshot-tile stoch-tile ${isGreen ? "green-setup" : "blue-setup"} ${row.entry_signal !== "NONE" ? "entry-fired" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={`${row.setup_type} · Daily ${row.daily_stoch_d.toFixed(1)} / Weekly ${row.weekly_stoch_d.toFixed(1)}`}>
+            <span className="tile-badges"><i>{isGreen ? "G" : "B"}</i>{row.entry_signal !== "NONE" && <i>PDH</i>}</span>
+            <b>{row.symbol}</b>
+            <small>{row.company_name}</small>
+            <span className={`tile-today-return ${tick ? "positive" : ""}`}>{tick ? money(tick.ltp) : row.entry_signal.replace("_", " ")}</span>
+            <StochRsiTileChart row={row} onOpen={() => setSelected(row)} />
+          </div>;
+        }) : <p className="panel-empty">No stocks matched the Weekly + Daily StochRSI setup today.</p>}
+      </section>
+    </>}
+    {selected && <div className="drawer" onClick={() => setSelected(null)}>
+      <div className="drawer-card chart-drawer" onClick={(event) => event.stopPropagation()}>
+        <button className="icon-button drawer-close" onClick={() => setSelected(null)}>×</button>
+        <p className="eyebrow">{selected.setup_type.replace("_", " ")} · {selected.entry_signal.replace("_", " ")}</p>
+        <h2>{selected.symbol} · {selected.company_name}</h2>
+        <p className="muted">{selected.reason}</p>
+        <StochRsiChartPanel selected={selected} settings={settings} />
+        <div className="stats-grid compact-stats">
+          <Stat label="Daily %D" value={selected.daily_stoch_d.toFixed(1)} sub={selected.current_date} />
+          <Stat label="Weekly %D" value={selected.weekly_stoch_d.toFixed(1)} sub="Previous completed week" />
+          <Stat label="PDH Breakout" value={selected.current_daily_high > selected.previous_daily_high ? "YES" : "WAIT"} sub={`${money(selected.current_daily_high)} / ${money(selected.previous_daily_high)}`} />
+          <Stat label="Zone Low" value={money(selected.lowest_price_in_zone)} sub={selected.new_lowest_candle ? "New lowest candle" : "Tracked setup low"} />
+        </div>
+      </div>
+    </div>}
+  </section>;
+}
+
 function EmaReversalScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, updatedAt }: { data: EmaReversalResponse | null; filters: EmaReversalFilters; setFilters: (filters: EmaReversalFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: EmaReversalRow | null; setSelected: (row: EmaReversalRow | null) => void; updatedAt?: string | null }) {
   const [sort, setSort] = useState<{ key: EmaReversalSortKey; direction: "asc" | "desc" }>({ key: "score", direction: "desc" });
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -2720,8 +3029,8 @@ export default function Home() {
   const [momentumContractionUpdatedAt, setMomentumContractionUpdatedAt] = useState<string | null>(null);
   const [thirtyInThirty, setThirtyInThirty] = useState<ThirtyInThirtyResponse | null>(null);
   const [thirtyInThirtyUpdatedAt, setThirtyInThirtyUpdatedAt] = useState<string | null>(null);
-  const [emaReversal, setEmaReversal] = useState<EmaReversalResponse | null>(null);
-  const [emaReversalUpdatedAt, setEmaReversalUpdatedAt] = useState<string | null>(null);
+  const [stochRsi, setStochRsi] = useState<StochRsiResponse | null>(null);
+  const [stochRsiUpdatedAt, setStochRsiUpdatedAt] = useState<string | null>(null);
   const [dryVolumeBreakout, setDryVolumeBreakout] = useState<DryVolumeBreakoutResponse | null>(null);
   const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
   const [tradingSettings, setTradingSettings] = useState<TradingSettings | null>(null);
@@ -2747,8 +3056,8 @@ export default function Home() {
   const [selectedMomentumContraction, setSelectedMomentumContraction] = useState<MomentumContractionRow | null>(null);
   const [thirtyInThirtyFilters, setThirtyInThirtyFilters] = useState<ThirtyInThirtyFilters>(defaultThirtyInThirtyFilters);
   const [selectedThirtyInThirty, setSelectedThirtyInThirty] = useState<ThirtyInThirtyRow | null>(null);
-  const [emaReversalFilters, setEmaReversalFilters] = useState<EmaReversalFilters>(defaultEmaReversalFilters);
-  const [selectedEmaReversal, setSelectedEmaReversal] = useState<EmaReversalRow | null>(null);
+  const [stochRsiFilters, setStochRsiFilters] = useState<StochRsiFilters>(defaultStochRsiFilters);
+  const [selectedStochRsi, setSelectedStochRsi] = useState<StochRsiRow | null>(null);
   const [dryVolumeBreakoutFilters, setDryVolumeBreakoutFilters] = useState<DryVolumeBreakoutFilters>(defaultDryVolumeBreakoutFilters);
   const [basketBacktestFilters, setBasketBacktestFilters] = useState<BasketBacktestFilters>(defaultBasketBacktestFilters);
   const [basketBacktest, setBasketBacktest] = useState<BasketBacktestResult | null>(null);
@@ -2773,7 +3082,7 @@ export default function Home() {
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("seasonal-edge-theme", theme); }, [theme]);
   useEffect(() => { localStorage.setItem("momentum-contraction-filters", JSON.stringify(momentumContractionFilters)); }, [momentumContractionFilters]);
-  useEffect(() => { if (!isAuthenticated) return; if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "50 EMA Reversal") runEmaReversalScreener(); if (view === "Dry Breakout" && !dryVolumeBreakout) runDryVolumeBreakoutScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured, isAuthenticated]);
+  useEffect(() => { if (!isAuthenticated) return; if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "StochRSI") runStochRsiScreener(); if (view === "Dry Breakout" && !dryVolumeBreakout) runDryVolumeBreakoutScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured, isAuthenticated]);
   useEffect(() => {
     if (!isAuthenticated || view !== "Data Status") return;
     let fallbackId: number | undefined;
@@ -2823,7 +3132,7 @@ export default function Home() {
   async function runHourlyBreakoutScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/hourly-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: hourlyBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setHourlyBreakout(d); setHourlyBreakoutUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Hourly Breakout screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runMomentumContractionScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/momentum-contraction-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: momentumContractionFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setMomentumContraction(d); setMomentumContractionUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Momentum Tight scanner unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runThirtyInThirtyScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/thirty-in-thirty-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: thirtyInThirtyFilters }) }); const d = await readJsonResponse<ThirtyInThirtyResponse>(r, "30 in 30 screener unavailable"); setThirtyInThirty(d); setThirtyInThirtyUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "30 in 30 screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
-  async function runEmaReversalScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/ema-reversal-pullback-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: emaReversalFilters }) }); const d = await readJsonResponse<EmaReversalResponse>(r, "50 EMA Reversal scanner unavailable"); setEmaReversal(d); setEmaReversalUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "50 EMA Reversal scanner unavailable"); } finally { if (!options.silent) setLoading(false); } }
+  async function runStochRsiScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/stoch-rsi-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: stochRsiFilters }) }); const d = await readJsonResponse<StochRsiResponse>(r, "StochRSI screener unavailable"); setStochRsi(d); setStochRsiUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "StochRSI screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runDryVolumeBreakoutScreener() { setLoading(true); try { const r = await fetch("/api/dry-volume-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: dryVolumeBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setDryVolumeBreakout(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Dry Breakout screener unavailable"); } finally { setLoading(false); } }
   async function runBasketBacktest() { setLoading(true); try { const r = await fetch("/api/basket-backtest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: basketBacktestFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setBasketBacktest(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Basket backtest unavailable"); } finally { setLoading(false); } }
   async function loadPortfolio() { setLoading(true); setError(""); try { const r = await fetch("/api/portfolio"); const d = await r.json(); if (!r.ok) throw new Error(d.error); setPortfolio(d); if (d.tradeManagement?.settings) setTradingSettings(d.tradeManagement.settings); } catch (e) { setError(e instanceof Error ? e.message : "Portfolio unavailable"); } finally { setLoading(false); } }
@@ -2867,12 +3176,12 @@ export default function Home() {
     {view === "Hourly Breakout" && <HourlyBreakoutScreenerView data={hourlyBreakout} filters={hourlyBreakoutFilters} setFilters={setHourlyBreakoutFilters} loading={loading} onRun={runHourlyBreakoutScreener} onReset={() => setHourlyBreakoutFilters(defaultHourlyBreakoutFilters)} selected={selectedHourlyBreakout} setSelected={setSelectedHourlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={hourlyBreakoutUpdatedAt} />}
     {view === "Momentum Tight" && <MomentumContractionScreenerView data={momentumContraction} filters={momentumContractionFilters} setFilters={setMomentumContractionFilters} loading={loading} onRun={runMomentumContractionScreener} onReset={() => setMomentumContractionFilters(defaultMomentumContractionFilters)} selected={selectedMomentumContraction} setSelected={setSelectedMomentumContraction} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={momentumContractionUpdatedAt} />}
     {view === "30 in 30" && <ThirtyInThirtyScreenerView data={thirtyInThirty} filters={thirtyInThirtyFilters} setFilters={setThirtyInThirtyFilters} loading={loading} onRun={runThirtyInThirtyScreener} onReset={() => setThirtyInThirtyFilters(defaultThirtyInThirtyFilters)} selected={selectedThirtyInThirty} setSelected={setSelectedThirtyInThirty} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={thirtyInThirtyUpdatedAt} settings={tradingSettings} />}
-    {view === "50 EMA Reversal" && <EmaReversalScreenerView data={emaReversal} filters={emaReversalFilters} setFilters={setEmaReversalFilters} loading={loading} onRun={runEmaReversalScreener} onReset={() => setEmaReversalFilters(defaultEmaReversalFilters)} selected={selectedEmaReversal} setSelected={setSelectedEmaReversal} updatedAt={emaReversalUpdatedAt} />}
+    {view === "StochRSI" && <StochRsiScreenerView data={stochRsi} filters={stochRsiFilters} setFilters={setStochRsiFilters} loading={loading} onRun={runStochRsiScreener} onReset={() => setStochRsiFilters(defaultStochRsiFilters)} selected={selectedStochRsi} setSelected={setSelectedStochRsi} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={stochRsiUpdatedAt} settings={tradingSettings} />}
     {view === "Dry Breakout" && <DryVolumeBreakoutScreenerView data={dryVolumeBreakout} filters={dryVolumeBreakoutFilters} loading={loading} onRun={runDryVolumeBreakoutScreener} onTradeCreated={loadPortfolio} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Backtest" && <BasketBacktestView filters={basketBacktestFilters} setFilters={setBasketBacktestFilters} data={basketBacktest} loading={loading} onRun={runBasketBacktest} />}
     {view === "Stock Search" && <><section className="search-card"><div className="search-copy"><p className="eyebrow">01 / Research a security</p><h2>Find an Indian equity</h2><p>Search the Dhan security master by symbol or company name.</p></div><div className="search-area"><form onSubmit={(e) => { e.preventDefault(); runSearch(); }}><div className="search-row"><div className="search-input"><Search size={18} /><input placeholder="Search RELIANCE, TCS, INFY…" value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>Enter</kbd></div><button className="primary search-button" type="submit" disabled={loading}>{loading ? "Searching…" : "Search"}</button></div></form>{results.length > 0 && <div className="results">{results.map((s) => <button key={`${s.securityId}-${s.segment}`} onClick={() => { setSecurity(s); setQuery(""); setResults([]); setAnalysis(null); }}><div><b>{s.symbol}</b><span>{s.name}</span></div><small>{s.exchange} · {s.securityId}</small></button>)}</div>}<div className="search-hint"><Database size={14} /><span>Security IDs are resolved from Dhan’s master—not ticker text alone.</span></div></div></section>{!configured && <section className="setup"><div className="setup-icon"><ShieldCheck size={25} /></div><div><p className="eyebrow">Secure data connection</p><h2>Connect your Dhan account to begin</h2><p>Market data and calculated statistics remain empty until server-side Dhan credentials are configured.</p></div><code>DHAN_CLIENT_ID= · DHAN_ACCESS_TOKEN=</code></section>}{!security && <section className="empty"><div className="empty-art"><CalendarDays size={30} /></div><p className="eyebrow">Awaiting a selection</p><h2>Start with a security search</h2><p>Select an equity to load its daily OHLCV history and derive seasonality statistics.</p></section>}{security && <><section className="stock-header"><div><div className="ticker-row"><span className="ticker">{security.symbol}</span><span className="exchange">{security.exchange}</span></div><h2>{security.name}</h2><p>Security ID {security.securityId} · Daily OHLCV · {analysis ? `${analysis.candles.length} trading sessions` : "Not loaded"}</p></div><button className="primary" onClick={() => analyze()} disabled={loading || !configured}>{loading ? <><RefreshCw size={16} className="spin" /> Calculating…</> : <><BarChart3 size={16} /> Load seasonality</>}</button></section>{analysis && <><section className="stats-grid"><Stat label="Current close" value={latest ? money(latest.close) : "—"} sub={latest?.date} /><Stat label="History available" value={`${new Set(analysis.candles.map((c) => c.date.slice(0, 4))).size} years`} sub="Complete years used" /><Stat label="Data through" value={latest?.date || "—"} sub="Cached locally" /><Stat label="Method" value="Daily OHLCV" sub="Adjusted data must be verified" /></section></>}</>}</>}
     {view === "Settings" && <TradingSettingsView settings={tradingSettings} onSaved={setTradingSettings} />}
-    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "50 EMA Reversal", "Dry Breakout", "Backtest", "Settings"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
+    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "StochRSI", "Dry Breakout", "Backtest", "Settings"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
   </div></main>;
 }
 
