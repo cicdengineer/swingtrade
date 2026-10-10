@@ -48,7 +48,12 @@ export type StochRsiScreenerRow = {
   entry_signal: StochRsiEntrySignal;
   current_daily_high: number;
   previous_daily_high: number;
+  previous_close: number;
   current_daily_low: number;
+  latest_signal_date: string;
+  latest_signal_high: number;
+  latest_signal_type: StochRsiEntrySignal;
+  latest_signal_age: number;
   new_lowest_candle: boolean;
   lowest_price_in_zone: number;
   ema10?: number;
@@ -214,6 +219,13 @@ function analyzeStock(input: {
   const previous = rows[currentIndex - 1];
   const latest = enriched[currentIndex];
   if (!current || !previous || !latest.setup_type || latest.daily_stoch_d === undefined || latest.weekly_stoch_d === undefined) return null;
+  const recentSignal = [...enriched.entries()]
+    .reverse()
+    .find(([index, point]) => currentIndex - index < 5 && point.entry_signal && point.entry_signal !== "NONE");
+  if (!recentSignal) return null;
+  const [signalIndex, signalPoint] = recentSignal;
+  const signalRow = rows[signalIndex];
+  if (!signalRow || !signalPoint.entry_signal || signalPoint.entry_signal === "NONE") return null;
 
   const signal = latest.entry_signal ?? "NONE";
   return {
@@ -231,7 +243,12 @@ function analyzeStock(input: {
     entry_signal: signal,
     current_daily_high: current.high,
     previous_daily_high: previous.high,
+    previous_close: previous.close,
     current_daily_low: current.low,
+    latest_signal_date: signalRow.trade_date,
+    latest_signal_high: signalRow.high,
+    latest_signal_type: signalPoint.entry_signal,
+    latest_signal_age: currentIndex - signalIndex,
     new_lowest_candle: Boolean(latest.new_lowest_candle),
     lowest_price_in_zone: latest.lowest_price_in_zone ?? current.low,
     ema10: ema10[currentIndex],

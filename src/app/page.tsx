@@ -71,10 +71,11 @@ type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "compan
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
 type StochRsiFilters = { universe: "ALL" | UniverseName; rsiLength: number; stochLength: number; smoothK: number; smoothD: number; upperThreshold: number; lowerThreshold: number; minWeeklyCandles: number; showAll: boolean };
-type StochRsiSortKey = "entry" | "symbol" | "setup" | "daily_d" | "weekly_d" | "breakout" | "lowest" | "current_close";
+type StochRsiSortKey = "entry" | "symbol" | "setup" | "daily_d" | "weekly_d" | "signal_high" | "distance_signal" | "lowest" | "today_return";
 type StochRsiRecentPoint = DailyChartPoint & { daily_stoch_d?: number; weekly_stoch_d?: number; setup_type?: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal?: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; new_lowest_candle?: boolean; lowest_price_in_zone?: number };
-type StochRsiRow = { status: "GREEN_SETUP" | "BLUE_SETUP"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; weekly_stoch_d: number; daily_stoch_d: number; setup_type: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; current_daily_high: number; previous_daily_high: number; current_daily_low: number; new_lowest_candle: boolean; lowest_price_in_zone: number; ema10?: number; ema20?: number; ema50?: number; ema200?: number; data_freshness: string; candle_completed: boolean; provisional: boolean; reason: string; recent: StochRsiRecentPoint[] };
+type StochRsiRow = { status: "GREEN_SETUP" | "BLUE_SETUP"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; weekly_stoch_d: number; daily_stoch_d: number; setup_type: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; current_daily_high: number; previous_daily_high: number; previous_close: number; current_daily_low: number; latest_signal_date: string; latest_signal_high: number; latest_signal_type: "GREEN_ENTRY" | "BLUE_ENTRY"; latest_signal_age: number; new_lowest_candle: boolean; lowest_price_in_zone: number; ema10?: number; ema20?: number; ema50?: number; ema200?: number; data_freshness: string; candle_completed: boolean; provisional: boolean; reason: string; recent: StochRsiRecentPoint[] };
 type StochRsiResponse = { filters: StochRsiFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; snapshotDate: string | null; results: StochRsiRow[]; generatedAt: string };
+type StochRsiDisplayFilters = { signal: "ALL" | "LATEST_CLOSED"; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean };
 type EmaReversalFilters = { universe: "ALL" | UniverseName; emaPeriod: number; downtrendLookback: number; minBelowEmaPct: number; minHistoricalDeclinePct: number; emaSlopeLookback: number; breakoutVolumeMultiplier: number; minPostBreakoutAdvancePct: number; minPullbackPct: number; maxPullbackPct: number; minPullbackDays: number; maxPullbackDays: number; maxEmaDownsideTolerancePct: number; minBreakoutAge: number; maxBreakoutAge: number; requireVolumeContraction: boolean; firstPullbackOnly: boolean; allowSidewaysConsolidation: boolean; allowReacceleration: boolean; maxCompletedPullbacks: number; minSetupScore: number; showAll: boolean };
 type EmaReversalSortKey = "score" | "symbol" | "stage" | "breakout_recent" | "advance" | "pullback" | "ema_dist" | "volume_dryness" | "setup_recent";
 type EmaReversalRow = { status: "FIRST_PULLBACK" | "TIGHT_CONSOLIDATION" | "REACCELERATION" | "INVALIDATED" | "NO_SETUP" | "INSUFFICIENT_DATA"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema50: number; distance_from_ema_pct: number; breakout_date?: string; breakout_close?: number; breakout_volume_ratio?: number; confirmation_date?: string; confirmation_volume_ratio?: number; post_breakout_high_date?: string; post_breakout_high?: number; advance_pct?: number; pullback_start_date?: string; pullback_pct?: number; pullback_volume_ratio?: number; days_in_pullback?: number; completed_pullback_count: number; setup_score: number; score_breakdown: Record<string, number>; downtrend_below_ema_pct?: number; historical_decline_pct?: number; ema50_slope_pct?: number; average_volume_5?: number; average_volume_20?: number; setup_type?: "Pullback" | "Sideways Consolidation" | "Reacceleration"; reason: string; recent: DailyChartPoint[] };
@@ -240,6 +241,18 @@ const defaultStochRsiFilters: StochRsiFilters = {
   lowerThreshold: 20,
   minWeeklyCandles: 40,
   showAll: false,
+};
+const defaultStochRsiDisplayFilters: StochRsiDisplayFilters = {
+  signal: "ALL",
+  above50EmaOnly: false,
+  nearPreviousDayHighOnly: false,
+  upTodayOnly: false,
+  strongStartOnly: false,
+  earlyVolumeOnly: false,
+  highVolumeOnly: false,
+  decliningVolumeOnly: false,
+  dryVolumeOnly: false,
+  redCandleOnly: false,
 };
 const defaultEmaReversalFilters: EmaReversalFilters = {
   universe: "ALL",
@@ -655,6 +668,57 @@ const matchesThirtyInThirtyFilters = (row: ThirtyInThirtyRow, filters: ThirtyInT
   (!filters.decliningVolumeOnly || hasDryVolumeStreak(row)) &&
   (!filters.dryVolumeOnly || hasDryVolumeRatio(row)) &&
   (!filters.redCandleOnly || closedRedPreviousSession(row));
+const stochTodayReturnPct = (row: StochRsiRow, tick?: LiveTick) => {
+  const close = tick?.ltp ?? row.current_close;
+  const previousClose = tick?.prevClose ?? row.previous_close;
+  return previousClose > 0 ? ((close / previousClose) - 1) * 100 : undefined;
+};
+const stochCurrentVolumeRatio = (row: StochRsiRow) => {
+  const completed = row.recent.filter((point) => point.trade_date !== liveTradeDate());
+  const latest = completed.at(-1) ?? row.recent.at(-1);
+  const baseline = completed.slice(-21, -1);
+  const avgVolume = average(baseline.map((point) => point.volume));
+  return latest && avgVolume > 0 ? latest.volume / avgVolume : 0;
+};
+const stochNearPreviousDayHigh = (row: StochRsiRow) => ((row.current_close / row.previous_daily_high) - 1) * 100 >= -0.5;
+const stochStrongStart = (row: StochRsiRow, tick?: LiveTick) => Boolean(tick?.dayOpen && tick.dayOpen > row.previous_close && tick.dayOpen < row.previous_daily_high);
+const stochDryVolumeStreak = (row: StochRsiRow, minDays = 5) => {
+  const volumes = row.recent.filter((point) => point.trade_date !== liveTradeDate()).map((point) => point.volume).filter((volume) => volume > 0);
+  if (volumes.length < minDays) return false;
+  let streakDays = 1;
+  for (let index = volumes.length - 1; index > 0; index -= 1) {
+    if (volumes[index] < volumes[index - 1]) streakDays += 1;
+    else break;
+  }
+  return streakDays >= minDays;
+};
+const stochDryVolumeRatio = (row: StochRsiRow, maxRatio = thirtyInThirtyDryVolumeRatio, lookbackDays = thirtyInThirtyDryVolumeLookback) => {
+  const completed = row.recent.filter((point) => point.trade_date !== liveTradeDate() && point.volume > 0);
+  if (completed.length <= lookbackDays) return false;
+  const latest = completed.at(-1)!;
+  const baseline = completed.slice(-(lookbackDays + 1), -1);
+  const averageVolume = average(baseline.map((point) => point.volume));
+  return averageVolume > 0 && latest.volume / averageVolume <= maxRatio;
+};
+const stochClosedRedPreviousSession = (row: StochRsiRow) => {
+  const latestCompleted = [...row.recent].reverse().find((point) => point.trade_date !== liveTradeDate());
+  return Boolean(latestCompleted && latestCompleted.close < latestCompleted.open);
+};
+const latestCompletedStochSignal = (row: StochRsiRow) => {
+  const today = liveTradeDate();
+  return [...row.recent].reverse().find((point) => point.trade_date !== today && point.entry_signal && point.entry_signal !== "NONE");
+};
+const matchesStochRsiFilters = (row: StochRsiRow, filters: StochRsiDisplayFilters, tick?: LiveTick) =>
+  (!filters.above50EmaOnly || (row.ema50 !== undefined && row.current_close > row.ema50)) &&
+  (!filters.nearPreviousDayHighOnly || stochNearPreviousDayHigh(row)) &&
+  (!filters.upTodayOnly || (stochTodayReturnPct(row, tick) ?? -Infinity) > 0) &&
+  (!filters.strongStartOnly || stochStrongStart(row, tick)) &&
+  (!filters.earlyVolumeOnly || stochCurrentVolumeRatio(row) >= 0.3) &&
+  (!filters.highVolumeOnly || stochCurrentVolumeRatio(row) >= 1.5) &&
+  (!filters.decliningVolumeOnly || stochDryVolumeStreak(row)) &&
+  (!filters.dryVolumeOnly || stochDryVolumeRatio(row)) &&
+  (!filters.redCandleOnly || stochClosedRedPreviousSession(row)) &&
+  (filters.signal === "ALL" || latestCompletedStochSignal(row)?.trade_date === row.recent.filter((point) => point.trade_date !== liveTradeDate()).at(-1)?.trade_date);
 
 function SetupSparkline({ row, onOpen }: { row: BreakoutChartRow; onOpen: () => void }) {
   const chartRows = lastTradingMonths(row.recent);
@@ -2396,8 +2460,8 @@ function liveAdjustedStochRsi(row: StochRsiRow, tick?: LiveTick): StochRsiRow {
   };
 }
 
-function StochRsiTileChart({ row, onOpen }: { row: StochRsiRow; onOpen: () => void }) {
-  const chartRows = lastTradingMonths(row.recent, 63);
+function StochRsiTileChart({ row, chartMonths, onOpen }: { row: StochRsiRow; chartMonths: 3 | 6; onOpen: () => void }) {
+  const chartRows = lastTradingMonths(row.recent, chartMonths === 6 ? 126 : 63);
   const closes = chartRows.map((point) => point.close);
   const trendUp = closes.length > 1 && closes.at(-1)! >= closes[0];
   return <span className="thirty-in-thirty-chart stoch-tile-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="img" aria-label={`${row.symbol} StochRSI setup chart`}>
@@ -2409,7 +2473,7 @@ function StochRsiTileChart({ row, onOpen }: { row: StochRsiRow; onOpen: () => vo
   </span>;
 }
 
-function SignalCandleChart({ rows, timeframe, loading, error, dailySessions = 63 }: { rows: StochRsiRecentPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; dailySessions?: number }) {
+function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signalDate, dailySessions = 63 }: { rows: StochRsiRecentPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; signalHigh?: number; signalDate?: string; dailySessions?: number }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -2419,14 +2483,24 @@ function SignalCandleChart({ rows, timeframe, loading, error, dailySessions = 63
   const volumeHeight = 74;
   const lows = chartRows.map((row) => row.low);
   const highs = chartRows.map((row) => row.high);
-  const priceMin = Math.min(...lows);
-  const priceMax = Math.max(...highs);
+  const closes = chartRows.map((row) => row.close);
+  const calculatedEma = emaValues(closes);
+  const chartEmaValues = chartRows.map((row, index) => row.ema50 ?? calculatedEma[index]);
+  const visibleEmaValues = chartEmaValues.filter((value): value is number => value !== undefined);
+  const priceMin = Math.min(...lows, ...visibleEmaValues, ...(signalHigh ? [signalHigh] : []));
+  const priceMax = Math.max(...highs, ...visibleEmaValues, ...(signalHigh ? [signalHigh] : []));
   const candleSlot = width / chartRows.length;
   const bodyWidth = Math.max(3, Math.min(8, candleSlot * 0.48));
   const maxVolume = Math.max(...chartRows.map((row) => row.volume));
+  const volumeSma = smaValues(chartRows.map((row) => row.volume), 20);
+  const emaPath = chartEmaValues.map((value, index) => ({ value, x: index * candleSlot + candleSlot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
+  const signalIndex = signalDate ? chartRows.findIndex((row) => row.trade_date === signalDate) : -1;
+  const signalLineY = signalHigh ? scaleValue(signalHigh, priceMin, priceMax, priceHeight, 8) : undefined;
+  const signalLineX = signalIndex >= 0 ? signalIndex * candleSlot + candleSlot / 2 : 0;
   return <div className="clean-chart signal-chart">
-    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-green-signal" />Green entry</span><span><i className="legend-blue-signal" />Blue entry</span><span><i className="legend-volume" />Volume strip</span></div>
+    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-green-signal" />Green entry</span><span><i className="legend-blue-signal" />Blue entry</span><span><i className="legend-high-volume" />Unusual volume</span></div>
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart with StochRSI entry markers`}>
+      {signalLineY !== undefined && <line className="signal-high-line" x1={signalLineX} x2={width} y1={signalLineY} y2={signalLineY} />}
       {chartRows.map((row, index) => {
         const x = index * candleSlot + candleSlot / 2;
         const openY = scaleValue(row.open, priceMin, priceMax, priceHeight, 8);
@@ -2441,15 +2515,18 @@ function SignalCandleChart({ rows, timeframe, loading, error, dailySessions = 63
           <title>{`${chartDateLabel(row.trade_date, timeframe)} O ${row.open.toFixed(2)} H ${row.high.toFixed(2)} L ${row.low.toFixed(2)} C ${row.close.toFixed(2)}${row.entry_signal && row.entry_signal !== "NONE" ? ` ${row.entry_signal}` : ""}`}</title>
           <line x1={x} x2={x} y1={highY} y2={lowY} />
           <rect x={x - bodyWidth / 2} y={bodyY} width={bodyWidth} height={bodyHeight} rx="1" />
-          {signalClass && <polygon className={`signal-triangle ${signalClass}`} points={`${x},${Math.max(8, highY - 11)} ${x - 5},${Math.max(16, highY - 1)} ${x + 5},${Math.max(16, highY - 1)}`} />}
+          {signalClass && <polygon className={`signal-triangle ${signalClass}`} points={`${x},${Math.min(priceHeight - 8, lowY + 12)} ${x - 5},${Math.min(priceHeight - 18, lowY + 2)} ${x + 5},${Math.min(priceHeight - 18, lowY + 2)}`} />}
         </g>;
       })}
+      <path className="ema-line" d={emaPath} />
     </svg>
     <div className="outside-volume" style={{ height: volumeHeight }}>
-      {chartRows.map((row) => {
+      {chartRows.map((row, index) => {
         const up = row.close >= row.open;
         const height = Math.max(7, (row.volume / maxVolume) * (volumeHeight - 12));
-        return <span key={row.trade_date} className={`outside-volume-bar ${up ? "up" : "down"}`} style={{ height }} title={`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}`} />;
+        const avg = volumeSma[index];
+        const high = avg ? row.volume / avg >= 1.5 : false;
+        return <span key={row.trade_date} className={`outside-volume-bar ${up ? "up" : "down"} ${high ? "high" : ""}`} style={{ height }} title={`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}${avg ? ` (${(row.volume / avg).toFixed(1)}x)` : ""}`} />;
       })}
     </div>
   </div>;
@@ -2465,7 +2542,7 @@ function StochRsiRiskTiles({ selected, activeRows, hourlyRows, hourlyLoading, ho
   </div>;
 }
 
-function StochRsiChartPanel({ selected, settings }: { selected: StochRsiRow; settings?: TradingSettings | null }) {
+function StochRsiChartPanel({ selected, chartMonths, settings }: { selected: StochRsiRow; chartMonths: 3 | 6; settings?: TradingSettings | null }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
   const [hourlyLoading, setHourlyLoading] = useState(false);
@@ -2510,14 +2587,14 @@ function StochRsiChartPanel({ selected, settings }: { selected: StochRsiRow; set
     };
   }, [selected.security_id, timeframe]);
 
-  const dailyRows = lastTradingMonths(mergeLiveDailyCandle(selected.recent, liveDailyRow) as StochRsiRecentPoint[], 63);
+  const dailyRows = lastTradingMonths(mergeLiveDailyCandle(selected.recent, liveDailyRow) as StochRsiRecentPoint[], chartMonths === 6 ? 126 : 63);
   const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
   return <div className="chart-shell">
     <StochRsiRiskTiles selected={selected} activeRows={dailyRows} hourlyRows={hourlyRows} hourlyLoading={hourlyLoading} hourlyError={hourlyError} settings={settings} />
     <div className="chart-toolbar">
       <div>
         <p className="eyebrow">Chart timeframe</p>
-        <span>{timeframe === "daily" ? `Last 3 months daily${liveDailyRow ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
+        <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${liveDailyRow ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
       </div>
       <div className="chart-toolbar-actions">
         <a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer" title={`Open ${selected.symbol} in TradingView`}><ArrowUpRight size={14}/>TradingView</a>
@@ -2527,7 +2604,7 @@ function StochRsiChartPanel({ selected, settings }: { selected: StochRsiRow; set
         </div>
       </div>
     </div>
-    <SignalCandleChart rows={activeRows as StochRsiRecentPoint[]} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} />
+    <SignalCandleChart rows={activeRows as StochRsiRecentPoint[]} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} signalHigh={timeframe === "daily" ? selected.latest_signal_high : undefined} signalDate={timeframe === "daily" ? selected.latest_signal_date : undefined} dailySessions={chartMonths === 6 ? 126 : 63} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>;
 }
@@ -2535,7 +2612,10 @@ function StochRsiChartPanel({ selected, settings }: { selected: StochRsiRow; set
 function StochRsiScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings }: { data: StochRsiResponse | null; filters: StochRsiFilters; setFilters: (filters: StochRsiFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: StochRsiRow | null; setSelected: (row: StochRsiRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null }) {
   const [sort, setSort] = useState<{ key: StochRsiSortKey; direction: "asc" | "desc" }>({ key: "entry", direction: "desc" });
   const [tileLimit, setTileLimit] = useState(9999);
+  const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
+  const [displayFilters, setDisplayFilters] = useState<StochRsiDisplayFilters>(defaultStochRsiDisplayFilters);
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const setNumber = (key: keyof StochRsiFilters, value: number) => setFilters({ ...filters, [key]: value });
   const rows = useMemo(() => (data?.results ?? []).map((row) => liveAdjustedStochRsi(row, liveTicks[row.security_id])), [data, liveTicks]);
   useEffect(() => {
@@ -2599,9 +2679,10 @@ function StochRsiScreenerView({ data, filters, setFilters, loading, onRun, onRes
       if (sort.key === "setup") return row.setup_type;
       if (sort.key === "daily_d") return row.daily_stoch_d;
       if (sort.key === "weekly_d") return row.weekly_stoch_d;
-      if (sort.key === "breakout") return row.current_daily_high - row.previous_daily_high;
+      if (sort.key === "signal_high") return row.latest_signal_high;
+      if (sort.key === "distance_signal") return Math.abs(((row.current_close / row.latest_signal_high) - 1) * 100);
       if (sort.key === "lowest") return row.new_lowest_candle ? 1 : 0;
-      if (sort.key === "current_close") return row.current_close;
+      if (sort.key === "today_return") return stochTodayReturnPct(row, liveTicks[row.security_id]) ?? -Infinity;
       return row.entry_signal === "NONE" ? 0 : 1;
     };
     return [...rows].sort((a, b) => {
@@ -2610,8 +2691,14 @@ function StochRsiScreenerView({ data, filters, setFilters, loading, onRun, onRes
       const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
       return sort.direction === "asc" ? comparison : -comparison;
     });
-  }, [rows, sort]);
-  const visibleRows = sortedRows.slice(0, tileLimit);
+  }, [rows, sort, liveTicks]);
+  const filteredRows = useMemo(() => sortedRows.filter((row) => matchesStochRsiFilters(row, displayFilters, liveTicks[row.security_id])), [sortedRows, displayFilters, liveTicks]);
+  const pinnedRows = useMemo(() => filteredRows.filter((row) => pinnedIds.includes(row.security_id)), [filteredRows, pinnedIds]);
+  const visibleRows = useMemo(() => {
+    const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
+    return [...pinnedRows, ...filteredRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
+  }, [filteredRows, pinnedRows, tileLimit]);
+  const togglePinned = (securityId: string) => setPinnedIds((current) => current.includes(securityId) ? current.filter((id) => id !== securityId) : [...current, securityId]);
   const sortBy = (key: StochRsiSortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_d" ? "asc" : "desc" });
 
   return <section className="research-page thirty-in-thirty-page stoch-rsi-page">
@@ -2633,27 +2720,43 @@ function StochRsiScreenerView({ data, filters, setFilters, loading, onRun, onRes
       <label>Stoch<input className="plain-input" type="number" value={filters.stochLength} onChange={(e) => setNumber("stochLength", Number(e.target.value))}/></label>
       <label>Upper<input className="plain-input" type="number" value={filters.upperThreshold} onChange={(e) => setNumber("upperThreshold", Number(e.target.value))}/></label>
       <label>Lower<input className="plain-input" type="number" value={filters.lowerThreshold} onChange={(e) => setNumber("lowerThreshold", Number(e.target.value))}/></label>
+      <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
-      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as StochRsiSortKey)}><option value="entry">Entry First</option><option value="daily_d">Daily %D</option><option value="weekly_d">Weekly %D</option><option value="breakout">PDH Breakout</option><option value="lowest">New Low</option><option value="symbol">Symbol</option><option value="setup">Setup</option><option value="current_close">LTP</option></select></label>
+      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as StochRsiSortKey)}><option value="entry">Entry First</option><option value="today_return">Today Gain</option><option value="distance_signal">Near Signal High</option><option value="signal_high">Signal High</option><option value="daily_d">Daily %D</option><option value="weekly_d">Weekly %D</option><option value="lowest">New Low</option><option value="symbol">Symbol</option><option value="setup">Setup</option></select></label>
       <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
+    </div>
+    <div className="thirty-in-thirty-switches stoch-rsi-switches">
+      <label>Signal<select value={displayFilters.signal} onChange={(e) => setDisplayFilters({ ...displayFilters, signal: e.target.value as StochRsiDisplayFilters["signal"] })}><option value="ALL">Last 5 days</option><option value="LATEST_CLOSED">Latest closed</option></select></label>
+      <label><input type="checkbox" checked={displayFilters.above50EmaOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, above50EmaOnly: e.target.checked })}/><span>Above 50EMA</span></label>
+      <label><input type="checkbox" checked={displayFilters.nearPreviousDayHighOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, nearPreviousDayHighOnly: e.target.checked })}/><span>Near PD High</span></label>
+      <label><input type="checkbox" checked={displayFilters.upTodayOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, upTodayOnly: e.target.checked })}/><span>Up</span></label>
+      <label><input type="checkbox" checked={displayFilters.strongStartOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, strongStartOnly: e.target.checked })}/><span>SS</span></label>
+      <label><input type="checkbox" checked={displayFilters.earlyVolumeOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, earlyVolumeOnly: e.target.checked })}/><span>Early Vol</span></label>
+      <label><input type="checkbox" checked={displayFilters.highVolumeOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, highVolumeOnly: e.target.checked })}/><span>High Volume</span></label>
+      <label><input type="checkbox" checked={displayFilters.decliningVolumeOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, decliningVolumeOnly: e.target.checked })}/><span>Declining Vol</span></label>
+      <label><input type="checkbox" checked={displayFilters.dryVolumeOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, dryVolumeOnly: e.target.checked })}/><span>Dry Volume</span></label>
+      <label><input type="checkbox" checked={displayFilters.redCandleOnly} onChange={(e) => setDisplayFilters({ ...displayFilters, redCandleOnly: e.target.checked })}/><span>Red Candle</span></label>
     </div>
     {data && <>
       <div className="thirty-scoreboard">
         <div><span>Evaluated</span><b>{data.evaluated}</b></div>
         <div><span>Setups</span><b>{data.qualified}</b></div>
         <div><span>Entries</span><b>{(data.statusSummary.GREEN_ENTRY ?? 0) + (data.statusSummary.BLUE_ENTRY ?? 0)}</b></div>
-        <div><span>Shown</span><b>{visibleRows.length} / {sortedRows.length}</b></div>
+        <div><span>Shown</span><b>{visibleRows.length} / {filteredRows.length}</b></div>
       </div>
       <section className="screenshot-tile-grid">
         {visibleRows.length ? visibleRows.map((row) => {
           const isGreen = row.setup_type === "GREEN_SETUP";
           const tick = liveTicks[row.security_id];
-          return <div key={row.security_id} className={`screenshot-tile stoch-tile ${isGreen ? "green-setup" : "blue-setup"} ${row.entry_signal !== "NONE" ? "entry-fired" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={`${row.setup_type} · Daily ${row.daily_stoch_d.toFixed(1)} / Weekly ${row.weekly_stoch_d.toFixed(1)}`}>
-            <span className="tile-badges"><i>{isGreen ? "G" : "B"}</i>{row.entry_signal !== "NONE" && <i>PDH</i>}</span>
+          const todayReturn = stochTodayReturnPct(row, tick);
+          const nearSignal = Math.abs(((row.current_close / row.latest_signal_high) - 1) * 100) <= 0.5;
+          const pinned = pinnedIds.includes(row.security_id);
+          return <div key={row.security_id} className={`screenshot-tile stoch-tile ${isGreen ? "green-setup" : "blue-setup"} ${row.entry_signal !== "NONE" ? "entry-fired" : ""} ${nearSignal ? "near-signal-high" : ""} ${pinned ? "pinned" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={`${row.setup_type} · Daily ${row.daily_stoch_d.toFixed(1)} / Weekly ${row.weekly_stoch_d.toFixed(1)}`}>
+            <span className="tile-badges stoch-tile-badges"><i>{isGreen ? "G" : "B"}</i><i>PDH</i><span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span>
             <b>{row.symbol}</b>
             <small>{row.company_name}</small>
-            <span className={`tile-today-return ${tick ? "positive" : ""}`}>{tick ? money(tick.ltp) : row.entry_signal.replace("_", " ")}</span>
-            <StochRsiTileChart row={row} onOpen={() => setSelected(row)} />
+            {todayReturn !== undefined && <span className={`tile-today-return ${todayReturn >= 0 ? "positive" : "negative"}`}>{pct2(todayReturn)}</span>}
+            <StochRsiTileChart row={row} chartMonths={chartMonths} onOpen={() => setSelected(row)} />
           </div>;
         }) : <p className="panel-empty">No stocks matched the Weekly + Daily StochRSI setup today.</p>}
       </section>
@@ -2664,11 +2767,11 @@ function StochRsiScreenerView({ data, filters, setFilters, loading, onRun, onRes
         <p className="eyebrow">{selected.setup_type.replace("_", " ")} · {selected.entry_signal.replace("_", " ")}</p>
         <h2>{selected.symbol} · {selected.company_name}</h2>
         <p className="muted">{selected.reason}</p>
-        <StochRsiChartPanel selected={selected} settings={settings} />
+        <StochRsiChartPanel selected={selected} chartMonths={chartMonths} settings={settings} />
         <div className="stats-grid compact-stats">
           <Stat label="Daily %D" value={selected.daily_stoch_d.toFixed(1)} sub={selected.current_date} />
           <Stat label="Weekly %D" value={selected.weekly_stoch_d.toFixed(1)} sub="Previous completed week" />
-          <Stat label="PDH Breakout" value={selected.current_daily_high > selected.previous_daily_high ? "YES" : "WAIT"} sub={`${money(selected.current_daily_high)} / ${money(selected.previous_daily_high)}`} />
+          <Stat label="Signal High" value={money(selected.latest_signal_high)} sub={`${selected.latest_signal_type.replace("_", " ")} · ${selected.latest_signal_date}`} />
           <Stat label="Zone Low" value={money(selected.lowest_price_in_zone)} sub={selected.new_lowest_candle ? "New lowest candle" : "Tracked setup low"} />
         </div>
       </div>
