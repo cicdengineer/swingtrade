@@ -66,13 +66,13 @@ type MomentumSetupType = "MOMENTUM_CONTRACTION" | "TRENDING_TIGHT";
 type MomentumContractionFilters = { universe: "ALL" | UniverseName; setupType: "ALL" | MomentumSetupType; emaLength: number; emaSlopeLookback: number; momentumLookback: number; minPriorMovePct: number; volumeAverageLength: number; expansionRelativeVolume: number; atrLength: number; tightRangeAtr: number; lowVolumeLookback: number; dryVolumeRatio: number; contractionLookback: number; minAverageDailyTradedValue: number; maxDistanceFromEmaPct: number; requireRisingEma: boolean; minSetupScore: number; showAll: boolean; debug: boolean };
 type MomentumContractionRow = { status: MomentumSetupType | "BELOW_EMA" | "NO_MOMENTUM" | "NOT_TIGHT" | "VOLUME_NOT_DRY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; setupType: MomentumSetupType; setupScore: number; current_date: string; current_close: number; ema50: number; emaSlope: number; distance_from_ema_pct: number; priorMovePct: number; momentumRelativeVolume: number; atr14: number; rangeCompression: number; currentVolume: number; volumeSMA20: number; volumeSMA50: number; relativeVolume: number; volumePercentile: number; lowestVolume10: boolean; lowestVolume20: boolean; avgVolume5: number; avgVolume20: number; volumeContractionRatio: number; trendStructure: "HIGHER_HIGH_LOW" | "RISING" | "SIDEWAYS" | "WEAK"; averageDailyTradedValue: number; reason: string; diagnostics: { pass: boolean; label: string }[]; recent: DailyChartPoint[] };
 type MomentumContractionResponse = { filters: MomentumContractionFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: MomentumContractionRow[]; generatedAt: string };
-type EmaConsolidationFilters = { universe: "ALL" | UniverseName; emaLength: number; lookbackDays: number; priorMoveLookbackDays: number; minPriorMovePct: number; consolidationDays: number; minConsolidationDays: number; maxRangePct: number; maxDistanceFromEmaPct: number; maxEmaToRangeMidPct: number; minAboveEmaDaysPct: number; minAverageDailyTradedValue: number; requireRisingEma: boolean; showAll: boolean };
+type EmaConsolidationFilters = { universe: "ALL" | UniverseName; emaLength: number; lookbackDays: number; priorMoveLookbackDays: number; minPriorMovePct: number; consolidationDays: number; minConsolidationDays: number; maxRangePct: number; maxDistanceFromEmaPct: number; maxEmaToRangeMidPct: number; minAboveEmaDaysPct: number; minAverageDailyTradedValue: number; requireRisingEma: boolean; stoch20Only: boolean; showAll: boolean };
 type EmaConsolidationSortKey = "score" | "today_return" | "symbol" | "company" | "prior_move" | "range" | "ema_distance" | "ema_catchup" | "above_ema" | "breakout_distance" | "volume";
-type EmaConsolidationRow = { status: "SETUP" | "WATCHLIST" | "NO_PRIOR_MOVE" | "BELOW_20EMA" | "TOO_WIDE" | "EMA_NOT_READY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema20: number; ema50: number; distance_from_20ema_pct: number; ema20_slope_pct: number; prior_move_pct: number; prior_low_date?: string; prior_low_close?: number; consolidation_start_date: string; consolidation_end_date: string; consolidation_days: number; range_high: number; range_low: number; range_pct: number; breakout_distance_pct: number; ema_to_range_mid_pct: number; above_ema_days_pct: number; current_volume_ratio?: number; averageDailyTradedValue: number; setup_score: number; reason: string; recent: Array<DailyChartPoint & { ema20?: number }> };
+type EmaConsolidationRow = { status: "SETUP" | "WATCHLIST" | "NO_PRIOR_MOVE" | "BELOW_20EMA" | "TOO_WIDE" | "EMA_NOT_READY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema20: number; ema50: number; distance_from_20ema_pct: number; ema20_slope_pct: number; prior_move_pct: number; prior_low_date?: string; prior_low_close?: number; consolidation_start_date: string; consolidation_end_date: string; consolidation_days: number; range_high: number; range_low: number; range_pct: number; breakout_distance_pct: number; ema_to_range_mid_pct: number; above_ema_days_pct: number; current_volume_ratio?: number; daily_stoch_d?: number; averageDailyTradedValue: number; setup_score: number; reason: string; recent: Array<DailyChartPoint & { ema20?: number; daily_stoch_d?: number }> };
 type EmaConsolidationResponse = { filters: EmaConsolidationFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: EmaConsolidationRow[]; generatedAt: string };
-type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; showAll: boolean };
+type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; stoch20Only: boolean; showAll: boolean };
 type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "hourly_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
-type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
+type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; daily_stoch_d?: number; averageDailyTradedValue: number; reason: string; recent: Array<DailyChartPoint & { daily_stoch_d?: number }> };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
 type StochRsiFilters = { universe: "ALL" | UniverseName; rsiLength: number; stochLength: number; smoothK: number; smoothD: number; upperThreshold: number; lowerThreshold: number; minWeeklyCandles: number; showAll: boolean };
 type StochRsiSortKey = "entry" | "symbol" | "setup" | "daily_d" | "weekly_d" | "signal_high" | "distance_signal" | "lowest" | "today_return";
@@ -235,6 +235,7 @@ const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   decliningVolumeOnly: false,
   dryVolumeOnly: false,
   redCandleOnly: false,
+  stoch20Only: false,
   showAll: false,
 };
 const defaultEmaConsolidationFilters: EmaConsolidationFilters = {
@@ -251,6 +252,7 @@ const defaultEmaConsolidationFilters: EmaConsolidationFilters = {
   minAboveEmaDaysPct: 65,
   minAverageDailyTradedValue: 0,
   requireRisingEma: true,
+  stoch20Only: false,
   showAll: false,
 };
 const defaultStochRsiFilters: StochRsiFilters = {
@@ -689,7 +691,8 @@ const matchesThirtyInThirtyFilters = (row: ThirtyInThirtyRow, filters: ThirtyInT
   (!filters.highVolumeOnly || currentVolumeRatio(row) >= 1.5) &&
   (!filters.decliningVolumeOnly || hasDryVolumeStreak(row)) &&
   (!filters.dryVolumeOnly || hasDryVolumeRatio(row)) &&
-  (!filters.redCandleOnly || closedRedPreviousSession(row));
+  (!filters.redCandleOnly || closedRedPreviousSession(row)) &&
+  (!filters.stoch20Only || (row.daily_stoch_d !== undefined && row.daily_stoch_d < 21));
 const stochTodayReturnPct = (row: StochRsiRow, tick?: LiveTick) => {
   const close = tick?.ltp ?? row.current_close;
   const previousClose = tick?.prevClose ?? row.previous_close;
@@ -2345,6 +2348,7 @@ function ThirtyInThirtyScoreTiles({ selected, chartMonths }: { selected: ThirtyI
     <StrategyStat label="Breakout Zone" value={money(selected.breakout_level)} sub={pct(selected.breakout_distance_pct)} tone={toneFromRange(selected.breakout_distance_pct, (value) => value >= -3 && value <= 0.5, (value) => value >= -6 && value <= 2)} />
     <StrategyStat label="Tightness 5D/20D" value={`${selected.tightness_5d_vs_20d.toFixed(2)}x`} tone={toneFromRange(selected.tightness_5d_vs_20d, (value) => value <= 0.75, (value) => value <= 1)} />
     <StrategyStat label="Lowest Vol 5D/20D" value={`${selected.lowest_volume_5d_vs_20d.toFixed(2)}x`} tone={toneFromRange(selected.lowest_volume_5d_vs_20d, (value) => value <= 0.45, (value) => value <= 0.75)} />
+    <StrategyStat label="Daily StochRSI" value={selected.daily_stoch_d === undefined ? "-" : selected.daily_stoch_d.toFixed(1)} tone={toneFromRange(selected.daily_stoch_d, (value) => value < 21, (value) => value < 35)} />
     <StrategyStat label="Demand/Supply" value={`${selected.demand_supply_score}`} tone={toneFromRange(selected.demand_supply_score, (value) => value >= 70, (value) => value >= 50)} />
   </div>;
 }
@@ -2613,6 +2617,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label><input type="checkbox" checked={filters.decliningVolumeOnly} onChange={(e) => setFilters({ ...filters, decliningVolumeOnly: e.target.checked })}/><span>Declining Vol</span></label>
       <label title={`Latest completed volume <= ${thirtyInThirtyDryVolumeRatio}x average of previous ${thirtyInThirtyDryVolumeLookback} sessions`}><input type="checkbox" checked={filters.dryVolumeOnly} onChange={(e) => setFilters({ ...filters, dryVolumeOnly: e.target.checked })}/><span>Dry Volume</span></label>
       <label><input type="checkbox" checked={filters.redCandleOnly} onChange={(e) => setFilters({ ...filters, redCandleOnly: e.target.checked })}/><span>Red Candle</span></label>
+      <label title="Daily StochRSI %D below 21"><input type="checkbox" checked={filters.stoch20Only} onChange={(e) => setFilters({ ...filters, stoch20Only: e.target.checked })}/><span>Stoch20</span></label>
     </div>
     {data && <>
       <div className="thirty-scoreboard">
@@ -2782,6 +2787,7 @@ function EmaConsolidationScoreTiles({ selected }: { selected: EmaConsolidationRo
     <StrategyStat label="EMA Catchup" value={pct(selected.ema_to_range_mid_pct)} sub="to base midpoint" tone={toneFromRange(selected.ema_to_range_mid_pct, (value) => value <= 4, (value) => value <= 7)} />
     <StrategyStat label="Above EMA Days" value={pct(selected.above_ema_days_pct)} tone={toneFromRange(selected.above_ema_days_pct, (value) => value >= 80, (value) => value >= 65)} />
     <StrategyStat label="Range High" value={money(selected.range_high)} sub={pct(selected.breakout_distance_pct)} tone={toneFromRange(selected.breakout_distance_pct, (value) => value >= -4 && value <= 2, (value) => value >= -8 && value <= 4)} />
+    <StrategyStat label="Daily StochRSI" value={selected.daily_stoch_d === undefined ? "-" : selected.daily_stoch_d.toFixed(1)} tone={toneFromRange(selected.daily_stoch_d, (value) => value < 21, (value) => value < 35)} />
     <StrategyStat label="Current Volume" value={selected.current_volume_ratio === undefined ? "-" : `${selected.current_volume_ratio.toFixed(2)}x`} tone="neutral" />
   </div>;
 }
@@ -2905,6 +2911,7 @@ function EmaConsolidationScreenerView({ data, filters, setFilters, loading, onRu
     </div>
     <div className="thirty-in-thirty-switches">
       <label><input type="checkbox" checked={filters.requireRisingEma} onChange={(e) => setFilters({ ...filters, requireRisingEma: e.target.checked })}/><span>Rising 20 EMA</span></label>
+      <label title="Daily StochRSI %D below 21"><input type="checkbox" checked={filters.stoch20Only} onChange={(e) => setFilters({ ...filters, stoch20Only: e.target.checked })}/><span>Stoch20</span></label>
       <label><input type="checkbox" checked={filters.showAll} onChange={(e) => setFilters({ ...filters, showAll: e.target.checked })}/><span>Show failed rows</span></label>
       <label>Min Above EMA %<input className="plain-input" type="number" value={filters.minAboveEmaDaysPct} onChange={(e) => setNumber("minAboveEmaDaysPct", Number(e.target.value))}/></label>
       <label>EMA To Mid %<input className="plain-input" type="number" value={filters.maxEmaToRangeMidPct} onChange={(e) => setNumber("maxEmaToRangeMidPct", Number(e.target.value))}/></label>

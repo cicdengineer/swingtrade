@@ -2,6 +2,7 @@ import "server-only";
 import type { DailyPriceRecord, UniverseName } from "./types";
 import { readDatabase } from "./localDatabase";
 import { calculateEma, calculateSma } from "./swingScreenerService";
+import { calculateStochRsiD } from "./stochRsiScreenerService";
 
 export type ThirtyInThirtyFilters = {
   universe: UniverseName | "ALL";
@@ -22,6 +23,7 @@ export type ThirtyInThirtyFilters = {
   decliningVolumeOnly: boolean;
   dryVolumeOnly: boolean;
   redCandleOnly: boolean;
+  stoch20Only: boolean;
   showAll: boolean;
 };
 
@@ -57,6 +59,7 @@ export type ThirtyInThirtyRow = {
   tightness_5d_vs_20d: number;
   lowest_volume_5d_vs_20d: number;
   demand_supply_score: number;
+  daily_stoch_d?: number;
   averageDailyTradedValue: number;
   reason: string;
   recent: Array<{
@@ -69,6 +72,7 @@ export type ThirtyInThirtyRow = {
     ema50?: number;
     volume: number;
     volume_ratio?: number;
+    daily_stoch_d?: number;
   }>;
 };
 
@@ -91,6 +95,7 @@ export const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   decliningVolumeOnly: false,
   dryVolumeOnly: false,
   redCandleOnly: false,
+  stoch20Only: false,
   showAll: false,
 };
 
@@ -117,8 +122,10 @@ function analyzeStock(input: {
   const closes = rows.map((row) => row.close);
   const ema10 = calculateEma(closes, 10);
   const ema50 = calculateEma(closes, 50);
+  const dailyStochD = calculateStochRsiD(closes);
   const currentEma10 = ema10[currentIndex];
   const currentEma = ema50[currentIndex];
+  const currentDailyStochD = dailyStochD[currentIndex];
   if (!currentEma10 || !currentEma) return null;
   const distanceFrom10Ema = pct(current.close, currentEma10);
   const distanceFromEma = pct(current.close, currentEma);
@@ -171,11 +178,12 @@ function analyzeStock(input: {
   );
   const positive3mPass = !input.filters.positive3MonthsOnly || current3mReturn > 0;
   const positive6mPass = !input.filters.positive6MonthsOnly || current6mReturn > 0;
+  const stoch20Pass = !input.filters.stoch20Only || (currentDailyStochD !== undefined && currentDailyStochD < 21);
   let status: ThirtyInThirtyRow["status"] = "ELIGIBLE";
   if (!liquidPass) status = "ILLIQUID";
   else if (!movePass) status = "NO_30D_MOVE";
-  else if (!positive3mPass || !positive6mPass) status = "FILTERED";
-  const qualifies = liquidPass && movePass && positive3mPass && positive6mPass;
+  else if (!positive3mPass || !positive6mPass || !stoch20Pass) status = "FILTERED";
+  const qualifies = liquidPass && movePass && positive3mPass && positive6mPass && stoch20Pass;
   const recent = rows.slice(-126).map((row, index, recentRows) => {
     const originalIndex = rows.length - recentRows.length + index;
     const volAvg = volumeSma20[originalIndex];
@@ -189,6 +197,7 @@ function analyzeStock(input: {
       ema50: ema50[originalIndex],
       volume: row.volume,
       volume_ratio: volAvg ? row.volume / volAvg : undefined,
+      daily_stoch_d: dailyStochD[originalIndex],
     };
   });
 
@@ -224,6 +233,7 @@ function analyzeStock(input: {
     tightness_5d_vs_20d: tightness5dVs20d,
     lowest_volume_5d_vs_20d: lowestVolume5dVs20d,
     demand_supply_score: demandSupplyScore,
+    daily_stoch_d: currentDailyStochD,
     averageDailyTradedValue,
     reason: qualifies
       ? `Best ${input.filters.windowDays}-session return was ${best.returnPct.toFixed(1)}% inside the last ${input.filters.lookbackDays} sessions.`
@@ -231,7 +241,9 @@ function analyzeStock(input: {
         ? "Average daily traded value is below the selected threshold."
         : !movePass
           ? `No ${input.filters.minReturnPct}% move was found in any ${input.filters.windowDays}-session window.`
-          : "Filtered out by positive 3M / 6M performance setting.",
+          : !stoch20Pass
+            ? "Daily StochRSI is not below 21."
+            : "Filtered out by positive 3M / 6M performance setting.",
     recent,
   };
 }

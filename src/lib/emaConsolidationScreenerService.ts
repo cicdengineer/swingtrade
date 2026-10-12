@@ -2,6 +2,7 @@ import "server-only";
 import type { DailyPriceRecord, UniverseName } from "./types";
 import { readDatabase } from "./localDatabase";
 import { calculateEma, calculateSma } from "./swingScreenerService";
+import { calculateStochRsiD } from "./stochRsiScreenerService";
 
 export type EmaConsolidationFilters = {
   universe: UniverseName | "ALL";
@@ -17,6 +18,7 @@ export type EmaConsolidationFilters = {
   minAboveEmaDaysPct: number;
   minAverageDailyTradedValue: number;
   requireRisingEma: boolean;
+  stoch20Only: boolean;
   showAll: boolean;
 };
 
@@ -46,10 +48,11 @@ export type EmaConsolidationRow = {
   ema_to_range_mid_pct: number;
   above_ema_days_pct: number;
   current_volume_ratio?: number;
+  daily_stoch_d?: number;
   averageDailyTradedValue: number;
   setup_score: number;
   reason: string;
-  recent: Array<DailyPriceRecord & { ema20?: number; ema50?: number; volume_ratio?: number }>;
+  recent: Array<DailyPriceRecord & { ema20?: number; ema50?: number; volume_ratio?: number; daily_stoch_d?: number }>;
 };
 
 export const defaultEmaConsolidationFilters: EmaConsolidationFilters = {
@@ -66,6 +69,7 @@ export const defaultEmaConsolidationFilters: EmaConsolidationFilters = {
   minAboveEmaDaysPct: 65,
   minAverageDailyTradedValue: 0,
   requireRisingEma: true,
+  stoch20Only: false,
   showAll: false,
 };
 
@@ -93,9 +97,11 @@ function analyzeStock(input: {
   const volumes = rows.map((row) => row.volume);
   const ema20 = calculateEma(closes, input.filters.emaLength);
   const ema50 = calculateEma(closes, 50);
+  const dailyStochD = calculateStochRsiD(closes);
   const volumeSma20 = calculateSma(volumes, 20);
   const currentEma20 = ema20[currentIndex];
   const currentEma50 = ema50[currentIndex];
+  const currentDailyStochD = dailyStochD[currentIndex];
   const currentVolumeAverage = volumeSma20[currentIndex];
   if (!currentEma20 || !currentEma50) return null;
 
@@ -136,6 +142,7 @@ function analyzeStock(input: {
     tight: rangePct <= input.filters.maxRangePct,
     emaReady: Math.abs(distanceFromEma) <= input.filters.maxDistanceFromEmaPct && emaToRangeMidPct <= input.filters.maxEmaToRangeMidPct,
     rising: !input.filters.requireRisingEma || emaSlope > 0,
+    stoch20: !input.filters.stoch20Only || (currentDailyStochD !== undefined && currentDailyStochD < 21),
   };
 
   let status: EmaConsolidationRow["status"] = "WATCHLIST";
@@ -161,6 +168,7 @@ function analyzeStock(input: {
     if (!checks.emaReady) reasons.push("20 EMA has not caught up close enough to price/range.");
     if (!checks.rising) reasons.push("20 EMA is not rising.");
   }
+  if (!checks.stoch20) reasons.push("Daily StochRSI is not below 21.");
 
   const qualifies = Object.values(checks).every(Boolean);
   if (qualifies) status = "SETUP";
@@ -181,6 +189,7 @@ function analyzeStock(input: {
       ema20: ema20[originalIndex],
       ema50: ema50[originalIndex],
       volume_ratio: volumeAverage ? row.volume / volumeAverage : undefined,
+      daily_stoch_d: dailyStochD[originalIndex],
     };
   });
 
@@ -210,6 +219,7 @@ function analyzeStock(input: {
     ema_to_range_mid_pct: emaToRangeMidPct,
     above_ema_days_pct: aboveEmaDaysPct,
     current_volume_ratio: currentVolumeRatio,
+    daily_stoch_d: currentDailyStochD,
     averageDailyTradedValue,
     setup_score: setupScore,
     reason: qualifies
