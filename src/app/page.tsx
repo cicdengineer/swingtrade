@@ -417,9 +417,10 @@ function parseServerSentEvents(chunk: string, onEvent: (event: string, data: str
 }
 
 async function fetchThirtyUpIntraday(securityId: string, force = false, endpoint = "thirty-up-screener") {
-  const cached = intradayCache.get(securityId);
+  const cacheKey = `${endpoint}:${securityId}`;
+  const cached = intradayCache.get(cacheKey);
   if (!force && cached && Date.now() - cached.fetchedAt < intradayCacheMs) return cached.rows;
-  const existing = intradayRequests.get(securityId);
+  const existing = intradayRequests.get(cacheKey);
   if (!force && existing) return existing;
   const request = fetch(`/api/${endpoint}/${securityId}/intraday?interval=60&days=30`)
     .then(async (response) => {
@@ -434,11 +435,11 @@ async function fetchThirtyUpIntraday(securityId: string, force = false, endpoint
       }));
     })
     .then((rows) => {
-      intradayCache.set(securityId, { rows, fetchedAt: Date.now() });
+      intradayCache.set(cacheKey, { rows, fetchedAt: Date.now() });
       return rows;
     })
-    .finally(() => intradayRequests.delete(securityId));
-  intradayRequests.set(securityId, request);
+    .finally(() => intradayRequests.delete(cacheKey));
+  intradayRequests.set(cacheKey, request);
   return request;
 }
 
@@ -1320,7 +1321,34 @@ function HoldingDecisionMeter({ holding }: { holding: PortfolioHolding }) {
 }
 
 function PortfolioHoldingChart({ holding }: { holding: PortfolioHolding }) {
-  const rows = lastTradingMonths(holding.recent ?? [], 90);
+  const [liveDailyRow, setLiveDailyRow] = useState<DailyChartPoint | null>(null);
+  const [dailyError, setDailyError] = useState("");
+
+  useEffect(() => {
+    setLiveDailyRow(null);
+    setDailyError("");
+  }, [holding.securityId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadIntraday = async () => {
+      setDailyError("");
+      try {
+        const candles = await fetchThirtyUpIntraday(holding.securityId, false, "thirty-up-screener");
+        if (!cancelled) setLiveDailyRow(aggregateIntradayDaily(candles));
+      } catch (error) {
+        if (!cancelled) setDailyError(error instanceof Error ? error.message : "Live daily candle unavailable");
+      }
+    };
+    void loadIntraday();
+    const timer = window.setInterval(() => void loadIntraday(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [holding.securityId]);
+
+  const rows = lastTradingMonths(mergeLiveDailyCandle(holding.recent ?? [], liveDailyRow), 90);
   if (rows.length < 5) return <div className="chart-empty">Not enough rows for charting.</div>;
   const width = 780;
   const priceHeight = 260;
@@ -1337,7 +1365,7 @@ function PortfolioHoldingChart({ holding }: { holding: PortfolioHolding }) {
   const entryY = scaleValue(holding.avgCostPrice, priceMin, priceMax, priceHeight, 8);
   const slY = holding.stopLoss ? scaleValue(holding.stopLoss, priceMin, priceMax, priceHeight, 8) : undefined;
   return <div className="candle-chart portfolio-popup-chart">
-    <div className="chart-legend"><span><i className="legend-candle" />Daily candles</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume</span><span><i className="legend-entry" />Entry</span><span><i className="legend-stop" />SL</span></div>
+    <div className="chart-legend"><span><i className="legend-candle" />Daily candles{liveDailyRow ? " + live" : ""}</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume</span><span><i className="legend-entry" />Entry</span><span><i className="legend-stop" />SL</span></div>
     <svg viewBox={`0 0 ${width} ${totalHeight}`} role="img" aria-label={`${holding.tradingSymbol} chart with 50 EMA, volume, entry and stop loss`}>
       {rows.map((row, index) => {
         const x = index * slot + slot / 2;
@@ -1360,6 +1388,7 @@ function PortfolioHoldingChart({ holding }: { holding: PortfolioHolding }) {
       <text className="chart-label" x="0" y={Math.max(12, entryY - 4)}>Entry {money(holding.avgCostPrice)}</text>
       {slY !== undefined && <text className="chart-label stop-label" x="0" y={Math.max(12, slY - 4)}>SL {money(holding.stopLoss!)}</text>}
     </svg>
+    {dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>;
 }
 
@@ -2582,7 +2611,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     return () => { cancelled = true; };
   }, [visibleSecurityKey]);
 
-  return <section className="research-page thirty-in-thirty-page">
+  return <section className="research-page thirty-in-thirty-page thirty-in-thirty-screener-page">
     <div className="thirty-hero thirty-in-thirty-hero">
       <div>
         <p className="eyebrow">30 in 30 Screener</p>
