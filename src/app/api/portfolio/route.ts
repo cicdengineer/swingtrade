@@ -263,13 +263,33 @@ function currentDayMove(rows: DailyPrice[]) {
 }
 
 function marketIndexTiles(prices: DailyPrice[]) {
-  const findRows = (match: (symbol: string) => boolean) => prices.filter((row) => match((row.symbol ?? "").toUpperCase()));
-  const tile = (label: string, rows: DailyPrice[]) => ({ label, changePct: currentDayMove(rows) });
+  const findRows = (match: (symbol: string) => boolean) => {
+    const matches = prices.filter((row) => match((row.symbol ?? "").toUpperCase()));
+    const groups = new Map<string, DailyPrice[]>();
+    matches.forEach((row) => groups.set(row.security_id, [...(groups.get(row.security_id) ?? []), row]));
+    return [...groups.values()]
+      .map((rows) => rows.sort((a, b) => a.trade_date.localeCompare(b.trade_date)))
+      .sort((a, b) => (b.length - a.length) || ((b.at(-1)?.trade_date ?? "").localeCompare(a.at(-1)?.trade_date ?? "")))
+      .at(0) ?? [];
+  };
+  const tile = (label: string, rows: DailyPrice[]) => {
+    const latest = rows.at(-1);
+    const ema10 = calculateEma(rows.map((row) => row.close), 10).at(-1);
+    return {
+      label,
+      securityId: latest?.security_id,
+      currentValue: latest?.close,
+      currentDate: latest?.trade_date,
+      ema10,
+      distanceFrom10EmaPct: latest?.close && ema10 ? ((latest.close - ema10) / ema10) * 100 : undefined,
+      changePct: currentDayMove(rows),
+    };
+  };
   const nifty50Rows = findRows((symbol) => ["NIFTY", "NIFTY50", "NIFTY 50", "NIFTY_INDEX"].includes(symbol));
   return [
     tile("Nifty 50", nifty50Rows),
-    tile("Nifty Midcap 150", findRows((symbol) => symbol.includes("MIDCAP")).length ? findRows((symbol) => symbol.includes("MIDCAP")) : []),
-    tile("Nifty Smallcap 250", findRows((symbol) => symbol.includes("SMALLCAP")).length ? findRows((symbol) => symbol.includes("SMALLCAP")) : []),
+    tile("Nifty Midcap 150", findRows((symbol) => symbol.includes("MIDCAP"))),
+    tile("Nifty Smallcap 250", findRows((symbol) => symbol.includes("SMALLCAP") || symbol.includes("SMLCAP"))),
   ];
 }
 

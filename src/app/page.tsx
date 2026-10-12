@@ -111,7 +111,7 @@ type PortfolioResponse = {
   closedTrades: ClosedTrade[];
   equityCurve: { date: string; pnl: number; cumulative: number }[];
   monthlyPnl: { month: string; pnl: number }[];
-  marketIndexes?: { label: string; changePct?: number }[];
+  marketIndexes?: { label: string; securityId?: string; currentValue?: number; currentDate?: string; ema10?: number; distanceFrom10EmaPct?: number; changePct?: number }[];
   stats: { financialYear: string; from: string; to: string; totalTrades: number; closedTrades: number; realizedPnl: number; grossPnl: number; charges: number; unrealizedPnl: number; totalInvested: number; portfolioPnl: number; winners: number; losers: number; winRate: number; averageWin: number; averageLoss: number; maxProfit: number; maxLoss: number; drawdown: number; winLossRatio: number };
   tradeManagement?: TradeManagementSnapshot;
   source?: { tradeHistoryFrom: string; tradeHistoryTo: string; inventoryHistoryFrom?: string; rawTrades: number; closedLots: number };
@@ -371,6 +371,7 @@ const filterLabels: Record<FilterKey, string> = {
 const pct = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 const money = (n: number) => `₹${n.toFixed(2)}`;
 const rupees = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+const indexValue = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 const pct2 = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 const rValue = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
 const tradingViewUrl = (symbol: string) => `https://in.tradingview.com/chart/05Iji3dY/?symbol=${encodeURIComponent(`NSE:${symbol.trim().toUpperCase()}`)}`;
@@ -957,8 +958,8 @@ const isBreakingSwingHigh = (holding: PortfolioHolding) => {
   return Boolean(high && price && price >= high);
 };
 const priceEquals = (left?: number, right?: number) => left !== undefined && right !== undefined && Math.abs(left - right) < 0.005;
-const ema10DistanceFromStopPct = (holding: PortfolioHolding) => holding.ema10 !== undefined && holding.stopLoss !== undefined && holding.stopLoss > 0 ? ((holding.ema10 - holding.stopLoss) / holding.stopLoss) * 100 : undefined;
-const needsMoveSlToCost = (holding: PortfolioHolding) => Boolean(holding.ema10 && holding.ema10 > holding.avgCostPrice && !priceEquals(holding.ema10, holding.avgCostPrice) && (holding.stopLoss === undefined || holding.stopLoss < holding.avgCostPrice) && !holding.riskFree);
+const ema10DistanceFromAvgCostPct = (holding: PortfolioHolding) => holding.ema10 !== undefined && holding.avgCostPrice > 0 ? ((holding.ema10 - holding.avgCostPrice) / holding.avgCostPrice) * 100 : undefined;
+const needsMoveSlToCost = (holding: PortfolioHolding) => Boolean(holding.ema10 && holding.ema10 > holding.avgCostPrice && !priceEquals(holding.ema10, holding.avgCostPrice));
 const highestVolumeDay = (holding: PortfolioHolding, lookback = 90) => {
   const rows = holding.recent?.slice(-lookback) ?? [];
   const latest = rows.at(-1);
@@ -1315,11 +1316,41 @@ function SwingHighPill({ holding }: { holding: PortfolioHolding }) {
 
 function TenEmaCell({ holding }: { holding: PortfolioHolding }) {
   const alert = needsMoveSlToCost(holding);
-  const distanceFromStop = ema10DistanceFromStopPct(holding);
+  const distanceFromAvgCost = ema10DistanceFromAvgCostPct(holding);
   if (holding.ema10 === undefined) return "—";
-  const tone = alert ? "move-sl" : distanceFromStop !== undefined && distanceFromStop >= 0 ? "above" : "neutral";
-  const sub = alert ? "Move SL to cost" : distanceFromStop === undefined ? "SL missing" : `${pct2(distanceFromStop)} from SL`;
+  const tone = alert ? "move-sl" : distanceFromAvgCost !== undefined && distanceFromAvgCost >= 0 ? "above" : "neutral";
+  const sub = distanceFromAvgCost === undefined ? "Avg missing" : `${pct2(distanceFromAvgCost)} from Avg`;
   return <span className={`portfolio-ema-pill ten-ema ${tone}`}><b>{money(holding.ema10)}</b><small>{sub}</small></span>;
+}
+
+type PortfolioMarketIndex = NonNullable<PortfolioResponse["marketIndexes"]>[number];
+
+function liveAdjustedMarketIndexes(indexes: PortfolioMarketIndex[] | undefined, liveDailyRows: Record<string, DailyChartPoint>) {
+  return indexes?.map((index) => {
+    const liveDaily = index.securityId ? liveDailyRows[index.securityId] : undefined;
+    if (!liveDaily) return index;
+    const currentValue = liveDaily.close;
+    return {
+      ...index,
+      currentValue,
+      currentDate: liveDaily.trade_date,
+      changePct: liveDaily.open > 0 ? ((currentValue - liveDaily.open) / liveDaily.open) * 100 : index.changePct,
+      distanceFrom10EmaPct: index.ema10 ? ((currentValue - index.ema10) / index.ema10) * 100 : index.distanceFrom10EmaPct,
+    };
+  });
+}
+
+function PortfolioMarketIndexChips({ indexes }: { indexes?: PortfolioMarketIndex[] }) {
+  if (!indexes?.length) return null;
+  return <div className="market-index-corner">{indexes.map((index) => {
+    const above10 = index.distanceFrom10EmaPct !== undefined && index.distanceFrom10EmaPct >= 0;
+    const tone = index.distanceFrom10EmaPct === undefined ? "neutral" : above10 ? "above" : "below";
+    return <div key={index.label} className={`market-index-chip ${tone}`}>
+      <span>{index.label}</span>
+      <b>{index.currentValue === undefined ? "—" : indexValue(index.currentValue)}</b>
+      <small>{index.ema10 === undefined ? "10 EMA —" : `10 EMA ${indexValue(index.ema10)}`} · {index.changePct === undefined ? "—" : pct2(index.changePct)}</small>
+    </div>;
+  })}</div>;
 }
 
 function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
@@ -1343,7 +1374,7 @@ function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
     { label: "Contraction", value: contraction ? "Yes" : "No", good: contraction },
     { label: "Above 10/50", value: above10 && above50 ? "Yes" : "No", good: above10 && above50 },
     { label: "Swing High", value: swingBreak ? "Breaking" : "Below", good: swingBreak },
-    { label: "10 EMA SL Cue", value: moveSl ? "Move SL" : "No cue", good: moveSl || holding.riskFree },
+    { label: "10 EMA Cost Cue", value: moveSl ? "Move SL" : "No cue", good: moveSl || holding.riskFree },
     { label: "Extreme Move", value: extremeMove ? "Yes" : "No", good: !extremeMove },
     { label: "Open Risk", value: holding.riskFree ? "Risk-free" : rupees(holdingRisk(holding)), good: holdingRisk(holding) === 0 },
   ];
@@ -1448,8 +1479,8 @@ function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHoldin
   }, [holding.securityId]);
 
   const adjustedHolding = useMemo(() => liveAdjustedPortfolioHolding(holding, liveDailyRow), [holding, liveDailyRow]);
-  const ema10FromStop = ema10DistanceFromStopPct(adjustedHolding);
-  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={ema10FromStop === undefined ? undefined : `${pct2(ema10FromStop)} from SL`} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
+  const ema10FromAvgCost = ema10DistanceFromAvgCostPct(adjustedHolding);
+  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={ema10FromAvgCost === undefined ? undefined : `${pct2(ema10FromAvgCost)} from Avg`} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
 }
 
 function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHolding[]; onStopLossSaved: () => Promise<void> | void }) {
@@ -1772,14 +1803,17 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
   }, [portfolio, setLiveFeedStatus]);
   useEffect(() => {
     const holdings = portfolio?.holdings ?? [];
+    const indexes = portfolio?.marketIndexes ?? [];
+    const securities = [...holdings.map((holding) => holding.securityId), ...indexes.map((index) => index.securityId)].filter((value): value is string => Boolean(value));
     setLiveDailyRows({});
-    if (!holdings.length) return;
+    if (!securities.length) return;
     let cancelled = false;
     const loadDailyRows = async () => {
-      const entries = await Promise.all(holdings.map(async (holding) => {
+      const uniqueIds = [...new Set(securities)];
+      const entries = await Promise.all(uniqueIds.map(async (securityId) => {
         try {
-          const candles = await fetchThirtyUpIntraday(holding.securityId, false, "thirty-up-screener");
-          return [holding.securityId, aggregateIntradayDaily(candles)] as const;
+          const candles = await fetchThirtyUpIntraday(securityId, false, "thirty-up-screener");
+          return [securityId, aggregateIntradayDaily(candles)] as const;
         } catch {
           return null;
         }
@@ -1794,6 +1828,7 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
     };
   }, [portfolio]);
   const livePortfolio = useMemo(() => liveAdjustedPortfolio(portfolio, liveTicks, liveDailyRows), [portfolio, liveTicks, liveDailyRows]);
+  const liveMarketIndexes = useMemo(() => liveAdjustedMarketIndexes(livePortfolio?.marketIndexes, liveDailyRows), [livePortfolio, liveDailyRows]);
   const settings = livePortfolio?.tradeManagement?.settings;
   const riskUnit = livePortfolio?.tradeManagement?.summary.riskUnit ?? (settings ? settings.totalCapital * settings.riskPercent / 100 : 0);
   const liveHoldings = livePortfolio?.holdings.length ?? 0;
@@ -1803,7 +1838,7 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
   const riskTone = accountRiskPct > 0.7 ? "danger" : accountRiskPct > 0.5 ? "warn" : "good";
   const exitChecks = livePortfolio?.holdings.filter((holding) => (holding.brokerTradingDaysHeld ?? 0) >= 3).length ?? 0;
   const liveTickCount = Object.keys(liveTicks).length;
-  return <section className="portfolio-page"><div className="data-toolbar portfolio-hero"><div><p className="eyebrow">Connected portfolio</p><h2>Dhan holdings</h2><small>{livePortfolio ? `Live P&L ${liveTickCount ? `on for ${liveTickCount}/${liveHoldings}` : "connecting"} · trading-day age and SL-based account risk.` : "Live holdings, trading-day age, and account risk."}</small></div><button className="primary" onClick={onRefresh} disabled={loading}><WalletCards size={15} />Refresh Portfolio</button></div>{!livePortfolio ? <section className="empty"><div className="empty-art"><WalletCards size={30} /></div><p className="eyebrow">Portfolio</p><h2>Fetch your Dhan holdings</h2><p>Your Dhan access token remains server-side. This view will populate with live holdings and account risk.</p></section> : <><div className="portfolio-risk-strip"><div><span>Invested</span><b>{rupees(livePortfolio.stats.totalInvested)}</b><small>{liveHoldings} live holdings</small></div><div><span>Risk Unit</span><b>{rupees(riskUnit)}</b><small>{settings ? `${settings.riskPercent.toFixed(2)}% per holding` : "Settings unavailable"}</small></div><div><span>Open P&amp;L</span><b className={livePortfolio.stats.unrealizedPnl >= 0 ? "positive" : "negative"}>{rupees(livePortfolio.stats.unrealizedPnl)}</b><small>Live broker ticks</small></div><div className={`account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div></div>{livePortfolio.marketIndexes && <div className="market-index-strip">{livePortfolio.marketIndexes.map((index) => <div key={index.label} className={index.changePct === undefined ? "neutral" : index.changePct >= 0 ? "positive" : "negative"}><span>{index.label}</span><b>{index.changePct === undefined ? "—" : pct2(index.changePct)}</b></div>)}</div>}{exitChecks > 0 && <div className="notice danger-notice"><AlertTriangle size={17}/><span>{exitChecks} open holding{exitChecks === 1 ? "" : "s"} reached the 3rd trading day. Review the Actions column for exit checks.</span></div>}<PortfolioTable holdings={livePortfolio.holdings} onStopLossSaved={onRefresh} /></>}</section>;
+  return <section className="portfolio-page"><div className="data-toolbar portfolio-hero"><div><p className="eyebrow">Connected portfolio</p><h2>Dhan holdings</h2><small>{livePortfolio ? `Live P&L ${liveTickCount ? `on for ${liveTickCount}/${liveHoldings}` : "connecting"} · trading-day age and SL-based account risk.` : "Live holdings, trading-day age, and account risk."}</small></div><div className="portfolio-hero-side"><PortfolioMarketIndexChips indexes={liveMarketIndexes} /><button className="primary" onClick={onRefresh} disabled={loading}><WalletCards size={15} />Refresh Portfolio</button></div></div>{!livePortfolio ? <section className="empty"><div className="empty-art"><WalletCards size={30} /></div><p className="eyebrow">Portfolio</p><h2>Fetch your Dhan holdings</h2><p>Your Dhan access token remains server-side. This view will populate with live holdings and account risk.</p></section> : <><div className="portfolio-risk-strip"><div><span>Invested</span><b>{rupees(livePortfolio.stats.totalInvested)}</b><small>{liveHoldings} live holdings</small></div><div><span>Risk Unit</span><b>{rupees(riskUnit)}</b><small>{settings ? `${settings.riskPercent.toFixed(2)}% per holding` : "Settings unavailable"}</small></div><div><span>Open P&amp;L</span><b className={livePortfolio.stats.unrealizedPnl >= 0 ? "positive" : "negative"}>{rupees(livePortfolio.stats.unrealizedPnl)}</b><small>Live broker ticks</small></div><div className={`account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div></div>{exitChecks > 0 && <div className="notice danger-notice"><AlertTriangle size={17}/><span>{exitChecks} open holding{exitChecks === 1 ? "" : "s"} reached the 3rd trading day. Review the Actions column for exit checks.</span></div>}<PortfolioTable holdings={livePortfolio.holdings} onStopLossSaved={onRefresh} /></>}</section>;
 }
 
 function DataStatusView({ status, loading, onRefresh, onRefreshUniverse, onRetryFailures }: { status: DataStatus | null; loading: boolean; onRefresh: () => void; onRefreshUniverse: (universe?: UniverseName) => void; onRetryFailures: () => void }) {
