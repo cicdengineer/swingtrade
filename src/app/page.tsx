@@ -954,6 +954,58 @@ const isBreakingSwingHigh = (holding: PortfolioHolding) => {
   return Boolean(high && price && price >= high);
 };
 const needsMoveSlToCost = (holding: PortfolioHolding) => Boolean(holding.ema10 && holding.ema10 > holding.avgCostPrice && !holding.riskFree);
+const highestVolumeDay = (holding: PortfolioHolding, lookback = 90) => {
+  const rows = holding.recent?.slice(-lookback) ?? [];
+  const latest = rows.at(-1);
+  if (!latest?.volume || rows.length < 2) return false;
+  return latest.volume >= Math.max(...rows.map((row) => row.volume));
+};
+const sharpUpMove = (holding: PortfolioHolding, thresholdPct = 5) => {
+  const rows = holding.recent ?? [];
+  const latest = rows.at(-1);
+  const previous = rows.at(-2);
+  return Boolean(latest && previous?.close && ((latest.close / previous.close) - 1) * 100 >= thresholdPct);
+};
+const backToBackThreeGreen = (holding: PortfolioHolding) => {
+  const last3 = holding.recent?.slice(-3) ?? [];
+  return last3.length === 3 && last3.every((row) => row.close > row.open);
+};
+const portfolioRowsWithLiveEma = (rows: DailyChartPoint[]) => {
+  const closes = rows.map((row) => row.close);
+  const ema10 = emaValues(closes, 10);
+  const ema50 = emaValues(closes, 50);
+  return rows.map((row, index) => {
+    const previousVolume = rows.slice(Math.max(0, index - 20), index).map((item) => item.volume).filter((volume) => volume > 0);
+    const averageVolume = average(previousVolume);
+    return {
+      ...row,
+      ema10: ema10[index],
+      ema50: ema50[index],
+      volume_ratio: averageVolume > 0 && row.volume > 0 ? row.volume / averageVolume : row.volume_ratio,
+    };
+  });
+};
+const liveAdjustedPortfolioHolding = (holding: PortfolioHolding, liveDaily: DailyChartPoint | null): PortfolioHolding => {
+  const mergedRows = liveDaily ? mergeLiveDailyCandle(holding.recent ?? [], liveDaily) : holding.recent ?? [];
+  const recent = portfolioRowsWithLiveEma(mergedRows);
+  const latest = recent.at(-1);
+  const previous = recent.at(-2);
+  const ema10 = latest?.ema10 ?? holding.ema10;
+  const ema50 = latest?.ema50 ?? holding.ema50;
+  const currentPrice = liveDaily ? latest?.close ?? holding.currentPrice : holding.currentPrice;
+  const todayChangePct = currentPrice !== undefined && previous?.close ? ((currentPrice / previous.close) - 1) * 100 : holding.todayChangePct;
+  return {
+    ...holding,
+    currentPrice,
+    todayChangePct,
+    unrealizedPnl: currentPrice === undefined ? holding.unrealizedPnl : (currentPrice - holding.avgCostPrice) * holding.totalQty,
+    ema10,
+    ema50,
+    distanceFrom10EmaPct: ema10 && currentPrice ? ((currentPrice - ema10) / ema10) * 100 : holding.distanceFrom10EmaPct,
+    distanceFrom50EmaPct: ema50 && currentPrice ? ((currentPrice - ema50) / ema50) * 100 : holding.distanceFrom50EmaPct,
+    recent,
+  };
+};
 
 function LiveFeedStatusIndicator({ status, message, view, dataJob }: { status: LiveFeedStatus; message?: string; view: View; dataJob?: DataDownloadJob | null }) {
   if (view === "Data Status") {
@@ -1291,36 +1343,75 @@ function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
 }
 
 function HoldingDecisionMeter({ holding }: { holding: PortfolioHolding }) {
-  const rows = holding.recent ?? [];
-  const last = rows.at(-1);
-  const previous = rows.at(-2);
-  const last3Green = rows.slice(-3).length === 3 && rows.slice(-3).every((row) => row.close >= row.open);
-  const highVol = Boolean(last?.volume_ratio && last.volume_ratio >= 1.5);
-  const above10 = holding.distanceFrom10EmaPct !== undefined && holding.distanceFrom10EmaPct >= 0;
-  const above50 = holding.distanceFrom50EmaPct !== undefined && holding.distanceFrom50EmaPct >= 0;
-  const swingBreak = isBreakingSwingHigh(holding);
-  const riskFree = holding.riskFree || holdingRisk(holding) === 0;
-  const extremeMove = Boolean(previous?.close && last && Math.abs(((last.close / previous.close) - 1) * 100) >= 5);
-  const score = Math.max(0, Math.min(100,
-    (above50 ? 20 : 0) +
-    (above10 ? 15 : 0) +
-    (swingBreak ? 20 : 0) +
-    (last3Green ? 12 : 0) +
-    (highVol ? 10 : 0) +
-    (riskFree ? 15 : 0) +
-    (!extremeMove ? 8 : -10),
-  ));
-  const action = score >= 75 ? "Hold / Trail" : score >= 55 ? "Hold, tighten risk" : score >= 38 ? "Book partial" : "Exit watch";
-  const tone = score >= 75 ? "good" : score >= 55 ? "watch" : score >= 38 ? "partial" : "danger";
-  const note = score >= 75 ? "Trend and risk are aligned." : score >= 55 ? "Trade is working, but keep protection active." : score >= 38 ? "Momentum is mixed; reduce exposure if price stalls." : "Weak score; protect capital first.";
+  const sharpMove = sharpUpMove(holding);
+  const threeGreen = backToBackThreeGreen(holding);
+  const highestVolume = highestVolumeDay(holding);
+  const score = Math.min(100, (sharpMove ? 40 : 0) + (threeGreen ? 30 : 0) + (highestVolume ? 30 : 0));
+  const extended = score > 0;
+  const action = extended ? "Book partial" : "Hold";
+  const tone = extended ? "partial" : "good";
+  const triggers = [
+    sharpMove ? "sharp up move" : "",
+    threeGreen ? "3 green candles" : "",
+    highestVolume ? "highest volume day" : "",
+  ].filter(Boolean).join(", ");
+  const note = extended ? `Move looks extended: ${triggers}. Consider booking partial profits.` : "No extension trigger from price or volume yet.";
   return <div className={`decision-meter ${tone}`}>
-    <div><span>Overall Meter</span><b>{action}</b><small>{note}</small></div>
+    <div><span>Extension Meter</span><b>{action}</b><small>{note}</small></div>
     <strong>{score}</strong>
     <div className="decision-track"><i style={{ width: `${score}%` }} /></div>
   </div>;
 }
 
-function PortfolioHoldingChart({ holding }: { holding: PortfolioHolding }) {
+function PortfolioHoldingChart({ holding, live, dailyError }: { holding: PortfolioHolding; live: boolean; dailyError?: string }) {
+  const rows = lastTradingMonths(holding.recent ?? [], 90);
+  if (rows.length < 5) return <div className="chart-empty">Not enough rows for charting.</div>;
+  const width = 780;
+  const priceHeight = 260;
+  const volumeHeight = 70;
+  const gap = 18;
+  const totalHeight = priceHeight + volumeHeight + gap;
+  const ema10Values = rows.map((row) => row.ema10).filter((value): value is number => value !== undefined);
+  const ema50Values = rows.map((row) => row.ema50).filter((value): value is number => value !== undefined);
+  const values = [...rows.flatMap((row) => [row.high, row.low]), ...ema10Values, ...ema50Values, holding.avgCostPrice, holding.stopLoss ?? holding.avgCostPrice];
+  const priceMin = Math.min(...values);
+  const priceMax = Math.max(...values);
+  const slot = width / rows.length;
+  const bodyWidth = Math.max(3, Math.min(8, slot * 0.48));
+  const maxVolume = Math.max(...rows.map((row) => row.volume), 1);
+  const emaPath = (period: "ema10" | "ema50") => rows.map((row, index) => ({ value: row[period], x: index * slot + slot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
+  const entryY = scaleValue(holding.avgCostPrice, priceMin, priceMax, priceHeight, 8);
+  const slY = holding.stopLoss ? scaleValue(holding.stopLoss, priceMin, priceMax, priceHeight, 8) : undefined;
+  return <div className="candle-chart portfolio-popup-chart">
+    <div className="chart-legend"><span><i className="legend-candle" />Daily candles{live ? " + live" : ""}</span><span><i className="legend-ema10" />10 EMA</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume</span><span><i className="legend-entry" />Entry</span><span><i className="legend-stop" />SL</span></div>
+    <svg viewBox={`0 0 ${width} ${totalHeight}`} role="img" aria-label={`${holding.tradingSymbol} chart with 10 EMA, 50 EMA, volume, entry and stop loss`}>
+      {rows.map((row, index) => {
+        const x = index * slot + slot / 2;
+        const openY = scaleValue(row.open, priceMin, priceMax, priceHeight, 8);
+        const closeY = scaleValue(row.close, priceMin, priceMax, priceHeight, 8);
+        const highY = scaleValue(row.high, priceMin, priceMax, priceHeight, 8);
+        const lowY = scaleValue(row.low, priceMin, priceMax, priceHeight, 8);
+        const up = row.close >= row.open;
+        const volumeBarHeight = Math.max(1, (row.volume / maxVolume) * volumeHeight);
+        return <g key={row.trade_date} className={up ? "candle up" : "candle down"}>
+          <title>{`${row.trade_date} O ${row.open.toFixed(2)} H ${row.high.toFixed(2)} L ${row.low.toFixed(2)} C ${row.close.toFixed(2)}`}</title>
+          <rect className="volume-bar" x={x - bodyWidth / 2} y={priceHeight + gap + volumeHeight - volumeBarHeight} width={bodyWidth} height={volumeBarHeight} rx="1" />
+          <line x1={x} x2={x} y1={highY} y2={lowY} />
+          <rect x={x - bodyWidth / 2} y={Math.min(openY, closeY)} width={bodyWidth} height={Math.max(1, Math.abs(closeY - openY))} rx="1" />
+        </g>;
+      })}
+      <path className="ema10-line" d={emaPath("ema10")} />
+      <path className="ema-line" d={emaPath("ema50")} />
+      <line className="entry-line" x1="0" x2={width} y1={entryY} y2={entryY} />
+      {slY !== undefined && <line className="stop-line" x1="0" x2={width} y1={slY} y2={slY} />}
+      <text className="chart-label" x="0" y={Math.max(12, entryY - 4)}>Entry {money(holding.avgCostPrice)}</text>
+      {slY !== undefined && <text className="chart-label stop-label" x="0" y={Math.max(12, slY - 4)}>SL {money(holding.stopLoss!)}</text>}
+    </svg>
+    {dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
+  </div>;
+}
+
+function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHolding; onClose: () => void }) {
   const [liveDailyRow, setLiveDailyRow] = useState<DailyChartPoint | null>(null);
   const [dailyError, setDailyError] = useState("");
 
@@ -1348,52 +1439,8 @@ function PortfolioHoldingChart({ holding }: { holding: PortfolioHolding }) {
     };
   }, [holding.securityId]);
 
-  const rows = lastTradingMonths(mergeLiveDailyCandle(holding.recent ?? [], liveDailyRow), 90);
-  if (rows.length < 5) return <div className="chart-empty">Not enough rows for charting.</div>;
-  const width = 780;
-  const priceHeight = 260;
-  const volumeHeight = 70;
-  const gap = 18;
-  const totalHeight = priceHeight + volumeHeight + gap;
-  const values = [...rows.flatMap((row) => [row.high, row.low]), ...rows.map((row) => row.ema50).filter((value): value is number => value !== undefined), holding.avgCostPrice, holding.stopLoss ?? holding.avgCostPrice];
-  const priceMin = Math.min(...values);
-  const priceMax = Math.max(...values);
-  const slot = width / rows.length;
-  const bodyWidth = Math.max(3, Math.min(8, slot * 0.48));
-  const maxVolume = Math.max(...rows.map((row) => row.volume), 1);
-  const emaPath = rows.map((row, index) => ({ value: row.ema50, x: index * slot + slot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
-  const entryY = scaleValue(holding.avgCostPrice, priceMin, priceMax, priceHeight, 8);
-  const slY = holding.stopLoss ? scaleValue(holding.stopLoss, priceMin, priceMax, priceHeight, 8) : undefined;
-  return <div className="candle-chart portfolio-popup-chart">
-    <div className="chart-legend"><span><i className="legend-candle" />Daily candles{liveDailyRow ? " + live" : ""}</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume</span><span><i className="legend-entry" />Entry</span><span><i className="legend-stop" />SL</span></div>
-    <svg viewBox={`0 0 ${width} ${totalHeight}`} role="img" aria-label={`${holding.tradingSymbol} chart with 50 EMA, volume, entry and stop loss`}>
-      {rows.map((row, index) => {
-        const x = index * slot + slot / 2;
-        const openY = scaleValue(row.open, priceMin, priceMax, priceHeight, 8);
-        const closeY = scaleValue(row.close, priceMin, priceMax, priceHeight, 8);
-        const highY = scaleValue(row.high, priceMin, priceMax, priceHeight, 8);
-        const lowY = scaleValue(row.low, priceMin, priceMax, priceHeight, 8);
-        const up = row.close >= row.open;
-        const volumeBarHeight = Math.max(1, (row.volume / maxVolume) * volumeHeight);
-        return <g key={row.trade_date} className={up ? "candle up" : "candle down"}>
-          <title>{`${row.trade_date} O ${row.open.toFixed(2)} H ${row.high.toFixed(2)} L ${row.low.toFixed(2)} C ${row.close.toFixed(2)}`}</title>
-          <rect className="volume-bar" x={x - bodyWidth / 2} y={priceHeight + gap + volumeHeight - volumeBarHeight} width={bodyWidth} height={volumeBarHeight} rx="1" />
-          <line x1={x} x2={x} y1={highY} y2={lowY} />
-          <rect x={x - bodyWidth / 2} y={Math.min(openY, closeY)} width={bodyWidth} height={Math.max(1, Math.abs(closeY - openY))} rx="1" />
-        </g>;
-      })}
-      <path className="ema-line" d={emaPath} />
-      <line className="entry-line" x1="0" x2={width} y1={entryY} y2={entryY} />
-      {slY !== undefined && <line className="stop-line" x1="0" x2={width} y1={slY} y2={slY} />}
-      <text className="chart-label" x="0" y={Math.max(12, entryY - 4)}>Entry {money(holding.avgCostPrice)}</text>
-      {slY !== undefined && <text className="chart-label stop-label" x="0" y={Math.max(12, slY - 4)}>SL {money(holding.stopLoss!)}</text>}
-    </svg>
-    {dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
-  </div>;
-}
-
-function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHolding; onClose: () => void }) {
-  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{holding.tradingSymbol}</h2><p className="muted">50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={holding} /><HoldingDecisionTiles holding={holding} /><HoldingDecisionMeter holding={holding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={holding.currentPrice === undefined ? "—" : money(holding.currentPrice)} sub={holding.todayChangePct === undefined ? undefined : pct2(holding.todayChangePct)} /><Stat label="Avg Cost" value={money(holding.avgCostPrice)} sub={`Qty ${holding.totalQty}`} /><Stat label="10 EMA" value={holding.ema10 === undefined ? "—" : money(holding.ema10)} sub={needsMoveSlToCost(holding) ? "Move SL to cost" : undefined} /><Stat label="50 EMA" value={holding.ema50 === undefined ? "—" : money(holding.ema50)} sub={holding.distanceFrom50EmaPct === undefined ? undefined : pct2(holding.distanceFrom50EmaPct)} /><Stat label="SL" value={holding.stopLoss === undefined ? "—" : money(holding.stopLoss)} sub={holding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
+  const adjustedHolding = useMemo(() => liveAdjustedPortfolioHolding(holding, liveDailyRow), [holding, liveDailyRow]);
+  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={adjustedHolding.distanceFrom10EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom10EmaPct)} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
 }
 
 function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHolding[]; onStopLossSaved: () => Promise<void> | void }) {
