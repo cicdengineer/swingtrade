@@ -2534,7 +2534,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings }: { selecte
         </div>
       </div>
     </div>
-    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} />
+    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>;
 }
@@ -3514,7 +3514,7 @@ function liveAdjustedHourlyBreakout(row: HourlyBreakoutRow, liveTick?: LiveTick)
   return { liveClose, todayChange, emaDistance, breakoutDistance, pullbackFromZone };
 }
 
-function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaLabel = "50 EMA" }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaLabel?: string }) {
+function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -3525,8 +3525,8 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   const lows = chartRows.map((row) => row.low);
   const highs = chartRows.map((row) => row.high);
   const closes = chartRows.map((row) => row.close);
-  const calculatedEma = emaValues(closes);
-  const chartEmaValues = chartRows.map((row, index) => row.ema50 ?? calculatedEma[index]);
+  const calculatedEma = emaValues(closes, emaPeriod);
+  const chartEmaValues = chartRows.map((row, index) => row[emaKey] ?? calculatedEma[index]);
   const visibleEmaValues = chartEmaValues.filter((value): value is number => value !== undefined);
   const priceMin = Math.min(...lows, ...visibleEmaValues);
   const priceMax = Math.max(...highs, ...visibleEmaValues);
@@ -3535,6 +3535,15 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   const maxVolume = Math.max(...chartRows.map((row) => row.volume));
   const volumeSma = smaValues(chartRows.map((row) => row.volume), 20);
   const emaPath = chartEmaValues.map((value, index) => ({ value, x: index * candleSlot + candleSlot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
+  const latestIndex = chartRows.length - 1;
+  const latestReclaimMarker = showLatestEmaReclaimMarker && latestIndex > 0 && chartEmaValues[latestIndex] !== undefined && chartEmaValues[latestIndex - 1] !== undefined && chartRows[latestIndex - 1].close < chartEmaValues[latestIndex - 1]! && chartRows[latestIndex].close > chartEmaValues[latestIndex]!
+    ? {
+      row: chartRows[latestIndex],
+      x: latestIndex * candleSlot + candleSlot / 2,
+      y: Math.min(priceHeight - 8, scaleValue(chartRows[latestIndex].low, priceMin, priceMax, priceHeight, 8) + 9),
+      ema: chartEmaValues[latestIndex]!,
+    }
+    : null;
   return <div className="clean-chart">
     <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span><span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart`}>
@@ -3554,6 +3563,9 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
         </g>;
       })}
       <path className="ema-line" d={emaPath} />
+      {latestReclaimMarker && <polygon className="ema-reclaim-triangle" points={`${latestReclaimMarker.x.toFixed(2)},${(latestReclaimMarker.y - 6).toFixed(2)} ${(latestReclaimMarker.x - 5).toFixed(2)},${(latestReclaimMarker.y + 4).toFixed(2)} ${(latestReclaimMarker.x + 5).toFixed(2)},${(latestReclaimMarker.y + 4).toFixed(2)}`}>
+        <title>{`${chartDateLabel(latestReclaimMarker.row.trade_date, timeframe)} reclaimed ${emaLabel}: previous close below, latest close ${latestReclaimMarker.row.close.toFixed(2)} above ${latestReclaimMarker.ema.toFixed(2)}`}</title>
+      </polygon>}
     </svg>
     <div className="outside-volume" style={{ height: volumeHeight }}>
       {chartRows.map((row, index) => {
