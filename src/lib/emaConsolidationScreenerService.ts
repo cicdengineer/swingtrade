@@ -19,6 +19,7 @@ export type EmaConsolidationFilters = {
   minAverageDailyTradedValue: number;
   requireRisingEma: boolean;
   stoch20Only: boolean;
+  stoch80Only: boolean;
   showAll: boolean;
 };
 
@@ -70,6 +71,7 @@ export const defaultEmaConsolidationFilters: EmaConsolidationFilters = {
   minAverageDailyTradedValue: 0,
   requireRisingEma: true,
   stoch20Only: false,
+  stoch80Only: false,
   showAll: false,
 };
 
@@ -143,6 +145,7 @@ function analyzeStock(input: {
     emaReady: Math.abs(distanceFromEma) <= input.filters.maxDistanceFromEmaPct && emaToRangeMidPct <= input.filters.maxEmaToRangeMidPct,
     rising: !input.filters.requireRisingEma || emaSlope > 0,
     stoch20: !input.filters.stoch20Only || (currentDailyStochD !== undefined && currentDailyStochD < 21),
+    stoch80: !input.filters.stoch80Only || (currentDailyStochD !== undefined && currentDailyStochD > 80),
   };
 
   let status: EmaConsolidationRow["status"] = "WATCHLIST";
@@ -169,6 +172,7 @@ function analyzeStock(input: {
     if (!checks.rising) reasons.push("20 EMA is not rising.");
   }
   if (!checks.stoch20) reasons.push("Daily StochRSI is not below 21.");
+  if (!checks.stoch80) reasons.push("Daily StochRSI is not above 80.");
 
   const qualifies = Object.values(checks).every(Boolean);
   if (qualifies) status = "SETUP";

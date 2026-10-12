@@ -24,6 +24,7 @@ export type ThirtyInThirtyFilters = {
   dryVolumeOnly: boolean;
   redCandleOnly: boolean;
   stoch20Only: boolean;
+  stoch80Only: boolean;
   showAll: boolean;
 };
 
@@ -96,6 +97,7 @@ export const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   dryVolumeOnly: false,
   redCandleOnly: false,
   stoch20Only: false,
+  stoch80Only: false,
   showAll: false,
 };
 
@@ -179,11 +181,12 @@ function analyzeStock(input: {
   const positive3mPass = !input.filters.positive3MonthsOnly || current3mReturn > 0;
   const positive6mPass = !input.filters.positive6MonthsOnly || current6mReturn > 0;
   const stoch20Pass = !input.filters.stoch20Only || (currentDailyStochD !== undefined && currentDailyStochD < 21);
+  const stoch80Pass = !input.filters.stoch80Only || (currentDailyStochD !== undefined && currentDailyStochD > 80);
   let status: ThirtyInThirtyRow["status"] = "ELIGIBLE";
   if (!liquidPass) status = "ILLIQUID";
   else if (!movePass) status = "NO_30D_MOVE";
-  else if (!positive3mPass || !positive6mPass || !stoch20Pass) status = "FILTERED";
-  const qualifies = liquidPass && movePass && positive3mPass && positive6mPass && stoch20Pass;
+  else if (!positive3mPass || !positive6mPass || !stoch20Pass || !stoch80Pass) status = "FILTERED";
+  const qualifies = liquidPass && movePass && positive3mPass && positive6mPass && stoch20Pass && stoch80Pass;
   const recent = rows.slice(-126).map((row, index, recentRows) => {
     const originalIndex = rows.length - recentRows.length + index;
     const volAvg = volumeSma20[originalIndex];
@@ -243,7 +246,9 @@ function analyzeStock(input: {
           ? `No ${input.filters.minReturnPct}% move was found in any ${input.filters.windowDays}-session window.`
           : !stoch20Pass
             ? "Daily StochRSI is not below 21."
-            : "Filtered out by positive 3M / 6M performance setting.",
+            : !stoch80Pass
+              ? "Daily StochRSI is not above 80."
+              : "Filtered out by positive 3M / 6M performance setting.",
     recent,
   };
 }
