@@ -3,6 +3,7 @@ import { getHoldings, getPositions, getTradeHistory, hasDhanCredentials, type Dh
 import { getTradeManagementSnapshot } from "@/lib/tradeManagementStore";
 import { readDatabase, writeDatabase } from "@/lib/localDatabase";
 import { calculateEma } from "@/lib/swingScreenerService";
+import { getHistoricalData, getSecurityMaster } from "@/lib/historicalDataService";
 
 export const dynamic = "force-dynamic";
 
@@ -262,7 +263,46 @@ function currentDayMove(rows: DailyPrice[]) {
   return base ? ((latest.close - base) / base) * 100 : undefined;
 }
 
-function marketIndexTiles(prices: DailyPrice[]) {
+type MarketIndexDefinition = { label: string; terms: string[]; match: (symbol: string) => boolean };
+const marketIndexDefinitions: MarketIndexDefinition[] = [
+  { label: "Nifty 50", terms: ["NIFTY 50", "NIFTY"], match: (symbol) => ["NIFTY", "NIFTY50", "NIFTY 50", "NIFTY_INDEX"].includes(symbol) },
+  { label: "Nifty Midcap 150", terms: ["NIFTY MIDCAP 150"], match: (symbol) => symbol.includes("MIDCAP150") || symbol.includes("MIDCAP 150") },
+  { label: "Nifty Smallcap 250", terms: ["NIFTY SMALLCAP 250", "NIFTY SMLCAP 250"], match: (symbol) => symbol.includes("SMALLCAP250") || symbol.includes("SMALLCAP 250") || symbol.includes("SMLCAP250") || symbol.includes("SMLCAP 250") },
+];
+const normalizeIndexName = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+async function indexFallbackRows(definition: MarketIndexDefinition): Promise<DailyPrice[]> {
+  try {
+    const master = await getSecurityMaster(false);
+    const wanted = definition.terms.map(normalizeIndexName);
+    const instrument = master.find((row) => row.exchange_segment === "IDX_I" && wanted.some((term) => [row.symbol, row.trading_symbol, row.company_name].map(normalizeIndexName).includes(term)));
+    if (!instrument) return [];
+    const to = new Date();
+    const from = new Date(to);
+    from.setDate(from.getDate() - 45);
+    const candles = await getHistoricalData({
+      securityId: instrument.security_id,
+      symbol: instrument.symbol,
+      segment: instrument.exchange_segment,
+      instrument: instrument.instrument,
+    }, dateInTimeZone(from, "Asia/Kolkata"), dateInTimeZone(to, "Asia/Kolkata"));
+    return candles.map((candle) => ({
+      security_id: instrument.security_id,
+      symbol: instrument.symbol,
+      trade_date: candle.date,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      volume: candle.volume,
+    }));
+  } catch (error) {
+    console.warn(`Market index fallback failed for ${definition.label}`, error instanceof Error ? error.message : error);
+    return [];
+  }
+}
+
+async function marketIndexTiles(prices: DailyPrice[]) {
   const findRows = (match: (symbol: string) => boolean) => {
     const matches = prices.filter((row) => match((row.symbol ?? "").toUpperCase()));
     const groups = new Map<string, DailyPrice[]>();
@@ -285,12 +325,11 @@ function marketIndexTiles(prices: DailyPrice[]) {
       changePct: currentDayMove(rows),
     };
   };
-  const nifty50Rows = findRows((symbol) => ["NIFTY", "NIFTY50", "NIFTY 50", "NIFTY_INDEX"].includes(symbol));
-  return [
-    tile("Nifty 50", nifty50Rows),
-    tile("Nifty Midcap 150", findRows((symbol) => symbol.includes("MIDCAP"))),
-    tile("Nifty Smallcap 250", findRows((symbol) => symbol.includes("SMALLCAP") || symbol.includes("SMLCAP"))),
-  ];
+  return Promise.all(marketIndexDefinitions.map(async (definition) => {
+    const localRows = findRows(definition.match);
+    const rows = localRows.length ? localRows : await indexFallbackRows(definition);
+    return tile(definition.label, rows);
+  }));
 }
 
 function positionLtp(position: DhanPosition | undefined, fallback?: number) {
@@ -453,7 +492,7 @@ export async function GET() {
       closedTrades,
       equityCurve,
       monthlyPnl: monthlyPnl(closedTrades, trades),
-      marketIndexes: marketIndexTiles(db.daily_prices),
+      marketIndexes: await marketIndexTiles(db.daily_prices),
       stats,
       tradeManagement,
       source: {

@@ -194,6 +194,8 @@ export async function getSecurityMaster(force = false): Promise<InstrumentRecord
       const tradingSymbol = first(row, ["TRADING_SYMBOL", "SEM_TRADING_SYMBOL", "UNDERLYING_SYMBOL", "SYMBOL", "Trading Symbol"]) || symbol;
       const isin = first(row, ["ISIN", "SEM_ISIN_CODE", "ISIN_CODE"]);
       const isNseEquity = exchange === "NSE" && segment === "E" && instrument.toUpperCase().includes("EQUITY");
+      const isNseIndex = exchange === "NSE" && segment === "I";
+      const exchangeSegment = isNseIndex ? "IDX_I" : isNseEquity ? "NSE_EQ" : "";
       return {
         security_id: securityId,
         symbol: tradingSymbol.replace(/-EQ$/, ""),
@@ -201,10 +203,10 @@ export async function getSecurityMaster(force = false): Promise<InstrumentRecord
         company_name: first(row, ["DISPLAY_NAME", "SM_SYMBOL_NAME", "SEM_CUSTOM_SYMBOL", "COMPANY_NAME"]) || symbol || tradingSymbol,
         isin,
         exchange,
-        exchange_segment: isNseEquity ? "NSE_EQ" : "",
+        exchange_segment: exchangeSegment,
         segment,
         instrument,
-        status: securityId && isNseEquity ? "ACTIVE" : "UNMAPPED",
+        status: securityId && exchangeSegment ? "ACTIVE" : "UNMAPPED",
         price_adjustment_status: "UNKNOWN",
       } satisfies InstrumentRecord;
     })
@@ -329,9 +331,16 @@ function isNoIntradayDataError(error: unknown) {
 }
 
 function dhanExchangeSegment(segment?: string) {
-  if (segment === "NSE_EQ" || segment === "BSE_EQ") return segment;
+  if (segment === "NSE_EQ" || segment === "BSE_EQ" || segment === "IDX_I") return segment;
   if (segment === "E" || !segment) return "NSE_EQ";
+  if (segment === "I") return "IDX_I";
   return segment;
+}
+
+function dhanInstrumentType(segment?: string, instrument?: string) {
+  const normalizedSegment = dhanExchangeSegment(segment);
+  if (normalizedSegment === "IDX_I") return "INDEX";
+  return instrument?.toUpperCase().includes("INDEX") ? "INDEX" : "EQUITY";
 }
 
 const pendingEodNotice = () =>
@@ -439,13 +448,13 @@ async function assertDhanProfileReady() {
   return profile;
 }
 
-export async function getHistoricalData(security: Pick<Security, "securityId" | "symbol" | "segment">, fromDate: string, toDate: string): Promise<Candle[]> {
+export async function getHistoricalData(security: Pick<Security, "securityId" | "symbol" | "segment"> & Partial<Pick<Security, "instrument">>, fromDate: string, toDate: string): Promise<Candle[]> {
   if (!hasDhanCredentials()) throw new Error("Dhan credentials are not configured.");
   return withRetry(`Dhan historical ${security.symbol}`, async () => {
       const response = await postDhanJson("/charts/historical", {
       securityId: security.securityId,
       exchangeSegment: dhanExchangeSegment(security.segment),
-      instrument: "EQUITY",
+      instrument: dhanInstrumentType(security.segment),
       expiryCode: 0,
       oi: false,
       fromDate,
@@ -473,8 +482,9 @@ export async function getIntradayData(securityId: string, interval = 60, days = 
   if (!hasDhanCredentials()) throw new Error("Dhan credentials are not configured.");
   if (![1, 5, 15, 25, 60].includes(interval)) throw new Error("Unsupported intraday interval.");
   const db = await readDatabase();
-  const instrument = db.instruments.find((row) => row.security_id === securityId);
+  let instrument = db.instruments.find((row) => row.security_id === securityId);
   const member = db.universe_members.find((row) => row.security_id === securityId);
+  if (!instrument && !member) instrument = (await getSecurityMaster(false)).find((row) => row.security_id === securityId);
   if (!instrument && !member) throw new Error(`No instrument metadata found for security ID ${securityId}.`);
 
   const to = new Date();
@@ -488,7 +498,7 @@ export async function getIntradayData(securityId: string, interval = 60, days = 
     const response = await postDhanJson("/charts/intraday", {
       securityId,
       exchangeSegment,
-      instrument: "EQUITY",
+      instrument: dhanInstrumentType(exchangeSegment, instrument?.instrument || member?.instrument),
       interval: String(interval),
       oi: false,
       fromDate: dhanDateTime(from),
@@ -529,7 +539,7 @@ async function getIntradayDataForSession(security: Security, tradingDate: string
     const response = await postDhanJson("/charts/intraday", {
       securityId: security.securityId,
       exchangeSegment: dhanExchangeSegment(security.segment),
-      instrument: "EQUITY",
+      instrument: dhanInstrumentType(security.segment),
       interval: String(interval),
       oi: false,
       fromDate: indiaSessionDateTime(tradingDate, marketOpenMinutes),
@@ -633,7 +643,7 @@ function applyHistoricalData(db: SeasonalityDatabase, security: Security, candle
     close: candle.close,
     volume: candle.volume,
     exchange_segment: dhanExchangeSegment(security.segment),
-    instrument: "EQUITY",
+    instrument: dhanInstrumentType(security.segment, security.instrument),
     data_source: dataSource,
     is_provisional: isProvisional,
     created_at: now,
@@ -649,7 +659,7 @@ function applyHistoricalData(db: SeasonalityDatabase, security: Security, candle
     exchange: security.exchange,
     exchange_segment: dhanExchangeSegment(security.segment),
     segment: dhanExchangeSegment(security.segment) === "NSE_EQ" ? "E" : security.segment,
-    instrument: security.instrument || "EQUITY",
+    instrument: dhanInstrumentType(security.segment, security.instrument),
     status: "ACTIVE",
     price_adjustment_status: "UNKNOWN",
   });
