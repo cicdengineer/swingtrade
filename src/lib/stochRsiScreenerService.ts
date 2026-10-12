@@ -24,6 +24,8 @@ export type StochRsiRecentPoint = {
   high: number;
   low: number;
   close: number;
+  ema10?: number;
+  ema50?: number;
   volume: number;
   daily_stoch_d?: number;
   weekly_stoch_d?: number;
@@ -204,6 +206,8 @@ function analyzeStock(input: {
       high: row.high,
       low: row.low,
       close: row.close,
+      ema10: ema10[index],
+      ema50: ema50[index],
       volume: row.volume,
       daily_stoch_d: dailyValue,
       weekly_stoch_d: weeklyValue,
