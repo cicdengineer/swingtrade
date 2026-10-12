@@ -922,18 +922,21 @@ function liveHourlySignal(signal?: HourlySignal, ltp?: number): HourlySignal | u
   return { ...signal, state: "red", ltp, distancePct, label: "Too far below hourly 50 EMA" };
 }
 
-function liveAdjustedPortfolio(portfolio: PortfolioResponse | null, liveTicks: Record<string, LiveTick>) {
+function liveAdjustedPortfolio(portfolio: PortfolioResponse | null, liveTicks: Record<string, LiveTick>, liveDailyRows: Record<string, DailyChartPoint> = {}) {
   if (!portfolio) return null;
   const holdings = portfolio.holdings.map((holding) => {
     const tick = liveTicks[holding.securityId];
-    if (!tick?.ltp) return holding;
+    const liveDaily = liveDailyRows[holding.securityId];
+    const tickAdjustedDaily = liveDaily && tick?.ltp ? { ...liveDaily, close: tick.ltp, high: Math.max(liveDaily.high, tick.ltp), low: Math.min(liveDaily.low, tick.ltp) } : liveDaily;
+    const adjustedHolding = liveAdjustedPortfolioHolding(holding, tickAdjustedDaily ?? null);
+    if (!tick?.ltp) return adjustedHolding;
     return {
-      ...holding,
+      ...adjustedHolding,
       currentPrice: tick.ltp,
       todayChangePct: tick.prevClose && tick.prevClose > 0 ? ((tick.ltp / tick.prevClose) - 1) * 100 : holding.todayChangePct,
       unrealizedPnl: (tick.ltp - holding.avgCostPrice) * holding.totalQty,
-      distanceFrom10EmaPct: holding.ema10 ? ((tick.ltp - holding.ema10) / holding.ema10) * 100 : holding.distanceFrom10EmaPct,
-      distanceFrom50EmaPct: holding.ema50 ? ((tick.ltp - holding.ema50) / holding.ema50) * 100 : holding.distanceFrom50EmaPct,
+      distanceFrom10EmaPct: adjustedHolding.ema10 ? ((tick.ltp - adjustedHolding.ema10) / adjustedHolding.ema10) * 100 : adjustedHolding.distanceFrom10EmaPct,
+      distanceFrom50EmaPct: adjustedHolding.ema50 ? ((tick.ltp - adjustedHolding.ema50) / adjustedHolding.ema50) * 100 : adjustedHolding.distanceFrom50EmaPct,
     };
   });
   const unrealizedPnl = holdings.reduce((sum, holding) => sum + holding.unrealizedPnl, 0);
@@ -953,7 +956,9 @@ const isBreakingSwingHigh = (holding: PortfolioHolding) => {
   const price = holding.currentPrice ?? holding.recent?.at(-1)?.close;
   return Boolean(high && price && price >= high);
 };
-const needsMoveSlToCost = (holding: PortfolioHolding) => Boolean(holding.ema10 && holding.ema10 > holding.avgCostPrice && !holding.riskFree);
+const priceEquals = (left?: number, right?: number) => left !== undefined && right !== undefined && Math.abs(left - right) < 0.005;
+const ema10DistanceFromStopPct = (holding: PortfolioHolding) => holding.ema10 !== undefined && holding.stopLoss !== undefined && holding.stopLoss > 0 ? ((holding.ema10 - holding.stopLoss) / holding.stopLoss) * 100 : undefined;
+const needsMoveSlToCost = (holding: PortfolioHolding) => Boolean(holding.ema10 && holding.ema10 > holding.avgCostPrice && !priceEquals(holding.ema10, holding.avgCostPrice) && (holding.stopLoss === undefined || holding.stopLoss < holding.avgCostPrice) && !holding.riskFree);
 const highestVolumeDay = (holding: PortfolioHolding, lookback = 90) => {
   const rows = holding.recent?.slice(-lookback) ?? [];
   const latest = rows.at(-1);
@@ -1310,8 +1315,11 @@ function SwingHighPill({ holding }: { holding: PortfolioHolding }) {
 
 function TenEmaCell({ holding }: { holding: PortfolioHolding }) {
   const alert = needsMoveSlToCost(holding);
+  const distanceFromStop = ema10DistanceFromStopPct(holding);
   if (holding.ema10 === undefined) return "—";
-  return <span className={`portfolio-ema-pill ten-ema ${alert ? "move-sl" : "above"}`}><b>{money(holding.ema10)}</b><small>{alert ? "Move SL to cost" : holding.distanceFrom10EmaPct === undefined ? "10 EMA" : pct2(holding.distanceFrom10EmaPct)}</small></span>;
+  const tone = alert ? "move-sl" : distanceFromStop !== undefined && distanceFromStop >= 0 ? "above" : "neutral";
+  const sub = alert ? "Move SL to cost" : distanceFromStop === undefined ? "SL missing" : `${pct2(distanceFromStop)} from SL`;
+  return <span className={`portfolio-ema-pill ten-ema ${tone}`}><b>{money(holding.ema10)}</b><small>{sub}</small></span>;
 }
 
 function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
@@ -1440,7 +1448,8 @@ function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHoldin
   }, [holding.securityId]);
 
   const adjustedHolding = useMemo(() => liveAdjustedPortfolioHolding(holding, liveDailyRow), [holding, liveDailyRow]);
-  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={adjustedHolding.distanceFrom10EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom10EmaPct)} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
+  const ema10FromStop = ema10DistanceFromStopPct(adjustedHolding);
+  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={ema10FromStop === undefined ? undefined : `${pct2(ema10FromStop)} from SL`} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
 }
 
 function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHolding[]; onStopLossSaved: () => Promise<void> | void }) {
@@ -1728,6 +1737,7 @@ function BasketBacktestView({ filters, setFilters, data, loading, onRun }: { fil
 
 function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { portfolio: PortfolioResponse | null; loading: boolean; onRefresh: () => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void }) {
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
+  const [liveDailyRows, setLiveDailyRows] = useState<Record<string, DailyChartPoint>>({});
   useEffect(() => {
     const ids = (portfolio?.holdings ?? []).map((holding) => holding.securityId).filter(Boolean).join(",");
     setLiveTicks({});
@@ -1760,7 +1770,30 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
       setLiveFeedStatus("idle");
     };
   }, [portfolio, setLiveFeedStatus]);
-  const livePortfolio = useMemo(() => liveAdjustedPortfolio(portfolio, liveTicks), [portfolio, liveTicks]);
+  useEffect(() => {
+    const holdings = portfolio?.holdings ?? [];
+    setLiveDailyRows({});
+    if (!holdings.length) return;
+    let cancelled = false;
+    const loadDailyRows = async () => {
+      const entries = await Promise.all(holdings.map(async (holding) => {
+        try {
+          const candles = await fetchThirtyUpIntraday(holding.securityId, false, "thirty-up-screener");
+          return [holding.securityId, aggregateIntradayDaily(candles)] as const;
+        } catch {
+          return null;
+        }
+      }));
+      if (!cancelled) setLiveDailyRows(Object.fromEntries(entries.filter((entry): entry is readonly [string, DailyChartPoint] => entry !== null)));
+    };
+    void loadDailyRows();
+    const timer = window.setInterval(() => void loadDailyRows(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [portfolio]);
+  const livePortfolio = useMemo(() => liveAdjustedPortfolio(portfolio, liveTicks, liveDailyRows), [portfolio, liveTicks, liveDailyRows]);
   const settings = livePortfolio?.tradeManagement?.settings;
   const riskUnit = livePortfolio?.tradeManagement?.summary.riskUnit ?? (settings ? settings.totalCapital * settings.riskPercent / 100 : 0);
   const liveHoldings = livePortfolio?.holdings.length ?? 0;
