@@ -109,7 +109,7 @@ const globalCache = globalThis as typeof globalThis & { __thirtyInThirtyCache?: 
 const pct = (value: number, base: number) => (value / Math.max(0.01, base) - 1) * 100;
 const avg = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 
-function analyzeStock(input: {
+export function analyzeStock(input: {
   securityId: string;
   symbol: string;
   companyName: string;

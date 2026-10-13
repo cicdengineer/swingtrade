@@ -95,15 +95,18 @@ export function buildObservationsForStock(input: {
   sector: string;
   universeName: UniverseName;
   prices: DailyPriceRecord[];
+  windowKey?: string;
+  completedThrough?: string;
 }) {
   const prices = [...input.prices].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
   const years = [...new Set(prices.map((price) => Number(price.trade_date.slice(0, 4))))].sort((a, b) => a - b);
   const observations: SeasonalObservationRecord[] = [];
   const exclusions: SeasonalExclusionRecord[] = [];
 
-  for (const window of seasonalWindows) {
+  for (const window of seasonalWindows.filter((item) => !input.windowKey || item.key === input.windowKey)) {
     for (const year of years) {
       const range = monthRange(year, window.startMonth);
+      if (input.completedThrough && range.endExclusive > input.completedThrough) continue;
       const slice = prices.filter((price) => price.trade_date >= range.startDate && price.trade_date < range.endExclusive);
       if (slice.length < 2) {
         exclusions.push(addExclusion(input.securityId, input.symbol, window.key, year, "Insufficient daily data inside window"));

@@ -68,3 +68,6 @@
 @media(max-width:850px){.thirty-in-thirty-screener-page .screenshot-tile:not(.stoch-tile) .tile-today-return{top:29px;right:8px}.thirty-in-thirty-screener-page .screenshot-tile:not(.stoch-tile) b{padding-right:68px}}
 @media(max-width:520px){.thirty-in-thirty-screener-page .screenshot-tile:not(.stoch-tile) .tile-today-return{top:25px;right:6px}.thirty-in-thirty-screener-page .screenshot-tile:not(.stoch-tile) b{padding-right:58px}}
 .ema10-line{fill:none;stroke:#2aa7ff;stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}.legend-ema10{background:#2aa7ff}.ema-reclaim-triangle{fill:#2aa7ff;stroke:#07110e;stroke-width:.7}
+.seasonal-tile .tile-seasonal-return{position:absolute;left:10px;bottom:9px;z-index:2;padding:3px 5px;border-radius:3px;background:#e2f7e9eb;color:#087f4d;font:800 9px "DM Mono";white-space:nowrap;max-width:calc(100% - 20px);overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+:root[data-theme="dark"] .seasonal-tile .tile-seasonal-return{background:#103b2beb;color:#69ffc0}
+@media(max-width:850px){.seasonal-tile .tile-seasonal-return{left:5px;bottom:4px;font-size:8px;padding:2px 3px}}
