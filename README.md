@@ -29,7 +29,7 @@ The browser only calls local `/api/*` routes. The historical request is made by 
 
 ## Seasonal Stocks watchlists
 
-The Seasonal Stocks screen reads prebuilt snapshots for the selected month. A month change reads only that month's saved watchlist; live Dhan ticks continue to update its tiles. Use **Build Watchlists** on that screen after refreshing market data and rebuilding statistics in the Seasonality screen. The build uses completed stored seasonal observations, requires an average three-month return strictly above 30%, and saves all 12 monthly watchlists in MySQL (or `.data/seasonal-watchlists.json` locally). **Load Saved** rereads the current month without recalculating historical returns.
+The Seasonal Stocks screen reads prebuilt snapshots for the selected month. A month change reads only that month's saved watchlist; live Dhan ticks continue to update its tiles. To prepare data, check **Data Status** for downloaded OHLCV rows and use **Refresh All Data** there if needed; then open **Seasonality** and click **Rebuild Seasonality Statistics**; finally return to **Seasonal Stocks** and click **Build Watchlists**. Repeat the statistics and watchlist builds after refreshing historical market data. The build uses completed stored seasonal observations, requires an average three-month return strictly above 30%, and saves all 12 monthly watchlists in MySQL (or `.data/seasonal-watchlists.json` locally). **Load Saved** rereads the current month without recalculating historical returns.
 
 ## Production storage and cron
 
