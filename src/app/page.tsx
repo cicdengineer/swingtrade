@@ -70,8 +70,8 @@ type EmaConsolidationFilters = { universe: "ALL" | UniverseName; emaLength: numb
 type EmaConsolidationSortKey = "score" | "today_return" | "symbol" | "company" | "prior_move" | "range" | "ema_distance" | "ema_catchup" | "above_ema" | "breakout_distance" | "volume";
 type EmaConsolidationRow = { status: "SETUP" | "WATCHLIST" | "NO_PRIOR_MOVE" | "BELOW_20EMA" | "TOO_WIDE" | "EMA_NOT_READY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema20: number; ema50: number; distance_from_20ema_pct: number; ema20_slope_pct: number; prior_move_pct: number; prior_low_date?: string; prior_low_close?: number; consolidation_start_date: string; consolidation_end_date: string; consolidation_days: number; range_high: number; range_low: number; range_pct: number; breakout_distance_pct: number; ema_to_range_mid_pct: number; above_ema_days_pct: number; current_volume_ratio?: number; daily_stoch_d?: number; averageDailyTradedValue: number; setup_score: number; reason: string; recent: Array<DailyChartPoint & { ema20?: number; daily_stoch_d?: number }> };
 type EmaConsolidationResponse = { filters: EmaConsolidationFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: EmaConsolidationRow[]; generatedAt: string };
-type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; stoch20Only: boolean; stoch80Only: boolean; showAll: boolean };
-type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "hourly_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
+type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; threeRedCandleOnly: boolean; stoch20Only: boolean; stoch80Only: boolean; showAll: boolean };
+type ThirtyInThirtySortKey = "best_return" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "swing_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; daily_stoch_d?: number; averageDailyTradedValue: number; reason: string; recent: Array<DailyChartPoint & { daily_stoch_d?: number }> };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
 type StochRsiFilters = { universe: "ALL" | UniverseName; rsiLength: number; stochLength: number; smoothK: number; smoothD: number; upperThreshold: number; lowerThreshold: number; minWeeklyCandles: number; showAll: boolean };
@@ -234,6 +234,7 @@ const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   decliningVolumeOnly: false,
   dryVolumeOnly: false,
   redCandleOnly: false,
+  threeRedCandleOnly: false,
   stoch20Only: false,
   stoch80Only: false,
   showAll: false,
@@ -662,6 +663,18 @@ const closedRedPreviousSession = (row: ThirtyInThirtyRow) => {
   const latestCompleted = latestCompletedDailyRow(row);
   return Boolean(latestCompleted && latestCompleted.close < latestCompleted.open);
 };
+const hasThreeRedCandlesInLastSixDays = (row: ThirtyInThirtyRow) => {
+  const completed = row.recent.filter((point) => point.trade_date !== liveTradeDate()).slice(-6);
+  for (let index = 0; index <= completed.length - 3; index += 1) {
+    if (completed.slice(index, index + 3).every((point) => point.close < point.open)) return true;
+  }
+  return false;
+};
+const thirtyInThirtySwingLowPoint = (rows: DailyChartPoint[]) => {
+  // Match StochRSI's five candles before the signal, using the latest candle as this chart's anchor.
+  if (rows.length < 6) return undefined;
+  return rows.slice(-6, -1).reduce((lowest, point) => point.low < lowest.low ? point : lowest);
+};
 const latestDailyStop = (rows: DailyChartPoint[]) => {
   return rows.at(-1)?.low;
 };
@@ -695,6 +708,7 @@ const matchesThirtyInThirtyFilters = (row: ThirtyInThirtyRow, filters: ThirtyInT
   (!filters.decliningVolumeOnly || hasDryVolumeStreak(row)) &&
   (!filters.dryVolumeOnly || hasDryVolumeRatio(row)) &&
   (!filters.redCandleOnly || closedRedPreviousSession(row)) &&
+  (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) &&
   (!filters.stoch20Only || (row.daily_stoch_d !== undefined && row.daily_stoch_d < 21)) &&
   (!filters.stoch80Only || (row.daily_stoch_d !== undefined && row.daily_stoch_d > 80));
 const stochTodayReturnPct = (row: StochRsiRow, tick?: LiveTick) => {
@@ -2442,13 +2456,13 @@ function EntrySizingTile({ title, entry, stop, settings, loading }: { title: str
   </div>;
 }
 
-function ThirtyInThirtyRiskTiles({ selected, activeRows, hourlyRows, hourlyLoading, hourlyError, settings }: { selected: ThirtyInThirtyRow; activeRows: DailyChartPoint[]; hourlyRows: DailyChartPoint[]; hourlyLoading: boolean; hourlyError?: string; settings?: TradingSettings | null }) {
+function ThirtyInThirtyRiskTiles({ selected, activeRows, settings }: { selected: ThirtyInThirtyRow; activeRows: DailyChartPoint[]; settings?: TradingSettings | null }) {
   const entry = selected.current_close;
   const dailyStop = latestDailyStop(activeRows.length ? activeRows : selected.recent);
-  const hourlyStop = latestHourlyStop(hourlyRows);
+  const swingStop = thirtyInThirtySwingLowPoint(activeRows.length ? activeRows : selected.recent)?.low;
   return <div className="entry-sizing-grid">
     <EntrySizingTile title="Daily Low Entry" entry={entry} stop={dailyStop} settings={settings} />
-    <EntrySizingTile title="Hourly Low Entry" entry={entry} stop={hourlyStop} settings={settings} loading={!hourlyError && (hourlyLoading || !hourlyRows.length)} />
+    <EntrySizingTile title="Swing Low Sizing" entry={entry} stop={swingStop} settings={settings} />
   </div>;
 }
 
@@ -2518,7 +2532,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings }: { selecte
   const dailyRows = lastTradingMonths(mergeLiveDailyCandle(selected.recent, liveDailyRow), chartMonths === 6 ? 126 : 63);
   const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
   return <div className="chart-shell">
-    <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} hourlyRows={hourlyRows} hourlyLoading={hourlyLoading} hourlyError={hourlyError} settings={settings} />
+    <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} settings={settings} />
     <div className="chart-toolbar">
       <div>
         <p className="eyebrow">Chart timeframe</p>
@@ -2534,7 +2548,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings }: { selecte
         </div>
       </div>
     </div>
-    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} />
+    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>;
 }
@@ -2544,7 +2558,6 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [tileLimit, setTileLimit] = useState(9999);
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
-  const [hourlyStops, setHourlyStops] = useState<Record<string, number | undefined>>({});
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const setNumber = (key: keyof ThirtyInThirtyFilters, value: number) => setFilters({ ...filters, [key]: value });
   const liveRows = useMemo(() => (data?.results ?? []).map((row) => liveAdjustedThirtyInThirty(row, liveTicks[row.security_id])), [data, liveTicks]);
@@ -2608,30 +2621,13 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       setLiveFeedStatus("idle");
     };
   }, [data, setLiveFeedStatus, tileLimit]);
-  useEffect(() => {
-    const rows = liveRows.slice(0, 180).filter((row) => !(row.security_id in hourlyStops));
-    if (!rows.length) return;
-    let cancelled = false;
-    rows.forEach((row) => {
-      void fetchThirtyUpIntraday(row.security_id, false, "thirty-in-thirty-screener")
-        .then((candles) => {
-          if (cancelled) return;
-          const stop = latestHourlyStop(candles);
-          setHourlyStops((current) => current[row.security_id] === stop ? current : { ...current, [row.security_id]: stop });
-        })
-        .catch(() => {
-          if (!cancelled) setHourlyStops((current) => row.security_id in current ? current : { ...current, [row.security_id]: undefined });
-        });
-    });
-    return () => { cancelled = true; };
-  }, [liveRows, hourlyStops]);
   const sortRows = useCallback((rows: ThirtyInThirtyRow[]) => {
     const valueFor = (row: ThirtyInThirtyRow): string | number => {
       if (sort.key === "symbol") return row.symbol;
       if (sort.key === "company") return row.company_name;
       if (sort.key === "today_return") return todayReturnPct(row, liveTicks[row.security_id]) ?? -Infinity;
       if (sort.key === "daily_sl_pct") return stopLossPct(row.current_close, latestDailyStop(row.recent)) ?? Infinity;
-      if (sort.key === "hourly_sl_pct") return stopLossPct(row.current_close, hourlyStops[row.security_id]) ?? Infinity;
+      if (sort.key === "swing_sl_pct") return stopLossPct(row.current_close, thirtyInThirtySwingLowPoint(row.recent)?.low) ?? Infinity;
       if (sort.key === "pullback") return row.pullback_from_best_end_pct;
       if (sort.key === "near_3m_high") return row.pullback_from_3m_high_pct;
       if (sort.key === "near_6m_high") return row.pullback_from_6m_high_pct;
@@ -2649,16 +2645,16 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
       return sort.direction === "asc" ? comparison : -comparison;
     });
-  }, [liveTicks, sort, hourlyStops]);
+  }, [liveTicks, sort]);
   const sortedRows = useMemo(() => sortRows(liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]))), [liveRows, liveTicks, filters, sortRows]);
-  const pinnedRows = useMemo(() => sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id))), [liveRows, pinnedIds, sortRows]);
+  const pinnedRows = useMemo(() => sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)))), [liveRows, pinnedIds, filters.threeRedCandleOnly, sortRows]);
   const visibleRows = useMemo(() => {
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
   }, [pinnedRows, sortedRows, tileLimit]);
   const visibleSecurityKey = useMemo(() => visibleRows.map((row) => row.security_id).join(","), [visibleRows]);
   const togglePinned = (securityId: string) => setPinnedIds((current) => current.includes(securityId) ? current.filter((id) => id !== securityId) : [...current, securityId]);
-  const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "hourly_sl_pct" ? "asc" : "desc" });
+  const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "swing_sl_pct" ? "asc" : "desc" });
 
   useEffect(() => {
     const rows = visibleRows.filter((row) => row.current_date !== liveTradeDate() || !liveTicks[row.security_id]);
@@ -2717,7 +2713,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
-      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}><option value="today_return">Today Live Gain</option><option value="daily_sl_pct">Daily SL%</option><option value="hourly_sl_pct">Hourly SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
+      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}><option value="today_return">Today Live Gain</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
       <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
     </div>
     <div className="thirty-in-thirty-switches">
@@ -2734,6 +2730,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label><input type="checkbox" checked={filters.decliningVolumeOnly} onChange={(e) => setFilters({ ...filters, decliningVolumeOnly: e.target.checked })}/><span>Declining Vol</span></label>
       <label title={`Latest completed volume <= ${thirtyInThirtyDryVolumeRatio}x average of previous ${thirtyInThirtyDryVolumeLookback} sessions`}><input type="checkbox" checked={filters.dryVolumeOnly} onChange={(e) => setFilters({ ...filters, dryVolumeOnly: e.target.checked })}/><span>Dry Volume</span></label>
       <label><input type="checkbox" checked={filters.redCandleOnly} onChange={(e) => setFilters({ ...filters, redCandleOnly: e.target.checked })}/><span>Red Candle</span></label>
+      <label title="Three consecutive red daily candles anywhere in the last six completed sessions"><input type="checkbox" checked={filters.threeRedCandleOnly} onChange={(e) => setFilters({ ...filters, threeRedCandleOnly: e.target.checked })}/><span>3Red Candle</span></label>
       <label title="Daily StochRSI %D below 21"><input type="checkbox" checked={filters.stoch20Only} onChange={(e) => setFilters({ ...filters, stoch20Only: e.target.checked })}/><span>Stoch20</span></label>
       <label title="Daily StochRSI %D above 80"><input type="checkbox" checked={filters.stoch80Only} onChange={(e) => setFilters({ ...filters, stoch80Only: e.target.checked })}/><span>Stoch80</span></label>
     </div>
@@ -3514,7 +3511,7 @@ function liveAdjustedHourlyBreakout(row: HourlyBreakoutRow, liveTick?: LiveTick)
   return { liveClose, todayChange, emaDistance, breakoutDistance, pullbackFromZone };
 }
 
-function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean }) {
+function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -3535,6 +3532,8 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   const maxVolume = Math.max(...chartRows.map((row) => row.volume));
   const volumeSma = smaValues(chartRows.map((row) => row.volume), 20);
   const emaPath = chartEmaValues.map((value, index) => ({ value, x: index * candleSlot + candleSlot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
+  const swingLowIndex = swingLowPoint ? chartRows.findIndex((row) => row.trade_date === swingLowPoint.trade_date) : -1;
+  const swingLowY = swingLowPoint && swingLowIndex >= 0 ? scaleValue(swingLowPoint.low, priceMin, priceMax, priceHeight, 8) : undefined;
   const latestIndex = chartRows.length - 1;
   const latestReclaimMarker = showLatestEmaReclaimMarker && latestIndex > 0 && chartEmaValues[latestIndex] !== undefined && chartEmaValues[latestIndex - 1] !== undefined && chartRows[latestIndex - 1].close < chartEmaValues[latestIndex - 1]! && chartRows[latestIndex].close > chartEmaValues[latestIndex]!
     ? {
@@ -3545,8 +3544,9 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
     }
     : null;
   return <div className="clean-chart">
-    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span><span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>
+    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}<span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart`}>
+      {swingLowY !== undefined && <line className="swing-low-line" x1={swingLowIndex * candleSlot + candleSlot / 2} x2={width} y1={swingLowY} y2={swingLowY}><title>{`Swing low ${money(swingLowPoint!.low)} on ${swingLowPoint!.trade_date}`}</title></line>}
       {chartRows.map((row, index) => {
         const x = index * candleSlot + candleSlot / 2;
         const openY = scaleValue(row.open, priceMin, priceMax, priceHeight, 8);
