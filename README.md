@@ -27,6 +27,10 @@ Local, rules-based Indian equity seasonality research. It contains no technical 
 
 The browser only calls local `/api/*` routes. The historical request is made by the Next.js server to Dhan with the access token held in the server environment.
 
+## Seasonal Stocks watchlists
+
+The Seasonal Stocks screen reads prebuilt snapshots for the selected month. A month change reads only that month's saved watchlist; live Dhan ticks continue to update its tiles. Use **Build Watchlists** on that screen after refreshing market data and rebuilding statistics in the Seasonality screen. The build uses completed stored seasonal observations, requires an average three-month return strictly above 30%, and saves all 12 monthly watchlists in MySQL (or `.data/seasonal-watchlists.json` locally). **Load Saved** rereads the current month without recalculating historical returns.
+
 ## Production storage and cron
 
 Set `DATABASE_URL` in production to use MySQL instead of the local `.data` JSON file. The app stores the existing JSON database model in a single MySQL document row, so local development can keep using `.data/seasonality-edge-db.json` when `DATABASE_URL` is empty.

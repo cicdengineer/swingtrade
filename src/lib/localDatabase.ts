@@ -42,6 +42,8 @@ export type SeasonalityDatabase = {
 };
 
 const dbFile = path.join(process.cwd(), ".data", "seasonality-edge-db.json");
+const seasonalWatchlistsFile = path.join(process.cwd(), ".data", "seasonal-watchlists.json");
+const seasonalWatchlistsCollection = "seasonal_watchlists";
 let writeQueue: Promise<void> = Promise.resolve();
 const replacementCharacter = "\uFFFD";
 const mysqlDatabaseId = "default";
@@ -260,8 +262,8 @@ function databaseFromShards(rows: MysqlRow[]) {
 async function ensureMysqlDatabase(): Promise<SeasonalityDatabase> {
   await ensureMysqlDb();
   const [shardRows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
-    "SELECT collection_name, shard_key, data FROM seasonality_json_collections WHERE document_id = ?",
-    [mysqlDatabaseId],
+    "SELECT collection_name, shard_key, data FROM seasonality_json_collections WHERE document_id = ? AND collection_name <> ?",
+    [mysqlDatabaseId, seasonalWatchlistsCollection],
   ));
   const sharded = databaseFromShards(shardRows);
   if (sharded) return sharded;
@@ -290,7 +292,7 @@ async function writeMysqlDatabase(db: SeasonalityDatabase) {
     const connection = await getMysqlPool().getConnection();
     try {
       await connection.beginTransaction();
-      await connection.execute("DELETE FROM seasonality_json_collections WHERE document_id = ?", [mysqlDatabaseId]);
+      await connection.execute("DELETE FROM seasonality_json_collections WHERE document_id = ? AND collection_name <> ?", [mysqlDatabaseId, seasonalWatchlistsCollection]);
       for (const shard of shards) {
         await connection.execute(
           `INSERT INTO seasonality_json_collections (document_id, collection_name, shard_key, data)
@@ -343,6 +345,94 @@ async function ensureJsonFileDb(): Promise<SeasonalityDatabase> {
 
 export async function readDatabase(): Promise<SeasonalityDatabase> {
   return useMysqlStorage ? ensureMysqlDatabase() : ensureJsonFileDb();
+}
+
+// Seasonal screen reads one prebuilt month without loading the full daily-price database.
+export async function readSeasonalWatchlistSnapshot<T>(month: number): Promise<T | null> {
+  if (useMysqlStorage) {
+    await ensureMysqlDb();
+    const [rows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
+      "SELECT data FROM seasonality_json_collections WHERE document_id = ? AND collection_name = ? AND shard_key = ? LIMIT 1",
+      [mysqlDatabaseId, seasonalWatchlistsCollection, String(month)],
+    ));
+    return parseMysqlJson<T>(rows[0]?.data);
+  }
+  try {
+    const snapshots = JSON.parse(await fs.readFile(seasonalWatchlistsFile, "utf8")) as Record<string, T>;
+    return snapshots[String(month)] ?? null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export async function readSeasonalWatchlistBuildInputs() {
+  if (!useMysqlStorage) {
+    const db = await readDatabase();
+    return { members: db.universe_members, observations: db.seasonal_observations };
+  }
+  await ensureMysqlDb();
+  const [rows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
+    "SELECT collection_name, data FROM seasonality_json_collections WHERE document_id = ? AND collection_name IN (?, ?)",
+    [mysqlDatabaseId, "universe_members", "seasonal_observations"],
+  ));
+  const members: UniverseMemberRecord[] = [];
+  const observations: SeasonalObservationRecord[] = [];
+  for (const row of rows) {
+    if (row.collection_name === "universe_members") members.push(...(parseMysqlJson<UniverseMemberRecord[]>(row.data) ?? []));
+    if (row.collection_name === "seasonal_observations") observations.push(...(parseMysqlJson<SeasonalObservationRecord[]>(row.data) ?? []));
+  }
+  return { members, observations };
+}
+
+export async function readDailyPricesForWatchlist(ids: string[]) {
+  if (!ids.length) return [] as DailyPriceRecord[];
+  if (!useMysqlStorage) {
+    const db = await readDatabase();
+    const wanted = new Set(ids);
+    return db.daily_prices.filter((row) => wanted.has(row.security_id));
+  }
+  await ensureMysqlDb();
+  const placeholders = ids.map(() => "?").join(",");
+  const [rows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
+    `SELECT data FROM seasonality_json_collections WHERE document_id = ? AND collection_name = ? AND shard_key IN (${placeholders})`,
+    [mysqlDatabaseId, "daily_prices", ...ids],
+  ));
+  return rows.flatMap((row) => parseMysqlJson<DailyPriceRecord[]>(row.data) ?? []);
+}
+
+export async function writeSeasonalWatchlistSnapshots(snapshots: Array<{ month: number; value: unknown }>) {
+  if (useMysqlStorage) {
+    await ensureMysqlDb();
+    await withMysqlRetry(async () => {
+      const connection = await getMysqlPool().getConnection();
+      try {
+        await connection.beginTransaction();
+        for (const snapshot of snapshots) {
+          await connection.execute(
+            `INSERT INTO seasonality_json_collections (document_id, collection_name, shard_key, data)
+             VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)`,
+            [mysqlDatabaseId, seasonalWatchlistsCollection, String(snapshot.month), JSON.stringify(snapshot.value)],
+          );
+        }
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback().catch(() => {});
+        throw error;
+      } finally {
+        connection.release();
+      }
+    });
+    return;
+  }
+  const write = async () => {
+    await fs.mkdir(path.dirname(seasonalWatchlistsFile), { recursive: true });
+    const tempFile = `${seasonalWatchlistsFile}.${process.pid}.${Date.now()}.tmp`;
+    await fs.writeFile(tempFile, JSON.stringify(Object.fromEntries(snapshots.map(({ month, value }) => [month, value]))));
+    await fs.rename(tempFile, seasonalWatchlistsFile);
+  };
+  writeQueue = writeQueue.then(write, write);
+  return writeQueue;
 }
 
 export async function writeDatabase(db: SeasonalityDatabase) {

@@ -70,7 +70,7 @@ type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: num
 type ThirtyInThirtySortKey = "best_return" | "seasonal_avg" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "swing_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; daily_stoch_d?: number; averageDailyTradedValue: number; reason: string; recent: Array<DailyChartPoint & { daily_stoch_d?: number }>; seasonal_avg_return?: number; seasonal_observations?: number; seasonal_window?: string };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
-type SeasonalStocksResponse = { month: number; window: WindowDef; evaluated: number; qualified: number; results: ThirtyInThirtyRow[]; generatedAt: string };
+type SeasonalStocksResponse = { month: number; window: WindowDef; evaluated: number; qualified: number; results: ThirtyInThirtyRow[]; generatedAt: string; needsBuild?: boolean };
 type StochRsiFilters = { universe: "ALL" | UniverseName; rsiLength: number; stochLength: number; smoothK: number; smoothD: number; upperThreshold: number; lowerThreshold: number; minWeeklyCandles: number; showAll: boolean };
 type StochRsiSortKey = "entry" | "symbol" | "setup" | "daily_d" | "weekly_d" | "signal_high" | "distance_signal" | "lowest" | "swing_low_pct" | "today_return";
 type StochRsiRecentPoint = DailyChartPoint & { daily_stoch_d?: number; weekly_stoch_d?: number; setup_type?: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal?: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; new_lowest_candle?: boolean; lowest_price_in_zone?: number };
@@ -2420,7 +2420,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings }: { selecte
   </div>;
 }
 
-function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings, seasonal, month, setMonth }: { data: ThirtyInThirtyResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: (row: ThirtyInThirtyRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null; seasonal?: boolean; month?: number; setMonth?: (month: number) => void }) {
+function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings, seasonal, month, setMonth, onBuild }: { data: ThirtyInThirtyResponse | SeasonalStocksResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: (row: ThirtyInThirtyRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null; seasonal?: boolean; month?: number; setMonth?: (month: number) => void; onBuild?: () => void }) {
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: seasonal ? "seasonal_avg" : "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [tileLimit, setTileLimit] = useState(9999);
@@ -2443,7 +2443,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     const liveRows = rows.slice(0, Math.min(tileLimit, thirtyInThirtyLiveFeedLimit));
     const ids = liveRows.map((row) => row.security_id);
     const controller = new AbortController();
-    setLiveFeedStatus("connecting", `Starting ${ids.length} of ${rows.length} 30 in 30 live feed`);
+    setLiveFeedStatus("connecting", `Starting live prices for ${ids.length} of ${rows.length} ${seasonal ? "seasonal" : "30 in 30"} stocks`);
 
     const handleEvent = (event: string, data: string) => {
       if (event === "status") {
@@ -2457,7 +2457,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       } else if (event === "tick") {
         const tick = JSON.parse(data) as LiveTick;
         setLiveTicks((current) => ({ ...current, [tick.securityId]: tick }));
-        setLiveFeedStatus("live", "30 in 30 live prices streaming");
+        setLiveFeedStatus("live", `${seasonal ? "Seasonal" : "30 in 30"} live prices streaming`);
       }
     };
 
@@ -2467,7 +2467,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       body: JSON.stringify({ ids }),
       signal: controller.signal,
     }).then(async (response) => {
-      if (!response.ok || !response.body) throw new Error(`30 in 30 live feed failed: HTTP ${response.status}`);
+      if (!response.ok || !response.body) throw new Error(`Live feed failed: HTTP ${response.status}`);
       setLiveFeedStatus("connecting", "Waiting for Dhan websocket status");
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -2481,13 +2481,13 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         events.forEach((chunk) => parseServerSentEvents(chunk, handleEvent));
       }
     }).catch((error) => {
-      if (!controller.signal.aborted) setLiveFeedStatus("error", error instanceof Error ? error.message : "30 in 30 live feed disconnected");
+      if (!controller.signal.aborted) setLiveFeedStatus("error", error instanceof Error ? error.message : "Live feed disconnected");
     });
     return () => {
       controller.abort();
       setLiveFeedStatus("idle");
     };
-  }, [data, setLiveFeedStatus, tileLimit]);
+  }, [data, setLiveFeedStatus, tileLimit, seasonal]);
   const sortRows = useCallback((rows: ThirtyInThirtyRow[]) => {
     const valueFor = (row: ThirtyInThirtyRow): string | number => {
       if (sort.key === "symbol") return row.symbol;
@@ -2525,6 +2525,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "swing_sl_pct" ? "asc" : "desc" });
 
   useEffect(() => {
+    if (seasonal) return; // Live websocket supplies seasonal tiles; avoid one intraday HTTP request per tile.
     const rows = visibleRows.filter((row) => row.current_date !== liveTradeDate() || !liveTicks[row.security_id]);
     if (!rows.length) return;
     let cancelled = false;
@@ -2558,23 +2559,24 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     };
     void run();
     return () => { cancelled = true; };
-  }, [visibleSecurityKey]);
+  }, [visibleSecurityKey, seasonal]);
 
   return <section className="research-page thirty-in-thirty-page thirty-in-thirty-screener-page">
     <div className="thirty-hero thirty-in-thirty-hero">
       <div>
         <p className="eyebrow">{seasonal ? "Seasonal Stocks" : "30 in 30 Screener"}</p>
         <h2>{seasonal ? "3-month seasonal watchlist" : "30% moves in any 30 sessions"}</h2>
-        <small>{seasonal ? "Stocks whose average return in the selected rolling 3-month window exceeded 30% across completed historical years." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
+        <small>{seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
       </div>
       <div className="thirty-hero-actions">
         <div className="refresh-status"><span className={Object.keys(liveTicks).length ? "ready" : "pending"} /><b>{Object.keys(liveTicks).length ? "Live prices" : "Last run"}</b><small>{Object.keys(liveTicks).length ? `${Object.keys(liveTicks).length} ticking` : formatTime(updatedAt)}</small></div>
-        <button className="primary" onClick={() => onRun()} disabled={loading}><TrendingUp size={15}/>{seasonal ? "Refresh Watchlist" : "Run Screener"}</button>
+        <button className="primary" onClick={() => onRun()} disabled={loading}><TrendingUp size={15}/>{seasonal ? "Load Saved" : "Run Screener"}</button>
+        {seasonal && <button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button>}
         <button className="secondary compact" onClick={onReset}>Reset</button>
       </div>
     </div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
-      {seasonal ? <label>Universe · Month<select value={month} onChange={(e) => setMonth?.(Number(e.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name} → {["Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb"][index]}</option>)}</select></label> : <><label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as ThirtyInThirtyFilters["universe"] })}><option value="ALL">All</option><option value="MIDCAP">Nifty Midcap</option><option value="SMALLCAP">Nifty Smallcap</option></select></label><label>Lookback<input className="plain-input" type="number" value={filters.lookbackDays} onChange={(e) => setNumber("lookbackDays", Number(e.target.value))}/></label><label>Window<input className="plain-input" type="number" value={filters.windowDays} onChange={(e) => setNumber("windowDays", Number(e.target.value))}/></label><label>Return %<input className="plain-input" type="number" value={filters.minReturnPct} onChange={(e) => setNumber("minReturnPct", Number(e.target.value))}/></label></>}
+      {seasonal ? <label>Universe · Month<select value={month} disabled={loading} onChange={(e) => setMonth?.(Number(e.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name} → {["Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb"][index]}</option>)}</select></label> : <><label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as ThirtyInThirtyFilters["universe"] })}><option value="ALL">All</option><option value="MIDCAP">Nifty Midcap</option><option value="SMALLCAP">Nifty Smallcap</option></select></label><label>Lookback<input className="plain-input" type="number" value={filters.lookbackDays} onChange={(e) => setNumber("lookbackDays", Number(e.target.value))}/></label><label>Window<input className="plain-input" type="number" value={filters.windowDays} onChange={(e) => setNumber("windowDays", Number(e.target.value))}/></label><label>Return %<input className="plain-input" type="number" value={filters.minReturnPct} onChange={(e) => setNumber("minReturnPct", Number(e.target.value))}/></label></>}
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
@@ -2599,11 +2601,13 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label title="Daily StochRSI %D below 21"><input type="checkbox" checked={filters.stoch20Only} onChange={(e) => setFilters({ ...filters, stoch20Only: e.target.checked })}/><span>Stoch20</span></label>
       <label title="Daily StochRSI %D above 80"><input type="checkbox" checked={filters.stoch80Only} onChange={(e) => setFilters({ ...filters, stoch80Only: e.target.checked })}/><span>Stoch80</span></label>
     </div>
+    {seasonal && data && "needsBuild" in data && data.needsBuild && <div className="notice"><AlertTriangle size={18}/><span>No saved watchlists yet. Build them once from existing Seasonality statistics. If those statistics are empty, rebuild them in the Seasonality screen first.</span></div>}
+    {seasonal && data?.generatedAt && <div className="count">Watchlists built {new Date(data.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST · live prices update without rebuilding</div>}
     {data && <>
       <div className="thirty-scoreboard">
         <div><span>Evaluated</span><b>{data.evaluated}</b></div>
         <div><span>Watchlist</span><b>{data.qualified}</b></div>
-        <div><span>{seasonal ? "Window" : "No Move"}</span><b>{seasonal ? data.results[0]?.seasonal_window ?? "—" : data.statusSummary.NO_30D_MOVE ?? 0}</b></div>
+        <div><span>{seasonal ? "Window" : "No Move"}</span><b>{seasonal ? data.results[0]?.seasonal_window ?? "—" : "statusSummary" in data ? data.statusSummary.NO_30D_MOVE ?? 0 : 0}</b></div>
         <div><span>Shown</span><b>{visibleRows.length} / {sortedRows.length}</b></div>
       </div>
       <section className="screenshot-tile-grid">
@@ -3372,10 +3376,9 @@ export default function Home() {
   const [thirtyInThirtyFilters, setThirtyInThirtyFilters] = useState<ThirtyInThirtyFilters>(defaultThirtyInThirtyFilters);
   const [selectedThirtyInThirty, setSelectedThirtyInThirty] = useState<ThirtyInThirtyRow | null>(null);
   const [seasonalMonth, setSeasonalMonth] = useState(new Date().getMonth());
-  const [seasonalStocks, setSeasonalStocks] = useState<SeasonalStocksResponse | null>(null);
+  const [seasonalStocksByMonth, setSeasonalStocksByMonth] = useState<Record<number, SeasonalStocksResponse>>({});
   const [seasonalFilters, setSeasonalFilters] = useState<ThirtyInThirtyFilters>(defaultThirtyInThirtyFilters);
   const [selectedSeasonalStock, setSelectedSeasonalStock] = useState<ThirtyInThirtyRow | null>(null);
-  const [seasonalUpdatedAt, setSeasonalUpdatedAt] = useState<string | null>(null);
   const [stochRsiFilters, setStochRsiFilters] = useState<StochRsiFilters>(defaultStochRsiFilters);
   const [selectedStochRsi, setSelectedStochRsi] = useState<StochRsiRow | null>(null);
   const [basketBacktestFilters, setBasketBacktestFilters] = useState<BasketBacktestFilters>(defaultBasketBacktestFilters);
@@ -3401,7 +3404,8 @@ export default function Home() {
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("seasonal-edge-theme", theme); }, [theme]);
   useEffect(() => { localStorage.setItem("momentum-contraction-filters", JSON.stringify(momentumContractionFilters)); }, [momentumContractionFilters]);
-  useEffect(() => { if (!isAuthenticated) return; if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "Seasonal Stocks") runSeasonalStocks(); if (view === "StochRSI") runStochRsiScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, seasonalMonth, configured, isAuthenticated]);
+  useEffect(() => { if (!isAuthenticated) return; if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "StochRSI") runStochRsiScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured, isAuthenticated]);
+  useEffect(() => { if (isAuthenticated && view === "Seasonal Stocks" && !seasonalStocksByMonth[seasonalMonth]) void runSeasonalStocks(); }, [view, seasonalMonth, isAuthenticated]);
   useEffect(() => {
     if (!isAuthenticated || view !== "Data Status") return;
     let fallbackId: number | undefined;
@@ -3451,7 +3455,8 @@ export default function Home() {
   async function runHourlyBreakoutScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/hourly-breakout-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: hourlyBreakoutFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setHourlyBreakout(d); setHourlyBreakoutUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Hourly Breakout screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runMomentumContractionScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/momentum-contraction-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: momentumContractionFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setMomentumContraction(d); setMomentumContractionUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Momentum Tight scanner unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runThirtyInThirtyScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/thirty-in-thirty-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: thirtyInThirtyFilters }) }); const d = await readJsonResponse<ThirtyInThirtyResponse>(r, "30 in 30 screener unavailable"); setThirtyInThirty(d); setThirtyInThirtyUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "30 in 30 screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
-  async function runSeasonalStocks(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch(`/api/seasonal-stocks?month=${seasonalMonth}`); const d = await readJsonResponse<SeasonalStocksResponse>(r, "Seasonal stocks unavailable"); setSeasonalStocks(d); setSelectedSeasonalStock(null); setSeasonalUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Seasonal stocks unavailable"); } finally { if (!options.silent) setLoading(false); } }
+  async function runSeasonalStocks(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch(`/api/seasonal-stocks?month=${seasonalMonth}`, { cache: "no-store" }); const d = await readJsonResponse<SeasonalStocksResponse>(r, "Seasonal stocks unavailable"); setSeasonalStocksByMonth((current) => ({ ...current, [d.month]: d })); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Seasonal stocks unavailable"); } finally { if (!options.silent) setLoading(false); } }
+  async function buildSeasonalStocks() { setLoading(true); try { const r = await fetch("/api/seasonal-stocks/rebuild", { method: "POST" }); await readJsonResponse(r, "Seasonal watchlist build failed"); const snapshot = await readJsonResponse<SeasonalStocksResponse>(await fetch(`/api/seasonal-stocks?month=${seasonalMonth}`, { cache: "no-store" }), "Seasonal stocks unavailable"); setSeasonalStocksByMonth({ [snapshot.month]: snapshot }); setSelectedSeasonalStock(null); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Seasonal watchlist build failed"); } finally { setLoading(false); } }
   async function runStochRsiScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/stoch-rsi-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: stochRsiFilters }) }); const d = await readJsonResponse<StochRsiResponse>(r, "StochRSI screener unavailable"); setStochRsi(d); setStochRsiUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "StochRSI screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runBasketBacktest() { setLoading(true); try { const r = await fetch("/api/basket-backtest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: basketBacktestFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setBasketBacktest(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Basket backtest unavailable"); } finally { setLoading(false); } }
   async function loadPortfolio() { setLoading(true); setError(""); try { const r = await fetch("/api/portfolio"); const d = await r.json(); if (!r.ok) throw new Error(d.error); setPortfolio(d); if (d.tradeManagement?.settings) setTradingSettings(d.tradeManagement.settings); } catch (e) { setError(e instanceof Error ? e.message : "Portfolio unavailable"); } finally { setLoading(false); } }
@@ -3495,7 +3500,7 @@ export default function Home() {
     {view === "Hourly Breakout" && <HourlyBreakoutScreenerView data={hourlyBreakout} filters={hourlyBreakoutFilters} setFilters={setHourlyBreakoutFilters} loading={loading} onRun={runHourlyBreakoutScreener} onReset={() => setHourlyBreakoutFilters(defaultHourlyBreakoutFilters)} selected={selectedHourlyBreakout} setSelected={setSelectedHourlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={hourlyBreakoutUpdatedAt} />}
     {view === "Momentum Tight" && <MomentumContractionScreenerView data={momentumContraction} filters={momentumContractionFilters} setFilters={setMomentumContractionFilters} loading={loading} onRun={runMomentumContractionScreener} onReset={() => setMomentumContractionFilters(defaultMomentumContractionFilters)} selected={selectedMomentumContraction} setSelected={setSelectedMomentumContraction} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={momentumContractionUpdatedAt} />}
     {view === "30 in 30" && <ThirtyInThirtyScreenerView data={thirtyInThirty} filters={thirtyInThirtyFilters} setFilters={setThirtyInThirtyFilters} loading={loading} onRun={runThirtyInThirtyScreener} onReset={() => setThirtyInThirtyFilters(defaultThirtyInThirtyFilters)} selected={selectedThirtyInThirty} setSelected={setSelectedThirtyInThirty} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={thirtyInThirtyUpdatedAt} settings={tradingSettings} />}
-    {view === "Seasonal Stocks" && <ThirtyInThirtyScreenerView key={`seasonal-${seasonalMonth}`} seasonal month={seasonalMonth} setMonth={(month) => { setSelectedSeasonalStock(null); setSeasonalMonth(month); }} data={seasonalStocks?.month === seasonalMonth ? { ...seasonalStocks, filters: seasonalFilters, statusSummary: {} } : null} filters={seasonalFilters} setFilters={setSeasonalFilters} loading={loading} onRun={runSeasonalStocks} onReset={() => setSeasonalFilters(defaultThirtyInThirtyFilters)} selected={selectedSeasonalStock} setSelected={setSelectedSeasonalStock} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={seasonalUpdatedAt} settings={tradingSettings} />}
+    {view === "Seasonal Stocks" && <ThirtyInThirtyScreenerView seasonal month={seasonalMonth} setMonth={(month) => { setSelectedSeasonalStock(null); setSeasonalMonth(month); }} data={seasonalStocksByMonth[seasonalMonth] ?? null} filters={seasonalFilters} setFilters={setSeasonalFilters} loading={loading} onRun={runSeasonalStocks} onBuild={buildSeasonalStocks} onReset={() => setSeasonalFilters(defaultThirtyInThirtyFilters)} selected={selectedSeasonalStock} setSelected={setSelectedSeasonalStock} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={seasonalStocksByMonth[seasonalMonth]?.generatedAt} settings={tradingSettings} />}
     {view === "StochRSI" && <StochRsiScreenerView data={stochRsi} filters={stochRsiFilters} setFilters={setStochRsiFilters} loading={loading} onRun={runStochRsiScreener} onReset={() => setStochRsiFilters(defaultStochRsiFilters)} selected={selectedStochRsi} setSelected={setSelectedStochRsi} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={stochRsiUpdatedAt} settings={tradingSettings} />}
     {view === "Backtest" && <BasketBacktestView filters={basketBacktestFilters} setFilters={setBasketBacktestFilters} data={basketBacktest} loading={loading} onRun={runBasketBacktest} />}
     {view === "Stock Search" && <><section className="search-card"><div className="search-copy"><p className="eyebrow">01 / Research a security</p><h2>Find an Indian equity</h2><p>Search the Dhan security master by symbol or company name.</p></div><div className="search-area"><form onSubmit={(e) => { e.preventDefault(); runSearch(); }}><div className="search-row"><div className="search-input"><Search size={18} /><input placeholder="Search RELIANCE, TCS, INFY…" value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>Enter</kbd></div><button className="primary search-button" type="submit" disabled={loading}>{loading ? "Searching…" : "Search"}</button></div></form>{results.length > 0 && <div className="results">{results.map((s) => <button key={`${s.securityId}-${s.segment}`} onClick={() => { setSecurity(s); setQuery(""); setResults([]); setAnalysis(null); }}><div><b>{s.symbol}</b><span>{s.name}</span></div><small>{s.exchange} · {s.securityId}</small></button>)}</div>}<div className="search-hint"><Database size={14} /><span>Security IDs are resolved from Dhan’s master—not ticker text alone.</span></div></div></section>{!configured && <section className="setup"><div className="setup-icon"><ShieldCheck size={25} /></div><div><p className="eyebrow">Secure data connection</p><h2>Connect your Dhan account to begin</h2><p>Market data and calculated statistics remain empty until server-side Dhan credentials are configured.</p></div><code>DHAN_CLIENT_ID= · DHAN_ACCESS_TOKEN=</code></section>}{!security && <section className="empty"><div className="empty-art"><CalendarDays size={30} /></div><p className="eyebrow">Awaiting a selection</p><h2>Start with a security search</h2><p>Select an equity to load its daily OHLCV history and derive seasonality statistics.</p></section>}{security && <><section className="stock-header"><div><div className="ticker-row"><span className="ticker">{security.symbol}</span><span className="exchange">{security.exchange}</span></div><h2>{security.name}</h2><p>Security ID {security.securityId} · Daily OHLCV · {analysis ? `${analysis.candles.length} trading sessions` : "Not loaded"}</p></div><button className="primary" onClick={() => analyze()} disabled={loading || !configured}>{loading ? <><RefreshCw size={16} className="spin" /> Calculating…</> : <><BarChart3 size={16} /> Load seasonality</>}</button></section>{analysis && <><section className="stats-grid"><Stat label="Current close" value={latest ? money(latest.close) : "—"} sub={latest?.date} /><Stat label="History available" value={`${new Set(analysis.candles.map((c) => c.date.slice(0, 4))).size} years`} sub="Complete years used" /><Stat label="Data through" value={latest?.date || "—"} sub="Cached locally" /><Stat label="Method" value="Daily OHLCV" sub="Adjusted data must be verified" /></section></>}</>}</>}
