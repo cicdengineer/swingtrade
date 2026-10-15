@@ -67,7 +67,7 @@ type MomentumContractionFilters = { universe: "ALL" | UniverseName; setupType: "
 type MomentumContractionRow = { status: MomentumSetupType | "BELOW_EMA" | "NO_MOMENTUM" | "NOT_TIGHT" | "VOLUME_NOT_DRY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; setupType: MomentumSetupType; setupScore: number; current_date: string; current_close: number; ema50: number; emaSlope: number; distance_from_ema_pct: number; priorMovePct: number; momentumRelativeVolume: number; atr14: number; rangeCompression: number; currentVolume: number; volumeSMA20: number; volumeSMA50: number; relativeVolume: number; volumePercentile: number; lowestVolume10: boolean; lowestVolume20: boolean; avgVolume5: number; avgVolume20: number; volumeContractionRatio: number; trendStructure: "HIGHER_HIGH_LOW" | "RISING" | "SIDEWAYS" | "WEAK"; averageDailyTradedValue: number; reason: string; diagnostics: { pass: boolean; label: string }[]; recent: DailyChartPoint[] };
 type MomentumContractionResponse = { filters: MomentumContractionFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: MomentumContractionRow[]; generatedAt: string };
 type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; threeRedCandleOnly: boolean; stoch20Only: boolean; stoch80Only: boolean; showAll: boolean };
-type ThirtyInThirtySortKey = "best_return" | "seasonal_avg" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "swing_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent";
+type ThirtyInThirtySortKey = "best_return" | "seasonal_avg" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "swing_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent" | "falling_trend";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; daily_stoch_d?: number; averageDailyTradedValue: number; reason: string; recent: Array<DailyChartPoint & { daily_stoch_d?: number }>; seasonal_avg_return?: number; seasonal_observations?: number; seasonal_window?: string };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
 type SeasonalStocksResponse = { month: number; window: WindowDef; evaluated: number; qualified: number; results: ThirtyInThirtyRow[]; generatedAt: string; needsBuild?: boolean };
@@ -416,6 +416,21 @@ function BrandLogo({ compact = false }: { compact?: boolean }) {
 }
 
 const lastTradingMonths = <T extends DailyChartPoint>(rows: T[], sessions = 63) => rows.slice(-sessions);
+const fallingTrendScore = (rows: DailyChartPoint[], sessions: number): number => {
+  const closes = lastTradingMonths(rows, sessions).map((point) => point.close);
+  if (closes.length < 10 || closes.some((close) => !Number.isFinite(close) || close <= 0)) return -Infinity;
+  const midpoint = (closes.length - 1) / 2;
+  const meanLogClose = closes.reduce((sum, close) => sum + Math.log(close), 0) / closes.length;
+  let covariance = 0;
+  let variance = 0;
+  closes.forEach((close, index) => {
+    const day = index - midpoint;
+    covariance += day * (Math.log(close) - meanLogClose);
+    variance += day * day;
+  });
+  // A larger positive score means a steeper sustained fall across the displayed chart.
+  return -(covariance / variance) * (closes.length - 1) * 100;
+};
 const scaleValue = (value: number, min: number, max: number, height: number, pad = 3) => {
   const range = max - min || 1;
   return pad + ((max - value) / range) * (height - pad * 2);
@@ -2295,7 +2310,7 @@ function ThirtyInThirtyTileChart({ row, chartMonths, onOpen }: { row: ThirtyInTh
   const chartRows = lastTradingMonths(row.recent, chartMonths === 6 ? 126 : 63);
   const closes = chartRows.map((point) => point.close);
   const trendUp = closes.length > 1 && closes.at(-1)! >= closes[0];
-  return <span className="thirty-in-thirty-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="img" aria-label={`${row.symbol} last 3 months line chart`}>
+  return <span className="thirty-in-thirty-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="img" aria-label={`${row.symbol} last ${chartMonths} months line chart`}>
     <svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true">
       <path className="spark-area" d={`${polylinePath(closes, 220, 82)} L220 82 L0 82 Z`} />
       <path className={trendUp ? "spark-line up" : "spark-line down"} d={polylinePath(closes, 220, 82)} />
@@ -2502,6 +2517,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       if (sort.key === "demand_supply") return row.demand_supply_score;
       if (sort.key === "volume_dryness") return -row.lowest_volume_5d_vs_20d;
       if (sort.key === "recent") return -row.days_since_best_move;
+      if (sort.key === "falling_trend") return fallingTrendScore(row.recent, chartMonths === 6 ? 126 : 63);
       return row.best_return_pct;
     };
     return [...rows].sort((a, b) => {
@@ -2510,7 +2526,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
       return sort.direction === "asc" ? comparison : -comparison;
     });
-  }, [liveTicks, sort]);
+  }, [chartMonths, liveTicks, sort]);
   const sortedRows = useMemo(() => sortRows(liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]))), [liveRows, liveTicks, filters, sortRows]);
   const pinnedRows = useMemo(() => sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)))), [liveRows, pinnedIds, filters.threeRedCandleOnly, sortRows]);
   const visibleRows = useMemo(() => {
@@ -2577,7 +2593,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
-      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{seasonal && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Today Live Gain</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
+      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{seasonal && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Today Live Gain</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="falling_trend">Falling Trend {chartMonths}M</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
       <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
     </div>
     <div className="thirty-in-thirty-switches">
