@@ -14,7 +14,7 @@
     "test:stoch-rsi": "node scripts/stoch-rsi-screener-tests.mjs",
     "test:trade-management": "node scripts/trade-management-tests.mjs",
     "test:market-data": "node scripts/market-data-refresh-tests.mjs",
-    "test:ema-high-hold": "node scripts/ema-high-hold-tests.mjs"
+    "test:ema-no-touch": "node scripts/ema-no-touch-tests.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
