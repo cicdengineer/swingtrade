@@ -115,6 +115,7 @@ nav button.active, :root[data-theme="light"] nav button.active { background: var
   color: var(--text);
 }
 .icon-button:hover, .secondary:hover { border-color: var(--gold); background: var(--panel-raised); }
+.falling-trend-sort[aria-pressed="true"] { background: var(--soft-green); border-color: var(--green); color: var(--text); }
 .user { background: var(--soft-green); color: var(--text); border-color: var(--line); }
 .primary { background: var(--green); color: #092116; border-radius: 8px; }
 .primary:hover:not(:disabled) { filter: brightness(1.08); }
