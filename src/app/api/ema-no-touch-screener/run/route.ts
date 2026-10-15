@@ -8,6 +8,6 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     return NextResponse.json(await runEmaNoTouchScreener(body.filters ?? body));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "10 EMA No Touch screener failed" }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "10 EMA Catchup screener failed" }, { status: 500 });
   }
 }
