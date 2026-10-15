@@ -194,6 +194,69 @@ td, :root[data-theme="light"] td { border-color: var(--line); color: var(--text)
 .stoch-line { stroke: #5588bf; }
 .outside-volume { border-color: var(--line); }
 
+/* Scanner cards sit on the workspace canvas in both themes. */
+.screenshot-tile,
+:root[data-theme="dark"] .screenshot-tile,
+.screenshot-tile.strong-start,
+:root[data-theme="dark"] .screenshot-tile.strong-start {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--line);
+  border-radius: 9px;
+}
+.screenshot-tile:hover,
+:root[data-theme="dark"] .screenshot-tile:hover {
+  background: var(--panel-raised);
+  border-color: var(--green);
+  box-shadow: 0 5px 18px #06180b16;
+}
+.screenshot-tile small,
+:root[data-theme="dark"] .screenshot-tile small { color: var(--muted); }
+.screenshot-tile.pinned { border-color: var(--gold); }
+.screenshot-tile.breaking-pdh { border-color: var(--green); }
+.thirty-in-thirty-chart,
+:root[data-theme="dark"] .thirty-in-thirty-chart,
+.momentum-tile-chart,
+:root[data-theme="light"] .momentum-tile-chart {
+  background: color-mix(in srgb, var(--bg) 86%, var(--green));
+  border-radius: 5px;
+}
+.tile-badges i, .pin-toggle,
+:root[data-theme="dark"] .tile-badges i,
+:root[data-theme="dark"] .pin-toggle {
+  background: var(--panel);
+  color: var(--muted);
+  border-color: var(--line);
+}
+.tile-badges i { color: var(--green); }
+.tile-today-return.positive { color: var(--green); }
+.tile-today-return.negative { color: var(--red); }
+
+@media (min-width: 851px) {
+  aside nav { gap: 8px; padding-bottom: 12px; }
+  aside nav button,
+  :root[data-theme="light"] aside nav button {
+    background: var(--panel);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 13px;
+    transition: background .15s ease, border-color .15s ease, color .15s ease;
+  }
+  aside nav button:hover,
+  :root[data-theme="light"] aside nav button:hover {
+    background: var(--panel-raised);
+    border-color: var(--gold);
+    color: var(--text);
+  }
+  aside nav button.active,
+  :root[data-theme="light"] aside nav button.active {
+    background: var(--soft-green);
+    border-color: var(--green);
+    color: var(--text);
+  }
+}
+
 .positive, :root[data-theme="light"] .positive, :root[data-theme="light"] td.positive { color: var(--green); }
 .negative, :root[data-theme="light"] .negative, :root[data-theme="light"] td.negative { color: var(--red); }
 .notice, :root[data-theme="light"] .notice { background: var(--panel-raised); border-color: var(--gold); color: var(--text); border-radius: 8px; }
