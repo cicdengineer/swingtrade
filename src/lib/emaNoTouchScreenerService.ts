@@ -3,26 +3,25 @@ import type { DailyPriceRecord, UniverseName } from "./types";
 import { readDatabase } from "./localDatabase";
 import { findEmaNoTouch } from "./emaNoTouchLogic";
 
-export type EmaNoTouchFilters = { universe: UniverseName | "ALL"; minAverageDailyTradedValue: number; maxSignalAgeSessions: number };
-export const defaultEmaNoTouchFilters: EmaNoTouchFilters = { universe: "ALL", minAverageDailyTradedValue: 0, maxSignalAgeSessions: 20 };
+export type EmaNoTouchFilters = { universe: UniverseName | "ALL"; minAverageDailyTradedValue: number };
+export const defaultEmaNoTouchFilters: EmaNoTouchFilters = { universe: "ALL", minAverageDailyTradedValue: 0 };
 
 export function analyzeEmaNoTouchStock(input: { securityId: string; symbol: string; companyName: string; universeName: UniverseName; prices: DailyPriceRecord[]; filters: EmaNoTouchFilters }) {
-  const setup = findEmaNoTouch(input.prices, input.filters.maxSignalAgeSessions);
+  const setup = findEmaNoTouch(input.prices);
   if (!setup) return null;
-  const { anchor, anchorEma10, current, currentEma10, recent } = setup;
+  const { anchor, anchorEma10, recent } = setup;
   const valueRows = recent.slice(-20);
   const averageDailyTradedValue = valueRows.reduce((sum, row) => sum + row.close * row.volume, 0) / valueRows.length;
   if (averageDailyTradedValue < input.filters.minAverageDailyTradedValue) return null;
   return {
     security_id: input.securityId, symbol: input.symbol, company_name: input.companyName,
-    universe_name: input.universeName, current_date: current.trade_date, current_close: current.close,
-    ema10: currentEma10, distance_from_10ema_pct: (current.close / currentEma10 - 1) * 100,
+    universe_name: input.universeName, current_date: anchor.trade_date, current_close: anchor.close,
+    ema10: anchorEma10, distance_from_10ema_pct: (anchor.close / anchorEma10 - 1) * 100,
     signal_date: anchor.trade_date, entry_high: anchor.high, stop_loss: anchorEma10,
     risk_pct: (anchor.high / anchorEma10 - 1) * 100,
-    distance_to_entry_pct: (current.close / anchor.high - 1) * 100,
-    signal_age_sessions: setup.signalAgeSessions, triggered: setup.triggered,
+    distance_to_entry_pct: (anchor.close / anchor.high - 1) * 100,
     averageDailyTradedValue,
-    reason: `${anchor.trade_date} low ${anchor.low.toFixed(2)} stayed above its 10 EMA ${anchorEma10.toFixed(2)}. Entry above ${anchor.high.toFixed(2)}; stop loss at that candle's 10 EMA. The level remains active until a completed candle closes below its 10 EMA.`,
+    reason: `Latest completed candle (${anchor.trade_date}) low ${anchor.low.toFixed(2)} stayed above its 10 EMA ${anchorEma10.toFixed(2)}. Watch for a later session to trade above ${anchor.high.toFixed(2)}; stop loss is ${anchorEma10.toFixed(2)}.`,
     recent,
   };
 }
@@ -42,7 +41,7 @@ async function calculate(filters: EmaNoTouchFilters) {
     const row = analyzeEmaNoTouchStock({ securityId: member.security_id, symbol: member.symbol, companyName: member.company_name,
       universeName: member.universe_name, prices: pricesBySecurity.get(member.security_id) ?? [], filters });
     return row ? [row] : [];
-  }).sort((a, b) => Number(b.triggered) - Number(a.triggered) || b.distance_to_entry_pct - a.distance_to_entry_pct);
+  }).sort((a, b) => b.distance_to_entry_pct - a.distance_to_entry_pct);
   return { filters, evaluated: seen.size, qualified: results.length, results, generatedAt: new Date().toISOString() };
 }
 
