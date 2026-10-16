@@ -33,7 +33,7 @@ import { fallingTrendScore, matchesCleanTrend } from "@/lib/cleanTrend";
 import { ABNORMAL_VOLUME_RATIO, RECENT_VOLUME_SESSIONS, VOLUME_BASELINE_SESSIONS, summarizeRecentVolume } from "@/lib/recentVolume";
 import QullamaggieView from "./QullamaggieView";
 
-type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings";
+type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings";
 type DataSummary = { universe_name: UniverseName; total_constituents: number; mapped: number; stocks_downloaded: number; stocks_pending: number; stocks_failed: number; earliest_data_date: string | null; latest_data_date: string | null; total_ohlcv_rows: number; last_refresh: string | null; historical_sessions: number; latest_official?: number; latest_provisional?: number };
 type DataDownloadJob = { id?: string; status: string; total: number; completed: number; remaining: number; successful: number; failed: number; current_stock?: string; current_status?: string; progress: number; started_at?: string; finished_at?: string; last_successful_update?: string; data_through_date?: string; notice?: string; pending_eod_count?: number; trading_date?: string; historical_candles_backfilled?: number; official_candles_updated?: number; provisional_candles_created?: number; provisional_candles_reconciled?: number; already_up_to_date?: number; errors: string[] };
 type DataStatus = { dhan_connected: boolean; dhan_profile?: { ok: boolean; dhanClientId?: string; tokenValidity?: string; activeSegment?: string; dataPlan?: string; dataValidity?: string; error?: string }; database_size_bytes: number; price_adjustment_status: string; latest_market_data: null | { trading_date: string; official: number; provisional: number; data_status: string }; latest_job: null | DataDownloadJob; summaries: DataSummary[]; failures: { symbol: string; security_id: string; error_message: string; attempt_count: number; last_attempt: string }[]; quality_issues: unknown[]; universe_sources: Record<string, { label: string; url: string }> };
@@ -79,6 +79,9 @@ type EmaNoTouchFilters = { universe: "ALL" | UniverseName; minAverageDailyTraded
 type EmaNoTouchRow = { security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; swing_low_date: string; stop_loss: number; risk_pct: number; prior_advance_pct: number; ema_slope_pct: number; catchup_pct: number; base_range_pct: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
 type EmaNoTouchResponse = { filters: EmaNoTouchFilters; evaluated: number; qualified: number; results: EmaNoTouchRow[]; generatedAt: string };
 type SeasonalStocksResponse = { month: number; window: WindowDef; evaluated: number; qualified: number; results: ThirtyInThirtyRow[]; generatedAt: string; needsBuild?: boolean };
+type ScreenerSource = "30 in 30" | "Qullamaggie" | "10 EMA Catchup" | "StochRSI" | "Seasonal Stocks";
+type ScreenerMembership = Record<string, ScreenerSource[]>;
+const screenerSources: ScreenerSource[] = ["30 in 30", "Qullamaggie", "10 EMA Catchup", "StochRSI", "Seasonal Stocks"];
 type StochRsiFilters = { universe: "ALL" | UniverseName; rsiLength: number; stochLength: number; smoothK: number; smoothD: number; upperThreshold: number; lowerThreshold: number; minWeeklyCandles: number; showAll: boolean };
 type StochRsiSortKey = "entry" | "symbol" | "setup" | "daily_d" | "weekly_d" | "signal_high" | "distance_signal" | "lowest" | "swing_low_pct" | "today_return" | "falling_trend";
 type StochRsiRecentPoint = DailyChartPoint & { daily_stoch_d?: number; weekly_stoch_d?: number; setup_type?: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal?: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; new_lowest_candle?: boolean; lowest_price_in_zone?: number };
@@ -124,6 +127,7 @@ const nav: { name: View; icon: typeof Activity }[] = [
   { name: "Data Status", icon: Database },
   { name: "Seasonality", icon: CalendarDays },
   { name: "30 in 30", icon: TrendingUp },
+  { name: "Screener", icon: SlidersHorizontal },
   { name: "Qullamaggie", icon: TrendingUp },
   { name: "10 EMA Catchup", icon: TrendingUp },
   { name: "Seasonal Stocks", icon: CalendarDays },
@@ -2553,7 +2557,65 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
   </div>;
 }
 
-function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings, seasonal, month, setMonth, onBuild, onOpenSeasonality }: { data: ThirtyInThirtyResponse | SeasonalStocksResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: (row: ThirtyInThirtyRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null; seasonal?: boolean; month?: number; setMonth?: (month: number) => void; onBuild?: () => void; onOpenSeasonality?: () => void }) {
+function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedStatus }: { settings?: TradingSettings | null; emaFilters: EmaNoTouchFilters; stochFilters: StochRsiFilters; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void }) {
+  const [filters, setFilters] = useState<ThirtyInThirtyFilters>(defaultThirtyInThirtyFilters);
+  const [source, setSource] = useState<ScreenerSource | "All watchlists">("All watchlists");
+  const [month, setMonth] = useState(new Date().getMonth());
+  const [data, setData] = useState<ThirtyInThirtyResponse | null>(null);
+  const [membership, setMembership] = useState<ScreenerMembership>({});
+  const [selected, setSelected] = useState<ThirtyInThirtyRow | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [sourceErrors, setSourceErrors] = useState<string[]>([]);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const run = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    const post = async <T,>(url: string, body: unknown): Promise<T> => readJsonResponse<T>(await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), `${url} unavailable`);
+    const getSeasonal = async (): Promise<SeasonalStocksResponse> => readJsonResponse<SeasonalStocksResponse>(await fetch(`/api/seasonal-stocks?month=${month}`, { cache: "no-store" }), "Seasonal Stocks unavailable");
+    let savedQFilters: Record<string, unknown> = {};
+    try { savedQFilters = JSON.parse(localStorage.getItem("qullamaggie-filters") ?? "{}"); } catch {}
+    try {
+      const results = await Promise.allSettled([
+        post<ThirtyInThirtyResponse>("/api/thirty-in-thirty-screener/run", { filters: { ...filters, showAll: true } }),
+        post<{ results: QRow[] }>("/api/qullamaggie-screener", { filters: { ...savedQFilters, universe: filters.universe } }),
+        post<EmaNoTouchResponse>("/api/ema-no-touch-screener/run", { filters: { ...emaFilters, universe: filters.universe } }),
+        post<StochRsiResponse>("/api/stoch-rsi-screener/run", { filters: { ...stochFilters, universe: filters.universe } }),
+        getSeasonal(),
+      ] as const);
+      const issues = results.flatMap((result, index) => result.status === "rejected" ? [`${screenerSources[index]}: ${result.reason instanceof Error ? result.reason.message : "unavailable"}`] : []);
+      const thirty = results[0].status === "fulfilled" ? results[0].value : null;
+      if (!thirty) throw new Error(issues[0] ?? "30 in 30 chart data unavailable");
+      const seasonal = results[4].status === "fulfilled" ? results[4].value : null;
+      if (seasonal?.needsBuild) issues.push("Seasonal Stocks: saved watchlists need to be built");
+      const members: ScreenerMembership = {};
+      const add = (id: string, name: ScreenerSource) => { if (!members[id]) members[id] = []; if (!members[id].includes(name)) members[id].push(name); };
+      thirty.results.filter(row => row.qualifies).forEach(row => add(row.security_id, "30 in 30"));
+      if (results[1].status === "fulfilled") results[1].value.results.filter(row => row.qualifies).forEach(row => add(row.security_id, "Qullamaggie"));
+      if (results[2].status === "fulfilled") results[2].value.results.forEach(row => add(row.security_id, "10 EMA Catchup"));
+      if (results[3].status === "fulfilled") results[3].value.results.filter(row => row.qualifies).forEach(row => add(row.security_id, "StochRSI"));
+      seasonal?.results.filter(row => filters.universe === "ALL" || row.universe_name === filters.universe).forEach(row => add(row.security_id, "Seasonal Stocks"));
+      const seasonalRows = new Map(seasonal?.results.map(row => [row.security_id, row]) ?? []);
+      const allRows = new Map(thirty.results.map(row => [row.security_id, { ...row, ...seasonalRows.has(row.security_id) ? { seasonal_avg_return: seasonalRows.get(row.security_id)!.seasonal_avg_return, seasonal_observations: seasonalRows.get(row.security_id)!.seasonal_observations, seasonal_window: seasonalRows.get(row.security_id)!.seasonal_window } : {} }]));
+      seasonal?.results.forEach(row => { if (!allRows.has(row.security_id)) allRows.set(row.security_id, row); });
+      const missing = Object.keys(members).filter(id => !allRows.has(id)).length;
+      if (missing) issues.push(`${missing} matching stocks have no 30 in 30 chart history`);
+      setData({ ...thirty, results: [...allRows.values()].filter(row => members[row.security_id]?.length), qualified: Object.keys(members).length });
+      setMembership(members);
+      setSourceErrors(issues);
+      setUpdatedAt(new Date().toISOString());
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Screener unavailable"); }
+    finally { setLoading(false); }
+  }, [filters, month, emaFilters, stochFilters]);
+  useEffect(() => { void run(); }, [month]);
+  return <>
+    {error && <div className="error">{error}</div>}
+    {sourceErrors.length > 0 && <div className="notice"><AlertTriangle size={18}/><span>{sourceErrors.join(" · ")}</span></div>}
+    <ThirtyInThirtyScreenerView combined data={data} membership={membership} source={source} setSource={setSource} month={month} setMonth={setMonth} filters={filters} setFilters={setFilters} loading={loading} onRun={run} onReset={() => { setFilters(defaultThirtyInThirtyFilters); setSource("All watchlists"); setMonth(new Date().getMonth()); }} selected={selected} setSelected={setSelected} setLiveFeedStatus={setLiveFeedStatus} updatedAt={updatedAt} settings={settings} />
+  </>;
+}
+
+function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings, seasonal, month, setMonth, onBuild, onOpenSeasonality, combined, membership = {}, source = "All watchlists", setSource }: { data: ThirtyInThirtyResponse | SeasonalStocksResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: (row: ThirtyInThirtyRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null; seasonal?: boolean; month?: number; setMonth?: (month: number) => void; onBuild?: () => void; onOpenSeasonality?: () => void; combined?: boolean; membership?: ScreenerMembership; source?: ScreenerSource | "All watchlists"; setSource?: (source: ScreenerSource | "All watchlists") => void }) {
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: seasonal ? "seasonal_avg" : "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [cleanTrendOnly, setCleanTrendOnly] = useState(false);
@@ -2597,17 +2659,17 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const qResistance = (securityId: string) => { const value = qWatchlist?.stocks.find(stock => stock.securityId === securityId)?.resistance; return value === undefined ? "—" : money(value); };
   const setNumber = (key: keyof ThirtyInThirtyFilters, value: number) => setFilters({ ...filters, [key]: value });
   const liveRows = useMemo(() => {
-    const rows = (activeData?.results ?? []).filter(row => !qMode || qIdSet.has(row.security_id));
+    const rows = (activeData?.results ?? []).filter(row => combined ? (source === "All watchlists" ? Boolean(membership[row.security_id]?.length) : membership[row.security_id]?.includes(source)) : !qMode || qIdSet.has(row.security_id));
     const uniqueRows = qMode ? [...new Map(rows.map(row => [row.security_id, row])).values()] : rows;
     return uniqueRows.map(row => liveAdjustedThirtyInThirty(row, liveTicks[row.security_id]));
-  }, [activeData, liveTicks, qMode, qIdSet]);
+  }, [activeData, liveTicks, qMode, qIdSet, combined, source, membership]);
   useEffect(() => {
     if (!selected) return;
     const replacement = liveRows.find((row) => row.security_id === selected.security_id);
     if (replacement && replacement !== selected) setSelected(replacement);
   }, [liveRows, selected, setSelected]);
   useEffect(() => {
-    const rows = (activeData?.results ?? []).filter(row => !qMode || qIdSet.has(row.security_id));
+    const rows = (activeData?.results ?? []).filter(row => combined ? (source === "All watchlists" ? Boolean(membership[row.security_id]?.length) : membership[row.security_id]?.includes(source)) : !qMode || qIdSet.has(row.security_id));
     if (!rows.length) {
       setLiveTicks({});
       setLiveFeedStatus("idle");
@@ -2660,7 +2722,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       controller.abort();
       setLiveFeedStatus("idle");
     };
-  }, [activeData, setLiveFeedStatus, tileLimit, seasonal, qMode, qIdSet]);
+  }, [activeData, setLiveFeedStatus, tileLimit, seasonal, qMode, qIdSet, combined, source, membership]);
   const sortRows = useCallback((rows: ThirtyInThirtyRow[]) => {
     const valueFor = (row: ThirtyInThirtyRow): string | number => {
       if (sort.key === "symbol") return row.symbol;
@@ -2739,24 +2801,24 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   return <section className="research-page thirty-in-thirty-page thirty-in-thirty-screener-page">
     <div className="thirty-hero thirty-in-thirty-hero">
       <div>
-        <p className="eyebrow">{qMode ? "Qullamaggie watchlist" : seasonal ? "Seasonal Stocks" : "30 in 30 Screener"}</p>
-        <h2>{qMode ? "Resistance setups in 30 in 30" : seasonal ? "3-month seasonal watchlist" : "30% moves in any 30 sessions"}</h2>
-        <small>{qMode ? "The stocks with confirmed Qullamaggie resistance, shown with 30 in 30 charts and sizing. Their inclusion does not mean they passed the 30 in 30 scan." : seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
+        <p className="eyebrow">{combined ? "Screener" : qMode ? "Qullamaggie watchlist" : seasonal ? "Seasonal Stocks" : "30 in 30 Screener"}</p>
+        <h2>{combined ? "All entry watchlists in one view" : qMode ? "Resistance setups in 30 in 30" : seasonal ? "3-month seasonal watchlist" : "30% moves in any 30 sessions"}</h2>
+        <small>{combined ? "30 in 30, Qullamaggie, 10 EMA Catchup, StochRSI and the current seasonal watchlist. One tile per stock, with common chart, sizing, filters and sorting." : qMode ? "The stocks with confirmed Qullamaggie resistance, shown with 30 in 30 charts and sizing. Their inclusion does not mean they passed the 30 in 30 scan." : seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
       </div>
       <div className="thirty-hero-actions">
         <div className="refresh-status"><span className={Object.keys(liveTicks).length ? "ready" : "pending"} /><b>{Object.keys(liveTicks).length ? "Live prices" : "Last run"}</b><small>{Object.keys(liveTicks).length ? `${Object.keys(liveTicks).length} ticking` : formatTime(updatedAt)}</small></div>
-        <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
+        <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{combined ? loading ? "Scanning…" : "Refresh All" : qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button>}
         <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
       </div>
     </div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
-      {!seasonal && <label>Watchlist<select value={watchlistMode} onChange={event => { setSelected(null); setWatchlistMode(event.target.value as "thirty" | "qullamaggie"); }}><option value="thirty">30 in 30 results</option><option value="qullamaggie">Qullamaggie resistance</option></select></label>}
+      {combined ? <><label>Watchlist<select value={source} onChange={event => { setSelected(null); setSource?.(event.target.value as ScreenerSource | "All watchlists"); }}><option value="All watchlists">All watchlists</option>{screenerSources.map(name => <option key={name} value={name}>{name}</option>)}</select></label><label>Seasonal Month<select value={month} onChange={event => setMonth?.(Number(event.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name}</option>)}</select></label></> : !seasonal && <label>Watchlist<select value={watchlistMode} onChange={event => { setSelected(null); setWatchlistMode(event.target.value as "thirty" | "qullamaggie"); }}><option value="thirty">30 in 30 results</option><option value="qullamaggie">Qullamaggie resistance</option></select></label>}
       {seasonal ? <label>Universe · Month<select value={month} disabled={loading} onChange={(e) => setMonth?.(Number(e.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name} → {["Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb"][index]}</option>)}</select></label> : <><label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as ThirtyInThirtyFilters["universe"] })}><option value="ALL">All</option><option value="MIDCAP">Nifty Midcap</option><option value="SMALLCAP">Nifty Smallcap</option></select></label><label>Lookback<input className="plain-input" type="number" value={filters.lookbackDays} onChange={(e) => setNumber("lookbackDays", Number(e.target.value))}/></label><label>Window<input className="plain-input" type="number" value={filters.windowDays} onChange={(e) => setNumber("windowDays", Number(e.target.value))}/></label><label>Return %<input className="plain-input" type="number" value={filters.minReturnPct} onChange={(e) => setNumber("minReturnPct", Number(e.target.value))}/></label></>}
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
-      <div className="thirty-sort-control"><label htmlFor="thirty-sort">Sort</label><div><select id="thirty-sort" value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{seasonal && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Today Live Gain</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="falling_trend">Falling Trend {chartMonths}M</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select><button className="secondary compact" aria-label={`Sort ${sort.direction === "asc" ? "ascending" : "descending"}; change direction`} title="Change sort direction" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button></div></div>
+      <div className="thirty-sort-control"><label htmlFor="thirty-sort">Sort</label><div><select id="thirty-sort" value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{(seasonal || combined) && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Today Live Gain</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="falling_trend">Falling Trend {chartMonths}M</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select><button className="secondary compact" aria-label={`Sort ${sort.direction === "asc" ? "ascending" : "descending"}; change direction`} title="Change sort direction" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button></div></div>
     </div>
     {!qMode && <div className="thirty-in-thirty-switches">
       {!seasonal && <label title={`Show clean up and down trends on the selected ${chartMonths}M chart`}><input type="checkbox" checked={cleanTrendOnly} onChange={(e) => setCleanTrendOnly(e.target.checked)}/><span>Clean {chartMonths}M Trend</span></label>}
@@ -2786,8 +2848,8 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     {activeData && <>
       <div className="thirty-scoreboard">
         <div><span>Evaluated</span><b>{qMode ? qWatchlist?.stocks.length ?? 0 : activeData.evaluated}</b></div>
-        <div><span>Watchlist</span><b>{qMode ? liveRows.length : activeData.qualified}</b></div>
-        <div><span>{qMode ? "Source" : seasonal ? "Window" : "No Move"}</span><b>{qMode ? "Qullamaggie" : seasonal ? activeData.results[0]?.seasonal_window ?? "—" : "statusSummary" in activeData ? activeData.statusSummary.NO_30D_MOVE ?? 0 : 0}</b></div>
+        <div><span>Watchlist</span><b>{combined ? liveRows.length : qMode ? liveRows.length : activeData.qualified}</b></div>
+        <div><span>{combined ? "Sources" : qMode ? "Source" : seasonal ? "Window" : "No Move"}</span><b>{combined ? source === "All watchlists" ? screenerSources.length : 1 : qMode ? "Qullamaggie" : seasonal ? activeData.results[0]?.seasonal_window ?? "—" : "statusSummary" in activeData ? activeData.statusSummary.NO_30D_MOVE ?? 0 : 0}</b></div>
         <div><span>Shown</span><b>{visibleRows.length} / {sortedRows.length}</b></div>
       </div>
       <section className="screenshot-tile-grid">
@@ -2796,10 +2858,11 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
           const pinned = pinnedIds.includes(row.security_id);
           const strongStart = isStrongStart(row, liveTicks[row.security_id]);
           const nearPdh = isBreakingPreviousDayHigh(row);
-          return <div key={row.security_id} className={`screenshot-tile ${!seasonal && !qMode ? "thirty-result-tile" : ""} ${seasonal ? "seasonal-tile" : ""} ${pinned ? "pinned" : ""} ${strongStart ? "strong-start" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={qMode ? `Qullamaggie resistance ${qResistance(row.security_id)}` : seasonal ? `${row.seasonal_window}: ${row.seasonal_avg_return?.toFixed(1)}% average over ${row.seasonal_observations} years` : `${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
+          return <div key={row.security_id} className={`screenshot-tile ${!seasonal && !qMode ? "thirty-result-tile" : ""} ${combined ? "combined-result-tile" : ""} ${seasonal ? "seasonal-tile" : ""} ${pinned ? "pinned" : ""} ${strongStart ? "strong-start" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={combined ? membership[row.security_id]?.join(", ") : qMode ? `Qullamaggie resistance ${qResistance(row.security_id)}` : seasonal ? `${row.seasonal_window}: ${row.seasonal_avg_return?.toFixed(1)}% average over ${row.seasonal_observations} years` : `${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
             {!seasonal && !qMode ? <>
               <div className="thirty-result-top"><b>{row.symbol}</b><span className="tile-badges">{strongStart && <i>SS</i>}{nearPdh && <i className="pdh-badge">PDH</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span></div>
               <div className="thirty-result-sub"><small>{row.company_name}</small></div>
+              {combined && <div className="screener-source-tags">{membership[row.security_id]?.map(name => <span key={name}>{name}</span>)}</div>}
               <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} showEma10={showTileEma10} onOpen={() => setSelected(row)} />
             </> : <>
               <span className="tile-badges">{strongStart && <i>SS</i>}{nearPdh && <i className="pdh-badge">PDH</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span>
@@ -2816,7 +2879,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     {selected && <div className="drawer" onClick={() => setSelected(null)}>
       <div className="drawer-card chart-drawer" onClick={(event) => event.stopPropagation()}>
         <button className="icon-button drawer-close" onClick={() => setSelected(null)}>×</button>
-        <p className="eyebrow">{qMode ? `Qullamaggie watchlist · resistance ${qResistance(selected.security_id)}` : seasonal ? `Seasonal Stocks · ${selected.seasonal_window} · ${selected.seasonal_avg_return?.toFixed(1)}% average` : `30 in 30 · ${selected.best_return_pct.toFixed(1)}%`}</p>
+        <p className="eyebrow">{combined ? `Screener · ${membership[selected.security_id]?.join(" · ")}` : qMode ? `Qullamaggie watchlist · resistance ${qResistance(selected.security_id)}` : seasonal ? `Seasonal Stocks · ${selected.seasonal_window} · ${selected.seasonal_avg_return?.toFixed(1)}% average` : `30 in 30 · ${selected.best_return_pct.toFixed(1)}%`}</p>
         <h2>{selected.symbol} · {selected.company_name}</h2>
         <p className="muted">{selected.reason}</p>
         <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} settings={settings} referenceStyle={!seasonal} />
@@ -3705,6 +3768,7 @@ export default function Home() {
     {view === "Hourly Breakout" && <HourlyBreakoutScreenerView data={hourlyBreakout} filters={hourlyBreakoutFilters} setFilters={setHourlyBreakoutFilters} loading={loading} onRun={runHourlyBreakoutScreener} onReset={() => setHourlyBreakoutFilters(defaultHourlyBreakoutFilters)} selected={selectedHourlyBreakout} setSelected={setSelectedHourlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={hourlyBreakoutUpdatedAt} />}
     {view === "Momentum Tight" && <MomentumContractionScreenerView data={momentumContraction} filters={momentumContractionFilters} setFilters={setMomentumContractionFilters} loading={loading} onRun={runMomentumContractionScreener} onReset={() => setMomentumContractionFilters(defaultMomentumContractionFilters)} selected={selectedMomentumContraction} setSelected={setSelectedMomentumContraction} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={momentumContractionUpdatedAt} />}
     {view === "30 in 30" && <ThirtyInThirtyScreenerView data={thirtyInThirty} filters={thirtyInThirtyFilters} setFilters={setThirtyInThirtyFilters} loading={loading} onRun={runThirtyInThirtyScreener} onReset={() => setThirtyInThirtyFilters(defaultThirtyInThirtyFilters)} selected={selectedThirtyInThirty} setSelected={setSelectedThirtyInThirty} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={thirtyInThirtyUpdatedAt} settings={tradingSettings} />}
+    {view === "Screener" && <CombinedScreenerView settings={tradingSettings} emaFilters={emaNoTouchFilters} stochFilters={stochRsiFilters} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Qullamaggie" && <QullamaggieView settings={tradingSettings} onOpenSettings={() => setView("Settings")} />}
     {view === "10 EMA Catchup" && <EmaNoTouchScreenerView data={emaNoTouch} filters={emaNoTouchFilters} setFilters={setEmaNoTouchFilters} loading={loading} onRun={runEmaNoTouchScreener} selected={selectedEmaNoTouch} setSelected={setSelectedEmaNoTouch} settings={tradingSettings} />}
     {view === "Seasonal Stocks" && <ThirtyInThirtyScreenerView seasonal month={seasonalMonth} setMonth={(month) => { setSelectedSeasonalStock(null); setSeasonalMonth(month); }} data={seasonalStocksByMonth[seasonalMonth] ?? null} filters={seasonalFilters} setFilters={setSeasonalFilters} loading={loading} onRun={runSeasonalStocks} onBuild={buildSeasonalStocks} onOpenSeasonality={() => setView("Seasonality")} onReset={() => setSeasonalFilters(defaultThirtyInThirtyFilters)} selected={selectedSeasonalStock} setSelected={setSelectedSeasonalStock} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={seasonalStocksByMonth[seasonalMonth]?.generatedAt} settings={tradingSettings} />}
@@ -3712,7 +3776,7 @@ export default function Home() {
     {view === "Backtest" && <BasketBacktestView filters={basketBacktestFilters} setFilters={setBasketBacktestFilters} data={basketBacktest} loading={loading} onRun={runBasketBacktest} />}
     {view === "Stock Search" && <><section className="search-card"><div className="search-copy"><p className="eyebrow">01 / Research a security</p><h2>Find an Indian equity</h2><p>Search the Dhan security master by symbol or company name.</p></div><div className="search-area"><form onSubmit={(e) => { e.preventDefault(); runSearch(); }}><div className="search-row"><div className="search-input"><Search size={18} /><input placeholder="Search RELIANCE, TCS, INFY…" value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>Enter</kbd></div><button className="primary search-button" type="submit" disabled={loading}>{loading ? "Searching…" : "Search"}</button></div></form>{results.length > 0 && <div className="results">{results.map((s) => <button key={`${s.securityId}-${s.segment}`} onClick={() => { setSecurity(s); setQuery(""); setResults([]); setAnalysis(null); }}><div><b>{s.symbol}</b><span>{s.name}</span></div><small>{s.exchange} · {s.securityId}</small></button>)}</div>}<div className="search-hint"><Database size={14} /><span>Security IDs are resolved from Dhan’s master—not ticker text alone.</span></div></div></section>{!configured && <section className="setup"><div className="setup-icon"><ShieldCheck size={25} /></div><div><p className="eyebrow">Secure data connection</p><h2>Connect your Dhan account to begin</h2><p>Market data and calculated statistics remain empty until server-side Dhan credentials are configured.</p></div><code>DHAN_CLIENT_ID= · DHAN_ACCESS_TOKEN=</code></section>}{!security && <section className="empty"><div className="empty-art"><CalendarDays size={30} /></div><p className="eyebrow">Awaiting a selection</p><h2>Start with a security search</h2><p>Select an equity to load its daily OHLCV history and derive seasonality statistics.</p></section>}{security && <><section className="stock-header"><div><div className="ticker-row"><span className="ticker">{security.symbol}</span><span className="exchange">{security.exchange}</span></div><h2>{security.name}</h2><p>Security ID {security.securityId} · Daily OHLCV · {analysis ? `${analysis.candles.length} trading sessions` : "Not loaded"}</p></div><button className="primary" onClick={() => analyze()} disabled={loading || !configured}>{loading ? <><RefreshCw size={16} className="spin" /> Calculating…</> : <><BarChart3 size={16} /> Load seasonality</>}</button></section>{analysis && <><section className="stats-grid"><Stat label="Current close" value={latest ? money(latest.close) : "—"} sub={latest?.date} /><Stat label="History available" value={`${new Set(analysis.candles.map((c) => c.date.slice(0, 4))).size} years`} sub="Complete years used" /><Stat label="Data through" value={latest?.date || "—"} sub="Cached locally" /><Stat label="Method" value="Daily OHLCV" sub="Adjusted data must be verified" /></section></>}</>}</>}
     {view === "Settings" && <TradingSettingsView settings={tradingSettings} onSaved={setTradingSettings} />}
-    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Qullamaggie", "10 EMA Catchup", "Seasonal Stocks", "StochRSI", "Backtest", "Settings"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
+    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Screener", "Qullamaggie", "10 EMA Catchup", "Seasonal Stocks", "StochRSI", "Backtest", "Settings"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
   </div></main>;
 }
 
