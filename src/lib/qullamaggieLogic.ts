@@ -104,7 +104,7 @@ export function analyzeQStock(input: { securityId: string; symbol: string; compa
   // A candidate ends on the last completed candle, or immediately before it for a fresh EOD cross.
   for (const end of [n, n - 1]) for (let days = f.minBaseDays; days <= f.maxBaseDays; days++) {
     const start = end - days + 1;
-    if (start < 45 || days < 6) continue;
+    if (start < 45 || days < 5) continue;
     const base = rows.slice(start, end + 1), high = Math.max(...base.map(r => r.high)), low = Math.min(...base.map(r => r.low));
     const depth = (high - low) / high * 100;
     const segment = Math.max(3, Math.floor(days / 3));

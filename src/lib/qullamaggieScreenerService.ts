@@ -12,7 +12,7 @@ function normalize(input: Partial<QFilters>): QFilters {
       if (!Number.isFinite(value) || value < 0) throw new Error(`Invalid ${key}`);
     }
   }
-  if (f.minBaseDays < 6 || f.maxBaseDays < f.minBaseDays || f.maxBaseDays > 60) throw new Error("Consolidation length must be 6–60 sessions");
+  if (f.minBaseDays < 5 || f.maxBaseDays < f.minBaseDays || f.maxBaseDays > 60) throw new Error("Consolidation length must be 5–60 sessions");
   if (![1, 5, 10, 15].includes(f.openingMinutes)) throw new Error("Invalid opening range");
   if (!["ALL", "MIDCAP", "SMALLCAP"].includes(f.universe)) throw new Error("Invalid watchlist");
   return f;

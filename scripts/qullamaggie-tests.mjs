@@ -22,6 +22,13 @@ const before = analyzeQStock({ ...input, asOf: prices[148].trade_date });
 assert.equal(before.stage, "Near Breakout");
 assert.ok(before.tightness >= 65);
 assert.equal(before.baseDays, 11);
+const fivePrices = prices.map((r, i) => {
+  const close = i < 138 ? 100 + i : 240 + i % 2 * .1;
+  const spread = i < 143 ? 2 : .5;
+  return { ...r, open: close - .1, high: close + spread, low: close - spread, close };
+});
+const fiveDayBase = analyzeQStock({ ...input, prices: fivePrices, asOf: prices[148].trade_date, filters: { ...f, minBaseDays: 5, maxBaseDays: 5 } });
+assert.equal(fiveDayBase.baseDays, 5);
 assert.equal(before.dataDate, prices[148].trade_date);
 assert.ok(before.adr20 > 0);
 assert.equal(before.recent.at(-1).trade_date, prices[148].trade_date);
