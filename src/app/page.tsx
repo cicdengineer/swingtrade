@@ -82,7 +82,6 @@ type SeasonalStocksResponse = { month: number; window: WindowDef; evaluated: num
 type ScreenerSource = "30 in 30" | "Qullamaggie" | "10 EMA Catchup" | "StochRSI" | "Seasonal Stocks";
 type ScreenerMembership = Record<string, ScreenerSource[]>;
 const screenerSources: ScreenerSource[] = ["30 in 30", "Qullamaggie", "10 EMA Catchup", "StochRSI", "Seasonal Stocks"];
-const screenerSourceLabels: Record<ScreenerSource, string> = { "30 in 30": "30 in 30", "Qullamaggie": "Qullamaggie", "10 EMA Catchup": "10 EMA", "StochRSI": "StochRSI", "Seasonal Stocks": "Seasonal" };
 const screenerSourceClasses: Record<ScreenerSource, string> = { "30 in 30": "thirty", "Qullamaggie": "qullamaggie", "10 EMA Catchup": "ema", "StochRSI": "stoch", "Seasonal Stocks": "seasonal" };
 type StochRsiFilters = { universe: "ALL" | UniverseName; rsiLength: number; stochLength: number; smoothK: number; smoothD: number; upperThreshold: number; lowerThreshold: number; minWeeklyCandles: number; showAll: boolean };
 type StochRsiSortKey = "entry" | "symbol" | "setup" | "daily_d" | "weekly_d" | "signal_high" | "distance_signal" | "lowest" | "swing_low_pct" | "today_return" | "falling_trend";
@@ -2490,7 +2489,7 @@ function ThirtyInThirtyScoreTiles({ selected, chartMonths }: { selected: ThirtyI
   </div>;
 }
 
-function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceStyle = false }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean }) {
+function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceStyle = false, sources }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[] }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
   const [hourlyLoading, setHourlyLoading] = useState(false);
@@ -2541,7 +2540,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
     <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} settings={settings} />
     <div className="chart-toolbar">
       <div>
-        <p className="eyebrow">Chart timeframe</p>
+        <div className="chart-timeframe-heading"><p className="eyebrow">Chart timeframe</p>{sources?.length ? <div className="chart-source-tags" aria-label="Watchlists">{sources.map(name => <span className={`screener-tag-${screenerSourceClasses[name]}`} key={name}>{name}</span>)}</div> : null}</div>
         <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${liveDailyRow ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
       </div>
       <div className="chart-toolbar-actions">
@@ -2800,7 +2799,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     return () => { cancelled = true; };
   }, [visibleSecurityKey, seasonal]);
 
-  return <section className="research-page thirty-in-thirty-page thirty-in-thirty-screener-page">
+  return <section className={`research-page thirty-in-thirty-page thirty-in-thirty-screener-page ${combined ? "combined-screener-page" : ""}`}>
     <div className="thirty-hero thirty-in-thirty-hero">
       <div>
         <p className="eyebrow">{combined ? "Screener" : qMode ? "Qullamaggie watchlist" : seasonal ? "Seasonal Stocks" : "30 in 30 Screener"}</p>
@@ -2864,7 +2863,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
             {!seasonal && !qMode ? <>
               <div className="thirty-result-top"><b style={combined ? { fontSize: `${Math.max(8, Math.min(14, 125 / Math.max(row.symbol.length, 1)))}px` } : undefined}>{row.symbol}</b><span className="tile-badges">{strongStart && <i>SS</i>}{nearPdh && <i className="pdh-badge">PDH</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span></div>
               {!combined && <div className="thirty-result-sub"><small>{row.company_name}</small></div>}
-              {combined && <div className="screener-source-tags" aria-label={`Watchlists: ${membership[row.security_id]?.join(", ")}`}>{membership[row.security_id]?.map(name => <span className={`screener-tag-${screenerSourceClasses[name]}`} key={name}>{screenerSourceLabels[name]}</span>)}</div>}
+              {combined && <div className="screener-source-dots" role="img" aria-label={`Watchlists: ${membership[row.security_id]?.join(", ")}`}>{membership[row.security_id]?.map(name => <span key={name} title={name} aria-hidden="true" />)}</div>}
               <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} showEma10={showTileEma10} onOpen={() => setSelected(row)} />
             </> : <>
               <span className="tile-badges">{strongStart && <i>SS</i>}{nearPdh && <i className="pdh-badge">PDH</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span>
@@ -2884,7 +2883,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <p className="eyebrow">{combined ? `Screener · ${membership[selected.security_id]?.join(" · ")}` : qMode ? `Qullamaggie watchlist · resistance ${qResistance(selected.security_id)}` : seasonal ? `Seasonal Stocks · ${selected.seasonal_window} · ${selected.seasonal_avg_return?.toFixed(1)}% average` : `30 in 30 · ${selected.best_return_pct.toFixed(1)}%`}</p>
         <h2>{selected.symbol} · {selected.company_name}</h2>
         <p className="muted">{selected.reason}</p>
-        <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} settings={settings} referenceStyle={!seasonal} />
+        <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} settings={settings} referenceStyle={!seasonal} sources={combined ? membership[selected.security_id] : undefined} />
         {seasonal && <div className="strategy-stat-grid"><StrategyStat label="Next 3M Seasonal Average" value={pct(selected.seasonal_avg_return ?? 0)} sub={`${selected.seasonal_window} · ${selected.seasonal_observations} completed years`} tone="good" /></div>}
         <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} />
       </div>
