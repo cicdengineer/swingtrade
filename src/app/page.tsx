@@ -2796,7 +2796,7 @@ function StochRsiTileChart({ row, chartMonths, onOpen }: { row: StochRsiRow; cha
   </span>;
 }
 
-function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signalDate, dailySessions = 63 }: { rows: StochRsiRecentPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; signalHigh?: number; signalDate?: string; dailySessions?: number }) {
+function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signalDate, swingLowPoint, dailySessions = 63 }: { rows: StochRsiRecentPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; signalHigh?: number; signalDate?: string; swingLowPoint?: StochRsiRecentPoint; dailySessions?: number }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -2810,7 +2810,7 @@ function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signal
   const calculatedEma = emaValues(closes, 10);
   const chartEmaValues = chartRows.map((row, index) => row.ema10 ?? calculatedEma[index]);
   const visibleEmaValues = chartEmaValues.filter((value): value is number => value !== undefined);
-  const priceMin = Math.min(...lows, ...visibleEmaValues, ...(signalHigh ? [signalHigh] : []));
+  const priceMin = Math.min(...lows, ...visibleEmaValues, ...(signalHigh ? [signalHigh] : []), ...(swingLowPoint ? [swingLowPoint.low] : []));
   const priceMax = Math.max(...highs, ...visibleEmaValues, ...(signalHigh ? [signalHigh] : []));
   const candleSlot = width / chartRows.length;
   const bodyWidth = Math.max(3, Math.min(8, candleSlot * 0.48));
@@ -2820,9 +2820,12 @@ function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signal
   const signalIndex = signalDate ? chartRows.findIndex((row) => row.trade_date === signalDate) : -1;
   const signalLineY = signalHigh ? scaleValue(signalHigh, priceMin, priceMax, priceHeight, 8) : undefined;
   const signalLineX = signalIndex >= 0 ? signalIndex * candleSlot + candleSlot / 2 : 0;
+  const swingLowIndex = swingLowPoint ? chartRows.findIndex((row) => row.trade_date === swingLowPoint.trade_date) : -1;
+  const swingLowY = swingLowPoint ? scaleValue(swingLowPoint.low, priceMin, priceMax, priceHeight, 8) : undefined;
   return <div className="clean-chart signal-chart">
-    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />10 EMA</span><span><i className="legend-green-signal" />Green entry</span><span><i className="legend-blue-signal" />Blue entry</span><span><i className="legend-high-volume" />Unusual volume</span></div>
+    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />10 EMA</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}<span><i className="legend-green-signal" />Green entry</span><span><i className="legend-blue-signal" />Blue entry</span><span><i className="legend-high-volume" />Unusual volume</span></div>
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart with StochRSI entry markers`}>
+      {swingLowY !== undefined && <line className="swing-low-line" x1={swingLowIndex >= 0 ? swingLowIndex * candleSlot + candleSlot / 2 : 0} x2={width} y1={swingLowY} y2={swingLowY}><title>{`Swing low ${money(swingLowPoint!.low)} on ${swingLowPoint!.trade_date}`}</title></line>}
       {signalLineY !== undefined && <line className="signal-high-line" x1={signalLineX} x2={width} y1={signalLineY} y2={signalLineY} />}
       {chartRows.map((row, index) => {
         const x = index * candleSlot + candleSlot / 2;
@@ -2855,12 +2858,14 @@ function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signal
   </div>;
 }
 
-const signalSwingLowStop = (rows: StochRsiRecentPoint[], signalDate: string) => {
+const signalSwingLowPoint = (rows: StochRsiRecentPoint[], signalDate: string) => {
   const signalIndex = rows.findIndex((row) => row.trade_date === signalDate);
   if (signalIndex <= 0) return undefined;
   const swingRows = rows.slice(Math.max(0, signalIndex - 5), signalIndex);
-  return swingRows.length ? Math.min(...swingRows.map((row) => row.low)) : undefined;
+  return swingRows.length ? swingRows.reduce((lowest, row) => row.low < lowest.low ? row : lowest) : undefined;
 };
+
+const signalSwingLowStop = (rows: StochRsiRecentPoint[], signalDate: string) => signalSwingLowPoint(rows, signalDate)?.low;
 
 function StochRsiRiskTiles({ selected, activeRows, settings }: { selected: StochRsiRow; activeRows: StochRsiRecentPoint[]; settings?: TradingSettings | null }) {
   const entry = selected.current_close;
@@ -2934,7 +2939,7 @@ function StochRsiChartPanel({ selected, chartMonths, settings }: { selected: Sto
         </div>
       </div>
     </div>
-    <SignalCandleChart rows={activeRows as StochRsiRecentPoint[]} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} signalHigh={timeframe === "daily" ? selected.latest_signal_high : undefined} signalDate={timeframe === "daily" ? selected.latest_signal_date : undefined} dailySessions={chartMonths === 6 ? 126 : 63} />
+    <SignalCandleChart rows={activeRows as StochRsiRecentPoint[]} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} signalHigh={timeframe === "daily" ? selected.latest_signal_high : undefined} signalDate={timeframe === "daily" ? selected.latest_signal_date : undefined} swingLowPoint={timeframe === "daily" ? signalSwingLowPoint(selected.recent, selected.latest_signal_date) : undefined} dailySessions={chartMonths === 6 ? 126 : 63} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>;
 }
