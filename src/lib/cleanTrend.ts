@@ -1,5 +1,3 @@
-export type CleanTrendDirection = "all" | "up" | "down";
-
 export const fallingTrendScore = (rows: { close: number }[], sessions: number): number => {
   const closes = rows.slice(-sessions).map((point) => point.close);
   if (closes.length < 10 || closes.some((close) => !Number.isFinite(close) || close <= 0)) return -Infinity;
@@ -16,8 +14,7 @@ export const fallingTrendScore = (rows: { close: number }[], sessions: number): 
   return -(covariance / variance) * (closes.length - 1) * 100;
 };
 
-export const matchesCleanTrend = (rows: { close: number }[], sessions: number, direction: CleanTrendDirection): boolean => {
-  if (direction === "all") return true;
+export const matchesCleanTrend = (rows: { close: number }[], sessions: number): boolean => {
   const closes = rows.slice(-sessions).map((point) => point.close);
   if (closes.length < Math.ceil(sessions * 0.8) || closes.some((close) => !Number.isFinite(close) || close <= 0)) return false;
   const logs = closes.map(Math.log);
@@ -34,5 +31,5 @@ export const matchesCleanTrend = (rows: { close: number }[], sessions: number, d
   });
   const score = fallingTrendScore(rows, sessions);
   const fit = priceVariance > 0 ? covariance ** 2 / (timeVariance * priceVariance) : 0;
-  return fit >= 0.6 && (direction === "down" ? score >= 12 : score <= -12);
+  return fit >= 0.6 && Math.abs(score) >= 12;
 };

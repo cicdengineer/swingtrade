@@ -9,13 +9,11 @@ const recentlyRising = prices(126, (day) => 100 * Math.exp(day < 63 ? -day * 0.0
 
 assert.ok(fallingTrendScore(falling, 126) > 0);
 assert.ok(fallingTrendScore(rising, 126) < 0);
-assert.equal(matchesCleanTrend(rising, 126, "up"), true);
-assert.equal(matchesCleanTrend(rising, 126, "down"), false);
-assert.equal(matchesCleanTrend(falling, 126, "down"), true);
-assert.equal(matchesCleanTrend(choppy, 126, "up"), false);
-assert.equal(matchesCleanTrend(recentlyRising, 63, "up"), true);
-assert.equal(matchesCleanTrend(recentlyRising, 126, "up"), false);
-assert.equal(matchesCleanTrend(rising.slice(-30), 63, "up"), false);
-assert.equal(matchesCleanTrend(choppy, 126, "all"), true);
+assert.equal(matchesCleanTrend(rising, 126), true);
+assert.equal(matchesCleanTrend(falling, 126), true);
+assert.equal(matchesCleanTrend(choppy, 126), false);
+assert.equal(matchesCleanTrend(recentlyRising, 63), true);
+assert.equal(matchesCleanTrend(recentlyRising, 126), false);
+assert.equal(matchesCleanTrend(rising.slice(-30), 63), false);
 
 console.log("Clean trend tests passed");
