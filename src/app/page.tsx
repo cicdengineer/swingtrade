@@ -2413,12 +2413,11 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
   </section>;
 }
 
-function ThirtyInThirtyTileChart({ row, chartMonths, showEma10, referenceStyle = false, onOpen }: { row: ThirtyInThirtyRow; chartMonths: 3 | 6; showEma10: boolean; referenceStyle?: boolean; onOpen: () => void }) {
+function ThirtyInThirtyTileChart({ row, chartMonths, showEma10, onOpen }: { row: ThirtyInThirtyRow; chartMonths: 3 | 6; showEma10: boolean; onOpen: () => void }) {
   const chartRows = lastTradingMonths(row.recent, chartMonths === 6 ? 126 : 63);
   const closes = chartRows.map((point) => point.close);
   const ema10 = showEma10 ? emaValues(row.recent.map((point) => point.close), 10).slice(-chartRows.length) : [];
-  const breakoutLevel = referenceStyle && Number.isFinite(row.breakout_level) && row.breakout_level > 0 ? row.breakout_level : undefined;
-  const visibleValues = [...closes, ...ema10.filter((value): value is number => value !== undefined), ...(breakoutLevel === undefined ? [] : [breakoutLevel])];
+  const visibleValues = [...closes, ...ema10.filter((value): value is number => value !== undefined)];
   const min = Math.min(...visibleValues);
   const max = Math.max(...visibleValues);
   const chartPath = (values: (number | undefined)[]) => values.map((value, index) => value === undefined ? "" : `${index === 0 || values[index - 1] === undefined ? "M" : "L"}${(index * 220 / Math.max(1, values.length - 1)).toFixed(2)} ${scaleValue(value, min, max, 82).toFixed(2)}`).join(" ");
@@ -2426,7 +2425,6 @@ function ThirtyInThirtyTileChart({ row, chartMonths, showEma10, referenceStyle =
   const trendUp = closes.length > 1 && closes.at(-1)! >= closes[0];
   return <span className="thirty-in-thirty-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="img" aria-label={`${row.symbol} last ${chartMonths} months line chart${showEma10 ? " with 10 EMA" : ""}`}>
     <svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true">
-      {breakoutLevel !== undefined && <line className="thirty-tile-breakout" x1="0" x2="220" y1={scaleValue(breakoutLevel, min, max, 82)} y2={scaleValue(breakoutLevel, min, max, 82)} />}
       <path className="spark-area" d={`${pricePath} L220 82 L0 82 Z`} />
       <path className={trendUp ? "spark-line up" : "spark-line down"} d={pricePath} />
       {showEma10 && <path className="tile-ema10-line" d={chartPath(ema10)} />}
@@ -2543,7 +2541,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
         </div>
       </div>
     </div>
-    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} resistanceLevel={timeframe === "daily" && referenceStyle ? selected.breakout_level : undefined} />
+    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>;
 }
@@ -2791,9 +2789,8 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
           return <div key={row.security_id} className={`screenshot-tile ${!seasonal && !qMode ? "thirty-result-tile" : ""} ${seasonal ? "seasonal-tile" : ""} ${isBreakingPreviousDayHigh(row) ? "breaking-pdh" : ""} ${pinned ? "pinned" : ""} ${strongStart ? "strong-start" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={qMode ? `Qullamaggie resistance ${qResistance(row.security_id)}` : seasonal ? `${row.seasonal_window}: ${row.seasonal_avg_return?.toFixed(1)}% average over ${row.seasonal_observations} years` : `${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
             {!seasonal && !qMode ? <>
               <div className="thirty-result-top"><b>{row.symbol}</b><span className="tile-badges">{strongStart && <i>SS</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span></div>
-              <div className="thirty-result-sub"><small>{row.company_name}</small><em>{row.status.replaceAll("_", " ")}</em></div>
-              <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} showEma10={showTileEma10} referenceStyle onOpen={() => setSelected(row)} />
-              <div className="thirty-result-metrics"><span>Close <b>{money(row.current_close)}</b></span><span>{chartMonths}M <b>{pct(chartMonths === 6 ? row.current_6m_return_pct : row.current_3m_return_pct)}</b></span><span>Today <b>{todayReturn === undefined ? "—" : pct2(todayReturn)}</b></span><span>Best 30D <b>{pct(row.best_return_pct)}</b></span><span>Volume <b>{currentVolumeRatio(row).toFixed(2)}×</b></span><span>Tight <b>{row.tightness_5d_vs_20d.toFixed(2)}</b></span><span className="thirty-result-wide">Breakout <b>{money(row.breakout_level)} · {pct(row.breakout_distance_pct)}</b></span></div>
+              <div className="thirty-result-sub"><small>{row.company_name}</small></div>
+              <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} showEma10={showTileEma10} onOpen={() => setSelected(row)} />
             </> : <>
               <span className="tile-badges">{strongStart && <i>SS</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span>
               <b>{row.symbol}</b><small>{row.company_name}</small>
@@ -3271,7 +3268,7 @@ function liveAdjustedHourlyBreakout(row: HourlyBreakoutRow, liveTick?: LiveTick)
   return { liveClose, todayChange, emaDistance, breakoutDistance, pullbackFromZone };
 }
 
-function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, resistanceLevel }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; resistanceLevel?: number }) {
+function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -3285,9 +3282,8 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   const calculatedEma = emaValues(closes, emaPeriod);
   const chartEmaValues = chartRows.map((row, index) => row[emaKey] ?? calculatedEma[index]);
   const visibleEmaValues = chartEmaValues.filter((value): value is number => value !== undefined);
-  const visibleResistance = resistanceLevel !== undefined && Number.isFinite(resistanceLevel) && resistanceLevel > 0 ? resistanceLevel : undefined;
-  const priceMin = Math.min(...lows, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(visibleResistance === undefined ? [] : [visibleResistance]));
-  const priceMax = Math.max(...highs, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(visibleResistance === undefined ? [] : [visibleResistance]));
+  const priceMin = Math.min(...lows, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]));
+  const priceMax = Math.max(...highs, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]));
   const candleSlot = width / chartRows.length;
   const bodyWidth = Math.max(3, Math.min(8, candleSlot * 0.48));
   const maxVolume = Math.max(...chartRows.map((row) => row.volume));
@@ -3310,7 +3306,6 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   return <div className={`clean-chart ${referenceStyle ? "thirty-reference-chart" : ""}`}>
     {!referenceStyle && <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}{highCandleY !== undefined && <span><i className="legend-high-candle" />Entry above {money(highCandle!.high)}</span>}{stopY !== undefined && <span><i className="legend-stop-level" />Signal EMA SL {money(stopLevel!)}</span>}<span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>}
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart`}>
-      {visibleResistance !== undefined && <line className="thirty-reference-resistance" x1="0" x2={width} y1={scaleValue(visibleResistance, priceMin, priceMax, priceHeight, 8)} y2={scaleValue(visibleResistance, priceMin, priceMax, priceHeight, 8)}><title>Breakout level {money(visibleResistance)}</title></line>}
       {swingLowY !== undefined && <line className="swing-low-line" x1={swingLowIndex * candleSlot + candleSlot / 2} x2={width} y1={swingLowY} y2={swingLowY}><title>{`Swing low ${money(swingLowPoint!.low)} on ${swingLowPoint!.trade_date}`}</title></line>}
       {highCandleY !== undefined && <line className="high-candle-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={highCandleY} y2={highCandleY}><title>{`High candle ${money(highCandle!.high)} on ${highCandle!.date}`}</title></line>}
       {stopY !== undefined && <line className="signal-stop-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={stopY} y2={stopY}><title>{`Signal candle 10 EMA stop loss ${money(stopLevel!)}`}</title></line>}
@@ -3344,7 +3339,7 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
         return <span key={row.trade_date} className={`outside-volume-bar ${up ? "up" : "down"} ${high ? "high" : ""}`} style={{ height }} title={`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}${ratio ? ` (${ratio.toFixed(1)}x)` : ""}`} />;
       })}
     </div>}
-    {referenceStyle && <div className="thirty-reference-legend">{timeframe} candles · <span>10 EMA</span>{visibleResistance !== undefined && " · Breakout level"} · Volume below</div>}
+    {referenceStyle && <div className="thirty-reference-legend">{timeframe} candles · <span>10 EMA</span> · Volume below</div>}
   </div>;
 }
 
