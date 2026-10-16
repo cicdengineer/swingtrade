@@ -41,5 +41,6 @@ assert.equal(positionSize(100, 95, 100000, 1, 10).quantity, 100);
 assert.equal(positionSize(100, 100, 100000, 1, 10).quantity, 0);
 const minutes = Array.from({ length: 7 }, (_, i) => ({ date: new Date(Date.UTC(2025, 0, 2, 3, 45 + i)).toISOString(), open: 100, high: i === 6 ? 106 : 102, low: 99, close: i === 6 ? 105 : 101 }));
 assert.equal(openingRangeSignal(minutes, 103, 5, 10, 1).status, "Fresh ORH cross");
+assert.equal(openingRangeSignal(minutes.map((c, i) => i === 6 ? { ...c, low: 80 } : c), 103, 5, 10, 1).stop, 99);
 assert.equal(openingRangeSignal(minutes.slice(0, 4), 103, 5, 10, 1).status, "Intraday data required");
 console.log("Qullamaggie logic tests passed");

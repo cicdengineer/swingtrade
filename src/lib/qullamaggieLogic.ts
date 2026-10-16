@@ -66,7 +66,9 @@ export function openingRangeSignal(candles: { date: string; open: number; high: 
   const threshold = Math.max(openingHigh, resistance);
   for (let i = minutes; i < day.length; i++) {
     if (day[i - 1].close <= threshold && day[i].high > threshold) {
-      const entry = threshold, stop = Math.min(...day.slice(0, i + 1).map(c => c.low));
+      // A minute candle does not reveal whether its low happened before or after its high.
+      // Use completed earlier lows and the crossing candle's open, which are observable before the cross.
+      const entry = threshold, stop = Math.min(day[i].open, ...day.slice(0, i).map(c => c.low));
       if (!(stop > 0 && entry > stop) || (entry - stop) / entry * 100 > adrPct * maxStopAdr) return { status: "Stop too wide" as const, openingHigh, openingLow, entry, stop };
       return { status: "Fresh ORH cross" as const, openingHigh, openingLow, entry, stop, date: latest };
     }
