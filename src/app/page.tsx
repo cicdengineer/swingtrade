@@ -29,6 +29,7 @@ import {
 import type { SeasonalObservationRecord, SeasonalStatisticsRecord, Security, Summary, UniverseName } from "@/lib/types";
 import type { QRow } from "@/lib/qullamaggieLogic";
 import { parseResistanceWatchlist, qullamaggieWatchlistKey, resistanceWatchlist, type QWatchlist } from "@/lib/qullamaggieWatchlist";
+import { fallingTrendScore, matchesCleanTrend, type CleanTrendDirection } from "@/lib/cleanTrend";
 import QullamaggieView from "./QullamaggieView";
 
 type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings";
@@ -425,21 +426,6 @@ function BrandLogo({ compact = false }: { compact?: boolean }) {
 }
 
 const lastTradingMonths = <T extends DailyChartPoint>(rows: T[], sessions = 63) => rows.slice(-sessions);
-const fallingTrendScore = (rows: { close: number }[], sessions: number): number => {
-  const closes = rows.slice(-sessions).map((point) => point.close);
-  if (closes.length < 10 || closes.some((close) => !Number.isFinite(close) || close <= 0)) return -Infinity;
-  const midpoint = (closes.length - 1) / 2;
-  const meanLogClose = closes.reduce((sum, close) => sum + Math.log(close), 0) / closes.length;
-  let covariance = 0;
-  let variance = 0;
-  closes.forEach((close, index) => {
-    const day = index - midpoint;
-    covariance += day * (Math.log(close) - meanLogClose);
-    variance += day * day;
-  });
-  // A larger positive score means a steeper sustained fall across the displayed chart.
-  return -(covariance / variance) * (closes.length - 1) * 100;
-};
 const sortByFallingTrend = <T extends { recent: { close: number }[] }>(rows: T[], direction: "asc" | "desc", sessions = 63): T[] =>
   [...rows].sort((a, b) => {
     const first = fallingTrendScore(a.recent, sessions);
@@ -2556,6 +2542,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings }: { selecte
 function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings, seasonal, month, setMonth, onBuild, onOpenSeasonality }: { data: ThirtyInThirtyResponse | SeasonalStocksResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: (row: ThirtyInThirtyRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null; seasonal?: boolean; month?: number; setMonth?: (month: number) => void; onBuild?: () => void; onOpenSeasonality?: () => void }) {
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: seasonal ? "seasonal_avg" : "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
+  const [cleanTrend, setCleanTrend] = useState<CleanTrendDirection>("all");
   const [tileLimit, setTileLimit] = useState(9999);
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
@@ -2686,8 +2673,9 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       return sort.direction === "asc" ? comparison : -comparison;
     });
   }, [chartMonths, liveTicks, sort]);
-  const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]))), [liveRows, liveTicks, filters, sortRows, qMode]);
-  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)))), [liveRows, pinnedIds, filters.threeRedCandleOnly, sortRows, qMode]);
+  const matchesSelectedTrend = useCallback((row: ThirtyInThirtyRow) => matchesCleanTrend(row.recent, chartMonths === 6 ? 126 : 63, cleanTrend), [chartMonths, cleanTrend]);
+  const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (seasonal || matchesSelectedTrend(row)))), [liveRows, liveTicks, filters, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, filters.threeRedCandleOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
   const visibleRows = useMemo(() => {
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
@@ -2744,7 +2732,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <div className="refresh-status"><span className={Object.keys(liveTicks).length ? "ready" : "pending"} /><b>{Object.keys(liveTicks).length ? "Live prices" : "Last run"}</b><small>{Object.keys(liveTicks).length ? `${Object.keys(liveTicks).length} ticking` : formatTime(updatedAt)}</small></div>
         <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button>}
-        <button className="secondary compact" onClick={onReset}>Reset</button>
+        <button className="secondary compact" onClick={() => { setCleanTrend("all"); onReset(); }}>Reset</button>
       </div>
     </div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
@@ -2753,10 +2741,10 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
-      <label>Sort<select value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{seasonal && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Today Live Gain</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="falling_trend">Falling Trend {chartMonths}M</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select></label>
-      <button className="secondary compact" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button>
+      <div className="thirty-sort-control"><label htmlFor="thirty-sort">Sort</label><div><select id="thirty-sort" value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{seasonal && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Today Live Gain</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option><option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="falling_trend">Falling Trend {chartMonths}M</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select><button className="secondary compact" aria-label={`Sort ${sort.direction === "asc" ? "ascending" : "descending"}; change direction`} title="Change sort direction" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button></div></div>
     </div>
     {!qMode && <div className="thirty-in-thirty-switches">
+      {!seasonal && <label className="clean-trend-filter" title={`Show only charts with at least a 12% fitted ${chartMonths}M move and 60% trend fit`}><span>Clean {chartMonths}M trend</span><select aria-label={`Clean ${chartMonths} month trend filter`} value={cleanTrend} onChange={(e) => setCleanTrend(e.target.value as CleanTrendDirection)}><option value="all">All</option><option value="up">Up only</option><option value="down">Down only</option></select></label>}
       <label><input type="checkbox" checked={filters.positive3MonthsOnly} onChange={(e) => setFilters({ ...filters, positive3MonthsOnly: e.target.checked })}/><span>Positive in 3M</span></label>
       <label><input type="checkbox" checked={filters.positive6MonthsOnly} onChange={(e) => setFilters({ ...filters, positive6MonthsOnly: e.target.checked })}/><span>Positive in 6M</span></label>
       <label><input type="checkbox" checked={filters.above50EmaOnly} onChange={(e) => setFilters({ ...filters, above50EmaOnly: e.target.checked })}/><span>Above 50EMA</span></label>
