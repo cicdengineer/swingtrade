@@ -16,7 +16,8 @@
     "test:market-data": "node scripts/market-data-refresh-tests.mjs",
     "test:ema-catchup": "node scripts/ema-catchup-tests.mjs",
     "test:qullamaggie": "node scripts/qullamaggie-tests.mjs",
-    "test:clean-trend": "node --experimental-strip-types scripts/clean-trend-tests.mjs"
+    "test:clean-trend": "node --experimental-strip-types scripts/clean-trend-tests.mjs",
+    "test:recent-volume": "node --experimental-strip-types scripts/recent-volume-tests.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

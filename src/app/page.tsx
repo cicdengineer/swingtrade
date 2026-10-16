@@ -30,6 +30,7 @@ import type { SeasonalObservationRecord, SeasonalStatisticsRecord, Security, Sum
 import type { QRow } from "@/lib/qullamaggieLogic";
 import { parseResistanceWatchlist, qullamaggieWatchlistKey, resistanceWatchlist, type QWatchlist } from "@/lib/qullamaggieWatchlist";
 import { fallingTrendScore, matchesCleanTrend } from "@/lib/cleanTrend";
+import { ABNORMAL_VOLUME_RATIO, RECENT_VOLUME_SESSIONS, VOLUME_BASELINE_SESSIONS, summarizeRecentVolume } from "@/lib/recentVolume";
 import QullamaggieView from "./QullamaggieView";
 
 type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings";
@@ -70,7 +71,7 @@ type MomentumSetupType = "MOMENTUM_CONTRACTION" | "TRENDING_TIGHT";
 type MomentumContractionFilters = { universe: "ALL" | UniverseName; setupType: "ALL" | MomentumSetupType; emaLength: number; emaSlopeLookback: number; momentumLookback: number; minPriorMovePct: number; volumeAverageLength: number; expansionRelativeVolume: number; atrLength: number; tightRangeAtr: number; lowVolumeLookback: number; dryVolumeRatio: number; contractionLookback: number; minAverageDailyTradedValue: number; maxDistanceFromEmaPct: number; requireRisingEma: boolean; minSetupScore: number; showAll: boolean; debug: boolean };
 type MomentumContractionRow = { status: MomentumSetupType | "BELOW_EMA" | "NO_MOMENTUM" | "NOT_TIGHT" | "VOLUME_NOT_DRY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; setupType: MomentumSetupType; setupScore: number; current_date: string; current_close: number; ema50: number; emaSlope: number; distance_from_ema_pct: number; priorMovePct: number; momentumRelativeVolume: number; atr14: number; rangeCompression: number; currentVolume: number; volumeSMA20: number; volumeSMA50: number; relativeVolume: number; volumePercentile: number; lowestVolume10: boolean; lowestVolume20: boolean; avgVolume5: number; avgVolume20: number; volumeContractionRatio: number; trendStructure: "HIGHER_HIGH_LOW" | "RISING" | "SIDEWAYS" | "WEAK"; averageDailyTradedValue: number; reason: string; diagnostics: { pass: boolean; label: string }[]; recent: DailyChartPoint[] };
 type MomentumContractionResponse = { filters: MomentumContractionFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: MomentumContractionRow[]; generatedAt: string };
-type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; threeRedCandleOnly: boolean; stoch20Only: boolean; stoch80Only: boolean; showAll: boolean };
+type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; abnormalVolume6dOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; threeRedCandleOnly: boolean; stoch20Only: boolean; stoch80Only: boolean; showAll: boolean };
 type ThirtyInThirtySortKey = "best_return" | "seasonal_avg" | "today_return" | "symbol" | "company" | "daily_sl_pct" | "swing_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent" | "falling_trend";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; daily_stoch_d?: number; averageDailyTradedValue: number; reason: string; recent: Array<DailyChartPoint & { daily_stoch_d?: number }>; seasonal_avg_return?: number; seasonal_observations?: number; seasonal_window?: string };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
@@ -233,6 +234,7 @@ const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   strongStartOnly: false,
   earlyVolumeOnly: false,
   highVolumeOnly: false,
+  abnormalVolume6dOnly: false,
   decliningVolumeOnly: false,
   dryVolumeOnly: false,
   redCandleOnly: false,
@@ -680,6 +682,7 @@ const matchesThirtyInThirtyFilters = (row: ThirtyInThirtyRow, filters: ThirtyInT
   (!filters.strongStartOnly || isStrongStart(row, tick)) &&
   (!filters.earlyVolumeOnly || currentVolumeRatio(row) >= 0.3) &&
   (!filters.highVolumeOnly || currentVolumeRatio(row) >= 1.5) &&
+  (!filters.abnormalVolume6dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) &&
   (!filters.decliningVolumeOnly || hasDryVolumeStreak(row)) &&
   (!filters.dryVolumeOnly || hasDryVolumeRatio(row)) &&
   (!filters.redCandleOnly || closedRedPreviousSession(row)) &&
@@ -2462,6 +2465,9 @@ function ThirtyInThirtyRiskTiles({ selected, activeRows, settings }: { selected:
 function ThirtyInThirtyScoreTiles({ selected, chartMonths }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6 }) {
   const nearHigh = chartMonths === 6 ? selected.pullback_from_6m_high_pct : selected.pullback_from_3m_high_pct;
   const chartReturn = chartMonths === 6 ? selected.current_6m_return_pct : selected.current_3m_return_pct;
+  const volume = summarizeRecentVolume(selected.recent, liveTradeDate());
+  const volumeRecency = volume.sessionsSinceLastSpike === null ? "" : volume.sessionsSinceLastSpike === 0 ? "latest session" : `${volume.sessionsSinceLastSpike} sessions ago`;
+  const volumeDetail = volume.evaluatedDays === 0 ? `Need ${VOLUME_BASELINE_SESSIONS} prior sessions` : `${volume.peakRatio?.toFixed(1)}× peak · ${volumeRecency || "no spike"} · latest ${volume.latestRatio?.toFixed(1) ?? "—"}×`;
   return <div className="strategy-stat-grid">
     <StrategyStat label="Best Window" value={pct(selected.best_return_pct)} sub={`${selected.best_start_date ?? "—"} to ${selected.best_end_date ?? "—"}`} tone={toneFromRange(selected.best_return_pct, (value) => value >= 45, (value) => value >= 30)} />
     <StrategyStat label="Current Close" value={money(selected.current_close)} sub={selected.current_date} tone="neutral" />
@@ -2472,6 +2478,7 @@ function ThirtyInThirtyScoreTiles({ selected, chartMonths }: { selected: ThirtyI
     <StrategyStat label="Breakout Zone" value={money(selected.breakout_level)} sub={pct(selected.breakout_distance_pct)} tone={toneFromRange(selected.breakout_distance_pct, (value) => value >= -3 && value <= 0.5, (value) => value >= -6 && value <= 2)} />
     <StrategyStat label="Tightness 5D/20D" value={`${selected.tightness_5d_vs_20d.toFixed(2)}x`} tone={toneFromRange(selected.tightness_5d_vs_20d, (value) => value <= 0.75, (value) => value <= 1)} />
     <StrategyStat label="Lowest Vol 5D/20D" value={`${selected.lowest_volume_5d_vs_20d.toFixed(2)}x`} tone={toneFromRange(selected.lowest_volume_5d_vs_20d, (value) => value <= 0.45, (value) => value <= 0.75)} />
+    <StrategyStat label="Recent Volume · 6D" value={volume.spikeCount ? `${volume.spikeCount} spike${volume.spikeCount === 1 ? "" : "s"}` : "No spikes"} sub={volumeDetail} tone={volume.spikeCount ? "good" : "neutral"} />
     <StrategyStat label="Daily StochRSI" value={selected.daily_stoch_d === undefined ? "-" : selected.daily_stoch_d.toFixed(1)} tone={toneFromRange(selected.daily_stoch_d, (value) => value < 21 || value > 80, (value) => value < 35 || value > 65)} />
     <StrategyStat label="Demand/Supply" value={`${selected.demand_supply_score}`} tone={toneFromRange(selected.demand_supply_score, (value) => value >= 70, (value) => value >= 50)} />
   </div>;
@@ -2683,7 +2690,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   }, [chartMonths, liveTicks, sort]);
   const matchesSelectedTrend = useCallback((row: ThirtyInThirtyRow) => !cleanTrendOnly || matchesCleanTrend(row.recent, chartMonths === 6 ? 126 : 63), [chartMonths, cleanTrendOnly]);
   const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (seasonal || matchesSelectedTrend(row)))), [liveRows, liveTicks, filters, sortRows, qMode, seasonal, matchesSelectedTrend]);
-  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, filters.threeRedCandleOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume6dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, filters.threeRedCandleOnly, filters.abnormalVolume6dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
   const visibleRows = useMemo(() => {
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
@@ -2763,6 +2770,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label title="Strong Start: live day open is above previous close and below previous high"><input type="checkbox" checked={filters.strongStartOnly} onChange={(e) => setFilters({ ...filters, strongStartOnly: e.target.checked })}/><span>SS</span></label>
       <label><input type="checkbox" checked={filters.earlyVolumeOnly} onChange={(e) => setFilters({ ...filters, earlyVolumeOnly: e.target.checked })}/><span>Early Vol</span></label>
       <label><input type="checkbox" checked={filters.highVolumeOnly} onChange={(e) => setFilters({ ...filters, highVolumeOnly: e.target.checked })}/><span>High Volume</span></label>
+      {!seasonal && <label title={`At least one of the last ${RECENT_VOLUME_SESSIONS} completed sessions had volume ≥${ABNORMAL_VOLUME_RATIO}× its preceding ${VOLUME_BASELINE_SESSIONS}-session average`}><input type="checkbox" checked={filters.abnormalVolume6dOnly} onChange={(e) => setFilters({ ...filters, abnormalVolume6dOnly: e.target.checked })}/><span>Abnormal Vol 6D</span></label>}
       <label><input type="checkbox" checked={filters.decliningVolumeOnly} onChange={(e) => setFilters({ ...filters, decliningVolumeOnly: e.target.checked })}/><span>Declining Vol</span></label>
       <label title={`Latest completed volume <= ${thirtyInThirtyDryVolumeRatio}x average of previous ${thirtyInThirtyDryVolumeLookback} sessions`}><input type="checkbox" checked={filters.dryVolumeOnly} onChange={(e) => setFilters({ ...filters, dryVolumeOnly: e.target.checked })}/><span>Dry Volume</span></label>
       <label><input type="checkbox" checked={filters.redCandleOnly} onChange={(e) => setFilters({ ...filters, redCandleOnly: e.target.checked })}/><span>Red Candle</span></label>
