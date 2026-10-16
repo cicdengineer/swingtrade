@@ -1,4 +1,4 @@
-export const RECENT_VOLUME_SESSIONS = 6;
+export const RECENT_VOLUME_SESSIONS = 10;
 export const VOLUME_BASELINE_SESSIONS = 20;
 export const ABNORMAL_VOLUME_RATIO = 2;
 
