@@ -8,7 +8,7 @@ export type QFilters = {
   shrinkingVolatility: boolean; contractingVolume: boolean; maxVolumeRatio: number;
   nearHigh: boolean; maxHighDistance: number; nearBreakout: number; minTightness: number;
   entryMode: "ORH" | "EOD"; openingMinutes: 1 | 5 | 10 | 15; maxStopAdr: number;
-  capital: number; riskPct: number; maxExposurePct: number; partialPct: number; partialDay: number; trailEma: 10 | 20;
+  maxExposurePct: number;
   showDiagnostics: boolean;
 };
 
@@ -19,7 +19,7 @@ export const defaultQFilters: QFilters = {
   shrinkingVolatility: true, contractingVolume: true, maxVolumeRatio: 0.7,
   nearHigh: true, maxHighDistance: 15, nearBreakout: 3, minTightness: 65,
   entryMode: "ORH", openingMinutes: 5, maxStopAdr: 1,
-  capital: 10_000_000, riskPct: 0.2, maxExposurePct: 10, partialPct: 33, partialDay: 3, trailEma: 10,
+  maxExposurePct: 10,
   showDiagnostics: false,
 };
 
@@ -70,7 +70,7 @@ export function openingRangeSignal(candles: { date: string; open: number; high: 
       // Use completed earlier lows and the crossing candle's open, which are observable before the cross.
       const entry = threshold, stop = Math.min(day[i].open, ...day.slice(0, i).map(c => c.low));
       if (!(stop > 0 && entry > stop) || (entry - stop) / entry * 100 > adrPct * maxStopAdr) return { status: "Stop too wide" as const, openingHigh, openingLow, entry, stop };
-      return { status: "Fresh ORH cross" as const, openingHigh, openingLow, entry, stop, date: latest };
+      return { status: "Fresh ORH cross" as const, openingHigh, openingLow, entry, stop, date: latest, signalTime: day[i].date };
     }
   }
   return { status: "Waiting for fresh cross" as const, openingHigh, openingLow };
