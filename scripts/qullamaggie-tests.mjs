@@ -45,4 +45,16 @@ assert.equal(openingRangeSignal(minutes, 103, 5, 10, 1).status, "Fresh ORH cross
 assert.equal(openingRangeSignal(minutes, 103, 5, 10, 1).signalTime, minutes[6].date);
 assert.equal(openingRangeSignal(minutes.map((c, i) => i === 6 ? { ...c, low: 80 } : c), 103, 5, 10, 1).stop, 99);
 assert.equal(openingRangeSignal(minutes.slice(0, 4), 103, 5, 10, 1).status, "Intraday data required");
+const watchlistSource = fs.readFileSync("src/lib/qullamaggieWatchlist.ts", "utf8");
+const watchlistJs = ts.transpileModule(watchlistSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const watchlistModule = { exports: {} };
+vm.runInNewContext(watchlistJs, { module: watchlistModule, exports: watchlistModule.exports, JSON, Number, Array });
+const { resistanceWatchlist, parseResistanceWatchlist } = watchlistModule.exports;
+const watchlist = resistanceWatchlist([
+  { security_id: "1", symbol: "BASE", qualifies: true, resistance: 100 },
+  { security_id: "2", symbol: "LEADER", qualifies: true },
+  { security_id: "3", symbol: "FILTERED", qualifies: false, resistance: 200 },
+], "2025-01-02T00:00:00Z", "2025-01-01");
+assert.deepEqual(Array.from(watchlist.stocks, stock => stock.symbol), ["BASE"]);
+assert.equal(parseResistanceWatchlist(JSON.stringify(watchlist)).stocks.length, 1);
 console.log("Qullamaggie logic tests passed");

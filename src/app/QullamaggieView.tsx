@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { defaultQFilters, openingRangeSignal, positionSize, type QFilters, type QPoint, type QRow, type QStage } from "@/lib/qullamaggieLogic";
+import { qullamaggieWatchlistKey, resistanceWatchlist } from "@/lib/qullamaggieWatchlist";
 import OpeningEntryPanel from "./OpeningEntryPanel";
 import "./qullamaggie.css";
 
@@ -93,7 +94,7 @@ export default function QullamaggieView({ settings, onOpenSettings }: { settings
   useEffect(() => { localStorage.setItem("qullamaggie-filters", JSON.stringify(filters)); }, [filters]);
   async function run() {
     setLoading(true); setError("");
-    try { const response = await fetch("/api/qullamaggie-screener", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters, rescan: true }) }); const json: Response & { error?: string } = await response.json(); if (!response.ok) throw new Error(json.error); const seen: string[] = JSON.parse(localStorage.getItem("qullamaggie-seen-breakouts") ?? "[]"); const keys = new Set(seen); json.results = json.results.map(row => { if (row.stage !== "Breakout Triggered") return row; const key = `${row.security_id}:${row.breakoutDate}:${row.resistance}`; if (keys.has(key)) return { ...row, stage: "Extended / Missed Entry" as const }; keys.add(key); return row; }); localStorage.setItem("qullamaggie-seen-breakouts", JSON.stringify([...keys].slice(-500))); setData(json); }
+    try { const response = await fetch("/api/qullamaggie-screener", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters, rescan: true }) }); const json: Response & { error?: string } = await response.json(); if (!response.ok) throw new Error(json.error); const seen: string[] = JSON.parse(localStorage.getItem("qullamaggie-seen-breakouts") ?? "[]"); const keys = new Set(seen); json.results = json.results.map(row => { if (row.stage !== "Breakout Triggered") return row; const key = `${row.security_id}:${row.breakoutDate}:${row.resistance}`; if (keys.has(key)) return { ...row, stage: "Extended / Missed Entry" as const }; keys.add(key); return row; }); localStorage.setItem("qullamaggie-seen-breakouts", JSON.stringify([...keys].slice(-500))); localStorage.setItem(qullamaggieWatchlistKey, JSON.stringify(resistanceWatchlist(json.results, json.generatedAt, json.latestDataDate))); setData(json); }
     catch (e) { setError(e instanceof Error ? e.message : "Scan failed"); } finally { setLoading(false); }
   }
   async function validateHistory() {

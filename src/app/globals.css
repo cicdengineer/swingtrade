@@ -78,3 +78,4 @@
 .portfolio-risk-strip b.negative{color:var(--red)}
 :root .portfolio-holdings-table td.portfolio-live-price.positive,:root .portfolio-holdings-table td.portfolio-live-change.positive,:root .portfolio-holdings-table td.portfolio-pnl.positive{color:var(--green)}
 :root .portfolio-holdings-table td.portfolio-live-price.negative,:root .portfolio-holdings-table td.portfolio-live-change.negative,:root .portfolio-holdings-table td.portfolio-pnl.negative{color:var(--red)}
+.screenshot-tile .q-watchlist-resistance{position:absolute;left:10px;bottom:9px;z-index:2;padding:3px 5px;border-radius:3px;background:#e2f7e9eb;color:#087f4d;font:800 9px "DM Mono";white-space:nowrap;max-width:calc(100% - 20px);overflow:hidden;text-overflow:ellipsis;pointer-events:none}:root[data-theme="dark"] .screenshot-tile .q-watchlist-resistance{background:#103b2beb;color:#69ffc0}@media(max-width:850px){.screenshot-tile .q-watchlist-resistance{left:5px;bottom:4px;font-size:8px;padding:2px 3px}}
