@@ -38,6 +38,7 @@ const breakout = analyzeQStock({ ...input, prices: breakoutPrices, filters: { ..
 assert.equal(breakout.stage, "Breakout Triggered");
 assert.equal(breakout.breakoutDate, prices[149].trade_date);
 assert.equal(positionSize(100, 95, 100000, 1, 10).quantity, 100);
+assert.equal(positionSize(110, 95, 100000, 1, 10).quantity, 66);
 assert.equal(positionSize(100, 100, 100000, 1, 10).quantity, 0);
 const minutes = Array.from({ length: 7 }, (_, i) => ({ date: new Date(Date.UTC(2025, 0, 2, 3, 45 + i)).toISOString(), open: 100, high: i === 6 ? 106 : 102, low: 99, close: i === 6 ? 105 : 101 }));
 assert.equal(openingRangeSignal(minutes, 103, 5, 10, 1).status, "Fresh ORH cross");
