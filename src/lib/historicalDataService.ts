@@ -23,20 +23,15 @@ import {
   upsertDailyPrices,
   upsertFailure,
   upsertInstrument,
-  upsertUniverseMember,
   writeDatabase,
 } from "./localDatabase";
 import type { SeasonalityDatabase } from "./localDatabase";
 
 const scripMasterUrl = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv";
 const universeSources: Record<UniverseName, { label: string; url: string }> = {
-  MIDCAP: {
-    label: "Nifty Midcap 150 current constituents",
-    url: "https://www.niftyindices.com/IndexConstituent/ind_niftymidcap150list.csv",
-  },
-  SMALLCAP: {
-    label: "Nifty Smallcap 250 current constituents",
-    url: "https://www.niftyindices.com/IndexConstituent/ind_niftysmallcap250list.csv",
+  CNX500: {
+    label: "Nifty 500 current constituents (NSE:CNX500)",
+    url: "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv",
   },
 };
 const cacheRoot = path.join(process.cwd(), ".data", "market-data-cache");
@@ -214,7 +209,7 @@ export async function getSecurityMaster(force = false): Promise<InstrumentRecord
 }
 
 export async function getCurrentUniverse(universeName?: UniverseName, force = false): Promise<UniverseMemberRecord[]> {
-  const names: UniverseName[] = universeName ? [universeName] : ["MIDCAP", "SMALLCAP"];
+  const names: UniverseName[] = universeName ? [universeName] : ["CNX500"];
   const master = await getSecurityMaster(force);
   const bySymbol = new Map(master.map((item) => [item.symbol.toUpperCase(), item]));
   const verifiedAt = new Date().toISOString();
@@ -248,9 +243,10 @@ export async function getCurrentUniverse(universeName?: UniverseName, force = fa
 export async function refreshUniverseData(force = false) {
   const db = await readDatabase();
   const members = await getCurrentUniverse(undefined, force);
+  if (members.length < 400) throw new Error(`Nifty 500 constituent download returned only ${members.length} stocks`);
+  db.universe_members = members;
   const masterBySecurity = new Map((await getSecurityMaster(false)).map((instrument) => [instrument.security_id, instrument]));
   for (const member of members) {
-    upsertUniverseMember(db, member);
     if (member.security_id) {
       markFailureResolved(db, `UNMAPPED:${member.symbol}`);
       markFailureResolved(db, member.security_id);
@@ -1110,7 +1106,8 @@ export async function updateHistoricalData(universeName?: UniverseName, retryFai
 export async function getDataStatus() {
   const db = await readDatabase();
   const dhanProfile = await getDhanProfileStatus();
-  const summaries = (["MIDCAP", "SMALLCAP"] as UniverseName[]).map((universeName) => {
+  const currentSecurityIds = new Set(db.universe_members.map((member) => member.security_id).filter(Boolean));
+  const summaries = (["CNX500"] as UniverseName[]).map((universeName) => {
     const members = db.universe_members.filter((member) => member.universe_name === universeName);
     const securityIds = new Set(members.map((member) => member.security_id).filter(Boolean));
     const prices = db.daily_prices.filter((row) => securityIds.has(row.security_id));
@@ -1137,9 +1134,10 @@ export async function getDataStatus() {
       latest_provisional: provisionalRows.length,
     };
   });
-  const allDates = db.daily_prices.map((row) => row.trade_date).sort();
+  const currentPrices = db.daily_prices.filter((row) => currentSecurityIds.has(row.security_id));
+  const allDates = currentPrices.map((row) => row.trade_date).sort();
   const latestMarketDate = allDates.at(-1) ?? null;
-  const latestMarketRows = latestMarketDate ? db.daily_prices.filter((row) => row.trade_date === latestMarketDate) : [];
+  const latestMarketRows = latestMarketDate ? currentPrices.filter((row) => row.trade_date === latestMarketDate) : [];
   const latestProvisional = latestMarketRows.filter((row) => row.is_provisional).length;
   return {
     dhan_connected: dhanProfile.ok,
@@ -1158,7 +1156,7 @@ export async function getDataStatus() {
     universe_sources: universeSources,
     latest_job: db.data_download_jobs[0] ?? null,
     summaries,
-    failures: db.download_failures.filter((failure) => failure.status === "open"),
+    failures: db.download_failures.filter((failure) => failure.status === "open" && currentSecurityIds.has(failure.security_id)),
     quality_issues: db.data_quality_issues,
   };
 }

@@ -6,7 +6,7 @@ Local, rules-based Indian equity seasonality research. It contains no technical 
 
 - Server-only Dhan historical-data integration and Dhan security-master search
 - A `.data/seasonality-edge-db.json` database for local development, with optional MySQL-backed JSON storage in production via `DATABASE_URL`
-- Current Nifty Midcap 150 and Nifty Smallcap 250 universe loading from NSE/Nifty Indices constituent CSV files
+- Current Nifty 500 (NSE:CNX500) universe loading from the NSE/Nifty Indices constituent CSV
 - Dhan Security ID mapping from the official detailed Dhan scrip master
 - Daily OHLCV analysis for Dhan's available rolling five-year history
 - Smart refresh behavior: new securities download from the required start date, existing securities request only dates after the latest stored trade date
@@ -97,8 +97,8 @@ To force reconciliation for testing, run refresh after a provisional candle exis
 
 1. Open **Data Status**.
 2. Use **Refresh Status** to inspect the local database.
-3. Use **Refresh All Data** to load the current Midcap and Smallcap universes, backfill missing daily OHLCV data, reconcile provisional candles, and construct today's EOD candle from intraday data after market close when needed.
-4. Use the per-universe **Refresh** buttons to refresh only MIDCAP or SMALLCAP.
+3. Use **Refresh All Data** to load the current Nifty 500 universe, backfill missing daily OHLCV data, reconcile provisional candles, and construct today's EOD candle from intraday data after market close when needed.
+4. Use the Nifty 500 **Refresh** button to refresh CNX500 constituents and prices.
 5. Use **Retry Failed** after transient API failures.
 6. Use **Export Universe** or **Export Failed** for CSV debugging.
 
@@ -108,9 +108,10 @@ Before running a full universe refresh, test a few known symbols from Stock Sear
 
 This implementation intentionally uses the current constituent universe only:
 
-- MIDCAP: Nifty Midcap 150 current constituents from `https://www.niftyindices.com/IndexConstituent/ind_niftymidcap150list.csv`
-- SMALLCAP: Nifty Smallcap 250 current constituents from `https://www.niftyindices.com/IndexConstituent/ind_niftysmallcap250list.csv`
+- CNX500: Nifty 500 current constituents from `https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv`
 - Dhan instrument master: `https://images.dhan.co/api-data/api-scrip-master-detailed.csv`
+
+Nifty 500 includes the Nifty 100, Nifty Midcap 150, and Nifty Smallcap 250 segments. On the first refresh after this change, the previous Midcap and Smallcap memberships are retired while existing price history remains available for matching Nifty 500 securities.
 
 Historical analysis currently uses the current constituent universe and may contain survivorship bias. Historical index membership is not solved in Phase 2A.
 

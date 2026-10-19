@@ -17,7 +17,7 @@ for (let i = 0; i < 150; i++) {
   prices.push({ id: String(i), security_id: "1", symbol: "TEST", isin: "", trade_date: day, open: close - .1, high: close + spread, low: close - spread, close, volume: i < 143 ? 1000 : 300, exchange_segment: "NSE_EQ", instrument: "EQUITY", data_source: "DHAN_DAILY", created_at: "", updated_at: "" });
 }
 const f = { ...defaultQFilters, oneMonth: false, threeMonth: false, sixMonth: false, above50: false, emaStack: false, rising20: false, minTightness: 0, maxVolumeRatio: 1, shrinkingVolatility: false };
-const input = { securityId: "1", symbol: "TEST", companyName: "Test", universeName: "MIDCAP", prices, filters: f };
+const input = { securityId: "1", symbol: "TEST", companyName: "Test", universeName: "CNX500", prices, filters: f };
 const before = analyzeQStock({ ...input, asOf: prices[148].trade_date });
 assert.equal(before.stage, "Near Breakout");
 assert.ok(before.tightness >= 65);

@@ -3,7 +3,7 @@ export type Security = { securityId: string; symbol: string; name: string; excha
 export type Observation = { label: string; year: number; returnPct: number; maePct: number };
 export type Summary = { average: number; median: number; winRate: number; best: number; worst: number; deviation: number; observations: number; maeAverage: number; maeMedian: number; maeWorst: number; maePercentiles: { p25: number; p50: number; p75: number; p90: number }; rows: Observation[] };
 
-export type UniverseName = "MIDCAP" | "SMALLCAP";
+export type UniverseName = "CNX500";
 
 export type InstrumentRecord = {
   security_id: string;

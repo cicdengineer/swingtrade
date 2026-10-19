@@ -7,12 +7,12 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     let db = await readDatabase();
-    if (!db.universe_members.some((member) => member.universe_name === "SMALLCAP")) {
+    if (!db.universe_members.some((member) => member.universe_name === "CNX500")) {
       await refreshUniverseData();
       db = await readDatabase();
     }
-    return NextResponse.json(db.universe_members.filter((member) => member.universe_name === "SMALLCAP"));
+    return NextResponse.json(db.universe_members.filter((member) => member.universe_name === "CNX500"));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Smallcap universe unavailable" }, { status: 502 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Nifty 500 universe unavailable" }, { status: 502 });
   }
 }

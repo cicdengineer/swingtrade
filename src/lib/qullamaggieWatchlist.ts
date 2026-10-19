@@ -1,6 +1,6 @@
 import type { QRow } from "./qullamaggieLogic";
 
-export const qullamaggieWatchlistKey = "qullamaggie-resistance-watchlist";
+export const qullamaggieWatchlistKey = "qullamaggie-resistance-watchlist-cnx500";
 
 export type QWatchlist = {
   generatedAt: string;

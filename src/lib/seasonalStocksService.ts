@@ -10,6 +10,7 @@ export type SeasonalStockRow = ThirtyInThirtyRow & {
 };
 
 export type SeasonalWatchlistSnapshot = {
+  universe: "CNX500";
   month: number;
   window: (typeof seasonalWindows)[number];
   evaluated: number;
@@ -28,7 +29,7 @@ function indiaToday() {
 export async function getSeasonalStocks(month: number) {
   const selectedMonth = Number.isInteger(month) && month >= 0 && month < 12 ? month : new Date().getMonth();
   const stored = await readSeasonalWatchlistSnapshot<SeasonalWatchlistSnapshot>(selectedMonth);
-  return stored ?? {
+  return stored?.universe === "CNX500" ? stored : {
     month: selectedMonth,
     window: seasonalWindows[selectedMonth],
     evaluated: 0,
@@ -115,7 +116,7 @@ async function calculateAndStoreWatchlists() {
   const generatedAt = new Date().toISOString();
   const snapshots: SeasonalWatchlistSnapshot[] = seasonalWindows.map((window, month) => {
     const rows = results[month].sort((a, b) => b.seasonal_avg_return - a.seasonal_avg_return);
-    return { month, window, evaluated: activeMembers.size, qualified: rows.length, results: rows, generatedAt };
+    return { universe: "CNX500", month, window, evaluated: activeMembers.size, qualified: rows.length, results: rows, generatedAt };
   });
   await writeSeasonalWatchlistSnapshots(snapshots.map((value) => ({ month: value.month, value })));
   return snapshots;

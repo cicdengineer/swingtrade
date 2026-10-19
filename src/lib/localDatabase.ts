@@ -106,7 +106,12 @@ const emptyDb = (): SeasonalityDatabase => {
 };
 
 function normalizeDatabase(raw: Partial<SeasonalityDatabase> | null | undefined): SeasonalityDatabase {
-  return { ...emptyDb(), ...(raw ?? {}) };
+  const db = { ...emptyDb(), ...(raw ?? {}) };
+  // Keep historical prices while retiring the old index memberships.
+  db.universe_members = db.universe_members.filter((member) => member.universe_name === "CNX500");
+  db.seasonal_observations = db.seasonal_observations.filter((row) => row.universe_name === "CNX500");
+  db.seasonal_statistics = db.seasonal_statistics.filter((row) => row.universe_name === "CNX500");
+  return db;
 }
 
 function parseMysqlJson<T>(value: MysqlJsonValue): T | null {
@@ -256,7 +261,7 @@ function databaseFromShards(rows: MysqlRow[]) {
     }
   }
 
-  return db;
+  return normalizeDatabase(db);
 }
 
 async function ensureMysqlDatabase(): Promise<SeasonalityDatabase> {
@@ -382,7 +387,10 @@ export async function readSeasonalWatchlistBuildInputs() {
     if (row.collection_name === "universe_members") members.push(...(parseMysqlJson<UniverseMemberRecord[]>(row.data) ?? []));
     if (row.collection_name === "seasonal_observations") observations.push(...(parseMysqlJson<SeasonalObservationRecord[]>(row.data) ?? []));
   }
-  return { members, observations };
+  return {
+    members: members.filter((member) => member.universe_name === "CNX500"),
+    observations: observations.filter((row) => row.universe_name === "CNX500"),
+  };
 }
 
 export async function readDailyPricesForWatchlist(ids: string[]) {

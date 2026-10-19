@@ -1,7 +1,7 @@
 import type { DailyPriceRecord } from "./types";
 
 export type QFilters = {
-  universe: "ALL" | "MIDCAP" | "SMALLCAP"; momentumMode: "ANY" | "ALL";
+  universe: "ALL" | "CNX500"; momentumMode: "ANY" | "ALL";
   oneMonth: boolean; min1m: number; threeMonth: boolean; min3m: number; sixMonth: boolean; min6m: number;
   above50: boolean; emaStack: boolean; rising20: boolean; above10: boolean;
   minBaseDays: number; maxBaseDays: number; maxDepth: number; max5Range: number;
