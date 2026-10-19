@@ -2489,7 +2489,7 @@ function ThirtyInThirtyScoreTiles({ selected, chartMonths }: { selected: ThirtyI
   </div>;
 }
 
-function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceStyle = false, sources }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[] }) {
+function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceStyle = false, sources, showScreenerStoch = false }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[]; showScreenerStoch?: boolean }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
   const [hourlyLoading, setHourlyLoading] = useState(false);
@@ -2534,7 +2534,12 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
     };
   }, [selected.security_id, timeframe]);
 
-  const dailyRows = lastTradingMonths(mergeLiveDailyCandle(selected.recent, liveDailyRow), chartMonths === 6 ? 126 : 63);
+  const mergedDailyRows = mergeLiveDailyCandle(selected.recent, liveDailyRow) as Array<DailyChartPoint & { daily_stoch_d?: number }>;
+  if (showScreenerStoch && liveDailyRow && mergedDailyRows.length) {
+    const liveD = screenerStochDValues(mergedDailyRows.map((row) => row.close)).at(-1);
+    mergedDailyRows[mergedDailyRows.length - 1] = { ...mergedDailyRows.at(-1)!, daily_stoch_d: liveD };
+  }
+  const dailyRows = lastTradingMonths(mergedDailyRows, chartMonths === 6 ? 126 : 63);
   const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
   return <div className="chart-shell">
     <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} settings={settings} />
@@ -2553,7 +2558,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
         </div>
       </div>
     </div>
-    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} />
+    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} showScreenerStoch={showScreenerStoch} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>;
 }
@@ -2884,7 +2889,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <p className="eyebrow">{combined ? `Screener · ${membership[selected.security_id]?.join(" · ")}` : qMode ? `Qullamaggie watchlist · resistance ${qResistance(selected.security_id)}` : seasonal ? `Seasonal Stocks · ${selected.seasonal_window} · ${selected.seasonal_avg_return?.toFixed(1)}% average` : `30 in 30 · ${selected.best_return_pct.toFixed(1)}%`}</p>
         <h2>{selected.symbol} · {selected.company_name}</h2>
         <p className="muted">{selected.reason}</p>
-        <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} settings={settings} referenceStyle={!seasonal} sources={combined ? membership[selected.security_id] : undefined} />
+        <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} settings={settings} referenceStyle={!seasonal} sources={combined ? membership[selected.security_id] : undefined} showScreenerStoch={combined} />
         {seasonal && <div className="strategy-stat-grid"><StrategyStat label="Next 3M Seasonal Average" value={pct(selected.seasonal_avg_return ?? 0)} sub={`${selected.seasonal_window} · ${selected.seasonal_observations} completed years`} tone="good" /></div>}
         <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} />
       </div>
@@ -3343,7 +3348,42 @@ function liveAdjustedHourlyBreakout(row: HourlyBreakoutRow, liveTick?: LiveTick)
   return { liveClose, todayChange, emaDistance, breakoutDistance, pullbackFromZone };
 }
 
-function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean }) {
+// The Screener chart uses the same 14/14/3/3 Wilder StochRSI calculation as its scan.
+function screenerStochDValues(closes: number[]) {
+  const rsi: Array<number | undefined> = Array(closes.length).fill(undefined);
+  if (closes.length <= 14) return rsi;
+  let gain = 0;
+  let loss = 0;
+  for (let index = 1; index <= 14; index += 1) {
+    const change = closes[index] - closes[index - 1];
+    gain += Math.max(change, 0);
+    loss += Math.max(-change, 0);
+  }
+  let averageGain = gain / 14;
+  let averageLoss = loss / 14;
+  rsi[14] = averageLoss === 0 ? 100 : 100 - 100 / (1 + averageGain / averageLoss);
+  for (let index = 15; index < closes.length; index += 1) {
+    const change = closes[index] - closes[index - 1];
+    averageGain = (averageGain * 13 + Math.max(change, 0)) / 14;
+    averageLoss = (averageLoss * 13 + Math.max(-change, 0)) / 14;
+    rsi[index] = averageLoss === 0 ? 100 : 100 - 100 / (1 + averageGain / averageLoss);
+  }
+  const rawK = rsi.map((value, index) => {
+    if (value === undefined || index < 27) return undefined;
+    const window = rsi.slice(index - 13, index + 1) as number[];
+    const low = Math.min(...window);
+    const high = Math.max(...window);
+    return high === low ? 0 : ((value - low) / (high - low)) * 100;
+  });
+  const smooth = (values: Array<number | undefined>) => values.map((_, index) => {
+    if (index < 2) return undefined;
+    const window = values.slice(index - 2, index + 1);
+    return window.every((value) => value !== undefined) ? (window as number[]).reduce((sum, value) => sum + value, 0) / 3 : undefined;
+  });
+  return smooth(smooth(rawK));
+}
+
+function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, showScreenerStoch = false }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; showScreenerStoch?: boolean }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -3362,6 +3402,24 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   const candleSlot = width / chartRows.length;
   const bodyWidth = Math.max(3, Math.min(8, candleSlot * 0.48));
   const maxVolume = Math.max(...chartRows.map((row) => row.volume));
+  const screenerD = showScreenerStoch ? timeframe === "daily"
+    ? chartRows.map((row) => (row as DailyChartPoint & { daily_stoch_d?: number }).daily_stoch_d)
+    : screenerStochDValues(chartRows.map((row) => row.close)) : [];
+  const stochHeight = 84;
+  const stochY = (value: number) => 8 + (100 - value) / 100 * (stochHeight - 16);
+  const stochPoints = screenerD.map((value, index) => value === undefined ? null : { value, x: index * candleSlot + candleSlot / 2, y: stochY(value) });
+  const stochPath = stochPoints.map((point, index) => point ? `${index && stochPoints[index - 1] ? "L" : "M"}${point.x.toFixed(2)} ${point.y.toFixed(2)}` : "").join(" ");
+  const stochFills = (threshold: number, below: boolean) => stochPoints.slice(1).flatMap((point, index) => {
+    const previous = stochPoints[index];
+    if (!previous || !point) return [];
+    const previousInside = below ? previous.value < threshold : previous.value > threshold;
+    const pointInside = below ? point.value < threshold : point.value > threshold;
+    if (!previousInside && !pointInside) return [];
+    const crossingX = previous.x + (threshold - previous.value) / (point.value - previous.value) * (point.x - previous.x);
+    const start = previousInside ? previous : { x: crossingX, y: stochY(threshold) };
+    const end = pointInside ? point : { x: crossingX, y: stochY(threshold) };
+    return [`${start.x},${stochY(threshold)} ${start.x},${start.y} ${end.x},${end.y} ${end.x},${stochY(threshold)}`];
+  });
   const volumeSma = smaValues(chartRows.map((row) => row.volume), 20);
   const emaPath = chartEmaValues.map((value, index) => ({ value, x: index * candleSlot + candleSlot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
   const swingLowIndex = swingLowPoint ? chartRows.findIndex((row) => row.trade_date === swingLowPoint.trade_date) : -1;
@@ -3414,6 +3472,16 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
         return <span key={row.trade_date} className={`outside-volume-bar ${up ? "up" : "down"} ${high ? "high" : ""}`} style={{ height }} title={`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}${ratio ? ` (${ratio.toFixed(1)}x)` : ""}`} />;
       })}
     </div>}
+    {showScreenerStoch && <div className="screener-stoch-panel"><svg viewBox={`0 0 ${width} ${stochHeight}`} role="img" aria-label={`${timeframe} StochRSI percent D; green below 20 and red above 80`}>
+      {stochFills(20, true).map((points, index) => <polygon key={`low-${index}`} className="screener-stoch-low" points={points} />)}
+      {stochFills(80, false).map((points, index) => <polygon key={`high-${index}`} className="screener-stoch-high" points={points} />)}
+      <line className="screener-stoch-guide" x1="0" x2={width} y1={stochY(20)} y2={stochY(20)} />
+      <line className="screener-stoch-guide" x1="0" x2={width} y1={stochY(80)} y2={stochY(80)} />
+      <path className="screener-stoch-line" d={stochPath} />
+      <text className="screener-stoch-label" x="4" y="13">StochRSI %D</text>
+      <text className="screener-stoch-label" x={width - 3} y={stochY(80) - 3} textAnchor="end">80</text>
+      <text className="screener-stoch-label" x={width - 3} y={stochY(20) - 3} textAnchor="end">20</text>
+    </svg></div>}
     {referenceStyle && <div className="thirty-reference-legend">{timeframe} candles · <span>10 EMA</span> · Volume below</div>}
   </div>;
 }
