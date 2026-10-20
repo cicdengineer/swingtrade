@@ -1323,6 +1323,7 @@ function TenEmaCell({ holding }: { holding: PortfolioHolding }) {
 
 function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
   const rows = holding.recent ?? [];
+  const latestStochD = chartStochDValues(rows.map((row) => row.close)).at(-1);
   const last = rows.at(-1);
   const previous = rows.at(-2);
   const last3 = rows.slice(-3);
@@ -1344,6 +1345,7 @@ function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
     { label: "Swing High", value: swingBreak ? "Breaking" : "Below", good: swingBreak },
     { label: "10 EMA Cost Cue", value: moveSl ? "Move SL" : "No cue", good: moveSl || holding.riskFree },
     { label: "Extreme Move", value: extremeMove ? "Yes" : "No", good: !extremeMove },
+    { label: "StochRSI %D", value: latestStochD === undefined ? "—" : latestStochD > 80 ? `Trim · ${latestStochD.toFixed(1)}` : latestStochD.toFixed(1), good: latestStochD !== undefined && latestStochD <= 80 },
     { label: "Open Risk", value: holding.riskFree ? "Risk-free" : rupees(holdingRisk(holding)), good: holdingRisk(holding) === 0 },
   ];
   return <div className="portfolio-decision-grid">{tiles.map((tile) => <div key={tile.label} className={tile.good ? "good" : "watch"}><span>{tile.label}</span><b>{tile.value}</b></div>)}</div>;
@@ -1371,7 +1373,8 @@ function HoldingDecisionMeter({ holding }: { holding: PortfolioHolding }) {
 }
 
 function PortfolioHoldingChart({ holding, live, dailyError }: { holding: PortfolioHolding; live: boolean; dailyError?: string }) {
-  const rows = lastTradingMonths(holding.recent ?? [], 90);
+  const allRows = holding.recent ?? [];
+  const rows = lastTradingMonths(allRows, 90);
   if (rows.length < 5) return <div className="chart-empty">Not enough rows for charting.</div>;
   const width = 780;
   const priceHeight = 260;
@@ -1389,8 +1392,9 @@ function PortfolioHoldingChart({ holding, live, dailyError }: { holding: Portfol
   const emaPath = (period: "ema10" | "ema50") => rows.map((row, index) => ({ value: row[period], x: index * slot + slot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
   const entryY = scaleValue(holding.avgCostPrice, priceMin, priceMax, priceHeight, 8);
   const slY = holding.stopLoss ? scaleValue(holding.stopLoss, priceMin, priceMax, priceHeight, 8) : undefined;
+  const stochD = chartStochDValues(allRows.map((row) => row.close)).slice(-rows.length);
   return <div className="candle-chart portfolio-popup-chart">
-    <div className="chart-legend"><span><i className="legend-candle" />Daily candles{live ? " + live" : ""}</span><span><i className="legend-ema10" />10 EMA</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume</span><span><i className="legend-entry" />Entry</span><span><i className="legend-stop" />SL</span></div>
+    <div className="chart-legend"><span><i className="legend-candle" />Daily candles{live ? " + live" : ""}</span><span><i className="legend-ema10" />10 EMA</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume</span><span><i className="legend-entry" />Entry</span><span><i className="legend-stop" />SL</span><span>StochRSI %D</span></div>
     <svg viewBox={`0 0 ${width} ${totalHeight}`} role="img" aria-label={`${holding.tradingSymbol} chart with 10 EMA, 50 EMA, volume, entry and stop loss`}>
       {rows.map((row, index) => {
         const x = index * slot + slot / 2;
@@ -1414,6 +1418,7 @@ function PortfolioHoldingChart({ holding, live, dailyError }: { holding: Portfol
       <text className="chart-label" x="0" y={Math.max(12, entryY - 4)}>Entry {money(holding.avgCostPrice)}</text>
       {slY !== undefined && <text className="chart-label stop-label" x="0" y={Math.max(12, slY - 4)}>SL {money(holding.stopLoss!)}</text>}
     </svg>
+    <StochDPanel values={stochD} width={width} label={`${holding.tradingSymbol} daily StochRSI percent D`} />
     {dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>;
 }
@@ -1448,7 +1453,7 @@ function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHoldin
 
   const adjustedHolding = useMemo(() => liveAdjustedPortfolioHolding(holding, liveDailyRow), [holding, liveDailyRow]);
   const ema10FromAvgCost = ema10DistanceFromAvgCostPct(adjustedHolding);
-  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume, entry and stored SL.</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={ema10FromAvgCost === undefined ? undefined : pct2(ema10FromAvgCost)} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
+  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume, StochRSI %D, entry and stored SL.</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={ema10FromAvgCost === undefined ? undefined : pct2(ema10FromAvgCost)} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
 }
 
 function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHolding[]; onStopLossSaved: () => Promise<void> | void }) {
@@ -2536,7 +2541,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
 
   const mergedDailyRows = mergeLiveDailyCandle(selected.recent, liveDailyRow) as Array<DailyChartPoint & { daily_stoch_d?: number }>;
   if (showScreenerStoch && liveDailyRow && mergedDailyRows.length) {
-    const liveD = screenerStochDValues(mergedDailyRows.map((row) => row.close)).at(-1);
+    const liveD = chartStochDValues(mergedDailyRows.map((row) => row.close)).at(-1);
     mergedDailyRows[mergedDailyRows.length - 1] = { ...mergedDailyRows.at(-1)!, daily_stoch_d: liveD };
   }
   const dailyRows = lastTradingMonths(mergedDailyRows, chartMonths === 6 ? 126 : 63);
@@ -3348,8 +3353,8 @@ function liveAdjustedHourlyBreakout(row: HourlyBreakoutRow, liveTick?: LiveTick)
   return { liveClose, todayChange, emaDistance, breakoutDistance, pullbackFromZone };
 }
 
-// The Screener chart uses the same 14/14/3/3 Wilder StochRSI calculation as its scan.
-function screenerStochDValues(closes: number[]) {
+// Portfolio and Screener use the same 14/14/3/3 Wilder StochRSI calculation as the scan.
+function chartStochDValues(closes: number[]) {
   const rsi: Array<number | undefined> = Array(closes.length).fill(undefined);
   if (closes.length <= 14) return rsi;
   let gain = 0;
@@ -3383,6 +3388,35 @@ function screenerStochDValues(closes: number[]) {
   return smooth(smooth(rawK));
 }
 
+function StochDPanel({ values, width, label }: { values: Array<number | undefined>; width: number; label: string }) {
+  const height = 84;
+  const slot = width / Math.max(values.length, 1);
+  const y = (value: number) => 8 + (100 - value) / 100 * (height - 16);
+  const points = values.map((value, index) => value === undefined ? null : { value, x: index * slot + slot / 2, y: y(value) });
+  const path = points.map((point, index) => point ? `${index && points[index - 1] ? "L" : "M"}${point.x.toFixed(2)} ${point.y.toFixed(2)}` : "").join(" ");
+  const fills = (threshold: number, below: boolean) => points.slice(1).flatMap((point, index) => {
+    const previous = points[index];
+    if (!previous || !point) return [];
+    const previousInside = below ? previous.value < threshold : previous.value > threshold;
+    const pointInside = below ? point.value < threshold : point.value > threshold;
+    if (!previousInside && !pointInside) return [];
+    const crossingX = previous.x + (threshold - previous.value) / (point.value - previous.value) * (point.x - previous.x);
+    const start = previousInside ? previous : { x: crossingX, y: y(threshold) };
+    const end = pointInside ? point : { x: crossingX, y: y(threshold) };
+    return [`${start.x},${y(threshold)} ${start.x},${start.y} ${end.x},${end.y} ${end.x},${y(threshold)}`];
+  });
+  return <div className="screener-stoch-panel"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${label}; green below 20 and red above 80`}>
+    {fills(20, true).map((polygon, index) => <polygon key={`low-${index}`} className="screener-stoch-low" points={polygon} />)}
+    {fills(80, false).map((polygon, index) => <polygon key={`high-${index}`} className="screener-stoch-high" points={polygon} />)}
+    <line className="screener-stoch-guide" x1="0" x2={width} y1={y(20)} y2={y(20)} />
+    <line className="screener-stoch-guide" x1="0" x2={width} y1={y(80)} y2={y(80)} />
+    <path className="screener-stoch-line" d={path} />
+    <text className="screener-stoch-label" x="4" y="13">StochRSI %D</text>
+    <text className="screener-stoch-label" x={width - 3} y={y(80) - 3} textAnchor="end">80</text>
+    <text className="screener-stoch-label" x={width - 3} y={y(20) - 3} textAnchor="end">20</text>
+  </svg></div>;
+}
+
 function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, showScreenerStoch = false }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; showScreenerStoch?: boolean }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
@@ -3404,22 +3438,7 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   const maxVolume = Math.max(...chartRows.map((row) => row.volume));
   const screenerD = showScreenerStoch ? timeframe === "daily"
     ? chartRows.map((row) => (row as DailyChartPoint & { daily_stoch_d?: number }).daily_stoch_d)
-    : screenerStochDValues(chartRows.map((row) => row.close)) : [];
-  const stochHeight = 84;
-  const stochY = (value: number) => 8 + (100 - value) / 100 * (stochHeight - 16);
-  const stochPoints = screenerD.map((value, index) => value === undefined ? null : { value, x: index * candleSlot + candleSlot / 2, y: stochY(value) });
-  const stochPath = stochPoints.map((point, index) => point ? `${index && stochPoints[index - 1] ? "L" : "M"}${point.x.toFixed(2)} ${point.y.toFixed(2)}` : "").join(" ");
-  const stochFills = (threshold: number, below: boolean) => stochPoints.slice(1).flatMap((point, index) => {
-    const previous = stochPoints[index];
-    if (!previous || !point) return [];
-    const previousInside = below ? previous.value < threshold : previous.value > threshold;
-    const pointInside = below ? point.value < threshold : point.value > threshold;
-    if (!previousInside && !pointInside) return [];
-    const crossingX = previous.x + (threshold - previous.value) / (point.value - previous.value) * (point.x - previous.x);
-    const start = previousInside ? previous : { x: crossingX, y: stochY(threshold) };
-    const end = pointInside ? point : { x: crossingX, y: stochY(threshold) };
-    return [`${start.x},${stochY(threshold)} ${start.x},${start.y} ${end.x},${end.y} ${end.x},${stochY(threshold)}`];
-  });
+    : chartStochDValues(chartRows.map((row) => row.close)) : [];
   const volumeSma = smaValues(chartRows.map((row) => row.volume), 20);
   const emaPath = chartEmaValues.map((value, index) => ({ value, x: index * candleSlot + candleSlot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
   const swingLowIndex = swingLowPoint ? chartRows.findIndex((row) => row.trade_date === swingLowPoint.trade_date) : -1;
@@ -3472,16 +3491,7 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
         return <span key={row.trade_date} className={`outside-volume-bar ${up ? "up" : "down"} ${high ? "high" : ""}`} style={{ height }} title={`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}${ratio ? ` (${ratio.toFixed(1)}x)` : ""}`} />;
       })}
     </div>}
-    {showScreenerStoch && <div className="screener-stoch-panel"><svg viewBox={`0 0 ${width} ${stochHeight}`} role="img" aria-label={`${timeframe} StochRSI percent D; green below 20 and red above 80`}>
-      {stochFills(20, true).map((points, index) => <polygon key={`low-${index}`} className="screener-stoch-low" points={points} />)}
-      {stochFills(80, false).map((points, index) => <polygon key={`high-${index}`} className="screener-stoch-high" points={points} />)}
-      <line className="screener-stoch-guide" x1="0" x2={width} y1={stochY(20)} y2={stochY(20)} />
-      <line className="screener-stoch-guide" x1="0" x2={width} y1={stochY(80)} y2={stochY(80)} />
-      <path className="screener-stoch-line" d={stochPath} />
-      <text className="screener-stoch-label" x="4" y="13">StochRSI %D</text>
-      <text className="screener-stoch-label" x={width - 3} y={stochY(80) - 3} textAnchor="end">80</text>
-      <text className="screener-stoch-label" x={width - 3} y={stochY(20) - 3} textAnchor="end">20</text>
-    </svg></div>}
+    {showScreenerStoch && <StochDPanel values={screenerD} width={width} label={`${timeframe} StochRSI percent D`} />}
     {referenceStyle && <div className="thirty-reference-legend">{timeframe} candles · <span>10 EMA</span> · Volume below</div>}
   </div>;
 }
