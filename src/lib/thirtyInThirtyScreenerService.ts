@@ -74,6 +74,7 @@ export type ThirtyInThirtyRow = {
     ema10?: number;
     ema50?: number;
     volume: number;
+    is_provisional?: boolean;
     volume_ratio?: number;
     daily_stoch_d?: number;
   }>;
@@ -203,6 +204,7 @@ export function analyzeStock(input: {
       ema10: ema10[originalIndex],
       ema50: ema50[originalIndex],
       volume: row.volume,
+      is_provisional: row.is_provisional,
       volume_ratio: volAvg ? row.volume / volAvg : undefined,
       daily_stoch_d: dailyStochD[originalIndex],
     };

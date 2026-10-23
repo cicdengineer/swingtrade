@@ -1,5 +1,7 @@
 import type { DailyPriceRecord } from "./types";
 
+type VolumePrice = Pick<DailyPriceRecord, "trade_date" | "open" | "high" | "low" | "close" | "volume"> & { is_provisional?: boolean };
+
 export type VolumeSellingSignal = {
   signal_date: string;
   signal_high: number;
@@ -16,11 +18,11 @@ export type VolumeSellingSetup = VolumeSellingSignal & {
   sessions_since_close_above?: number;
 };
 
-/** Latest completed red candle in the last 126 sessions with exceptional selling volume. */
-export function findVolumeSellingSignal(prices: DailyPriceRecord[], minRedRatio = 2.5): VolumeSellingSignal | null {
+/** Latest completed red candle in the selected session window with exceptional selling volume. */
+export function findVolumeSellingSignal(prices: VolumePrice[], minRedRatio = 2.5, lookbackSessions = 126): VolumeSellingSignal | null {
   const rows = [...prices].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
   const last = rows.length - 1;
-  for (let i = last; i >= Math.max(0, last - 125); i--) {
+  for (let i = last; i >= Math.max(0, last - lookbackSessions + 1); i--) {
     const candle = rows[i];
     if (candle.is_provisional || candle.close >= candle.open || candle.volume <= 0) continue;
     const prior = rows.slice(Math.max(0, i - 60), i).filter(row => !row.is_provisional && row.volume > 0);
@@ -40,7 +42,7 @@ export function findVolumeSellingSignal(prices: DailyPriceRecord[], minRedRatio 
 }
 
 /** A falling 21-session setup remains visible for five sessions after its first completed close above the signal high. */
-export function findVolumeSellingSetup(prices: DailyPriceRecord[], minRedRatio = 2.5): VolumeSellingSetup | null {
+export function findVolumeSellingSetup(prices: VolumePrice[], minRedRatio = 2.5): VolumeSellingSetup | null {
   const rows = [...prices].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
   const signal = findVolumeSellingSignal(prices, minRedRatio);
   if (!signal) return null;

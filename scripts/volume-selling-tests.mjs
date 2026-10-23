@@ -14,6 +14,7 @@ const latest = findVolumeSellingSignal(rows);
 assert.equal(latest?.signal_date, rows[140].trade_date, "select the latest strong red candle");
 assert.equal(latest?.signal_high, rows[140].high);
 assert.equal(latest?.signal_age, 9);
+assert.equal(findVolumeSellingSignal(rows, 2.5, 21)?.signal_date, rows[140].trade_date, "Screener uses the latest signal within 21 sessions");
 assert.equal(findVolumeSellingSignal(rows, 3.5)?.signal_date, rows[40].trade_date, "higher threshold skips weaker recent signal");
 rows[145].volume = 1000;
 rows[145].is_provisional = true;
@@ -21,6 +22,7 @@ rows[145].open = 101; rows[145].close = 100;
 assert.equal(findVolumeSellingSignal(rows)?.signal_date, rows[140].trade_date, "ignore provisional candles");
 rows[140].close = 102;
 assert.equal(findVolumeSellingSignal(rows)?.signal_date, rows[40].trade_date, "green candle cannot replace selling signal");
+assert.equal(findVolumeSellingSignal(rows, 2.5, 21), null, "Screener does not show an older red entry line");
 assert.equal(findVolumeSellingSignal([...rows, ...Array.from({ length: 126 }, (_, i) => ({ ...rows[149], trade_date: new Date(Date.UTC(2026, 5, i + 1)).toISOString().slice(0, 10) }))]), null, "signals expire after 126 sessions");
 
 const falling = Array.from({ length: 60 }, (_, index) => ({

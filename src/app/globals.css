@@ -109,4 +109,7 @@
 .volume-selling-chart .vs-axis{fill:var(--muted);font:11px "DM Mono"}
 .volume-selling-page .vs-signal-line{stroke:#265ee8;stroke-width:2;vector-effect:non-scaling-stroke}
 .volume-selling-chart .vs-signal-label{fill:#265ee8;font:700 12px "DM Mono"}
+.combined-screener-page .selling-climax-line{stroke:#265ee8;stroke-width:2;stroke-dasharray:none;vector-effect:non-scaling-stroke}
+.combined-screener-page .selling-climax-label{fill:#265ee8;font:700 10px "DM Mono"}
+.screener-tag-selling{background:#e1e8ff;border-color:#9fb3f7!important;color:#2145af}
 @media(max-width:700px){.volume-selling-page .screenshot-tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.volume-selling-page .thirty-result-tile{height:155px}}
