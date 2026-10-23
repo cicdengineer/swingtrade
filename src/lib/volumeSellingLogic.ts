@@ -9,6 +9,13 @@ export type VolumeSellingSignal = {
   signal_age: number;
 };
 
+export type VolumeSellingSetup = VolumeSellingSignal & {
+  one_month_decline_pct: number;
+  phase: "BELOW" | "CLOSED_ABOVE";
+  first_close_above_date?: string;
+  sessions_since_close_above?: number;
+};
+
 /** Latest completed red candle in the last 126 sessions with exceptional selling volume. */
 export function findVolumeSellingSignal(prices: DailyPriceRecord[], minRedRatio = 2.5): VolumeSellingSignal | null {
   const rows = [...prices].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
@@ -32,16 +39,26 @@ export function findVolumeSellingSignal(prices: DailyPriceRecord[], minRedRatio 
   return null;
 }
 
-/** The level must remain untouched after the signal until today; today's first intraday test is allowed. */
-export function isCleanVolumeSellingSignal(prices: DailyPriceRecord[], signal: VolumeSellingSignal, today: string): boolean {
-  return prices.every(row => {
-    if (row.trade_date <= signal.signal_date) return true;
-    if (row.trade_date < today) return row.high < signal.signal_high;
-    return row.is_provisional || row.close < signal.signal_high;
-  });
-}
-
-export function findCleanVolumeSellingSignal(prices: DailyPriceRecord[], today: string, minRedRatio = 2.5): VolumeSellingSignal | null {
+/** A falling 21-session setup remains visible for five sessions after its first completed close above the signal high. */
+export function findVolumeSellingSetup(prices: DailyPriceRecord[], minRedRatio = 2.5): VolumeSellingSetup | null {
+  const rows = [...prices].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
   const signal = findVolumeSellingSignal(prices, minRedRatio);
-  return signal && isCleanVolumeSellingSignal(prices, signal, today) ? signal : null;
+  if (!signal) return null;
+  const signalIndex = rows.findIndex(row => row.trade_date === signal.signal_date);
+  const firstCloseAboveIndex = rows.findIndex((row, index) => index > signalIndex && !row.is_provisional && row.close >= signal.signal_high);
+  const referenceIndex = firstCloseAboveIndex >= 0
+    ? rows.findLastIndex((row, index) => index < firstCloseAboveIndex && !row.is_provisional)
+    : rows.findLastIndex(row => !row.is_provisional);
+  const completed = rows.slice(0, referenceIndex + 1).filter(row => !row.is_provisional);
+  if (completed.length < 22) return null;
+  const currentClose = completed.at(-1)!.close;
+  const monthAgoClose = completed.at(-22)!.close;
+  if (monthAgoClose <= 0 || currentClose >= monthAgoClose) return null;
+  const sessionsSinceCloseAbove = firstCloseAboveIndex >= 0
+    ? new Set(rows.slice(firstCloseAboveIndex + 1).map(row => row.trade_date)).size : undefined;
+  if (sessionsSinceCloseAbove !== undefined && sessionsSinceCloseAbove > 5) return null;
+  return { ...signal, one_month_decline_pct: (currentClose / monthAgoClose - 1) * 100,
+    phase: firstCloseAboveIndex >= 0 ? "CLOSED_ABOVE" : "BELOW",
+    first_close_above_date: firstCloseAboveIndex >= 0 ? rows[firstCloseAboveIndex].trade_date : undefined,
+    sessions_since_close_above: sessionsSinceCloseAbove };
 }

@@ -1,9 +1,9 @@
 import "server-only";
 import { readDatabase } from "./localDatabase";
-import { findCleanVolumeSellingSignal, findVolumeSellingSignal } from "./volumeSellingLogic";
+import { findVolumeSellingSetup } from "./volumeSellingLogic";
 import type { DailyPriceRecord, UniverseName } from "./types";
 
-export type VolumeSellingRow = NonNullable<ReturnType<typeof findVolumeSellingSignal>> & {
+export type VolumeSellingRow = NonNullable<ReturnType<typeof findVolumeSellingSetup>> & {
   security_id: string; symbol: string; company_name: string; universe_name: UniverseName;
   current_date: string; current_close: number; previous_close: number; current_high: number;
   distance_pct: number; recent: Pick<DailyPriceRecord, "trade_date" | "open" | "high" | "low" | "close" | "volume">[];
@@ -11,7 +11,6 @@ export type VolumeSellingRow = NonNullable<ReturnType<typeof findVolumeSellingSi
 
 export async function runVolumeSellingScreener() {
   const db = await readDatabase();
-  const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const bySecurity = new Map<string, DailyPriceRecord[]>();
   for (const price of db.daily_prices) {
     const list = bySecurity.get(price.security_id) ?? [];
@@ -27,7 +26,7 @@ export async function runVolumeSellingScreener() {
     const prices = (bySecurity.get(member.security_id) ?? []).sort((a, b) => a.trade_date.localeCompare(b.trade_date));
     const current = prices.at(-1);
     if (!current) continue;
-    const signal = findCleanVolumeSellingSignal(prices, today);
+    const signal = findVolumeSellingSetup(prices);
     if (!signal || signal.signal_high <= 0) continue;
     const previous = prices.at(-2);
     results.push({ ...signal, security_id: member.security_id, symbol: member.symbol, company_name: member.company_name,

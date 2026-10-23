@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { findCleanVolumeSellingSignal, findVolumeSellingSignal } from "../src/lib/volumeSellingLogic.ts";
+import { findVolumeSellingSetup, findVolumeSellingSignal } from "../src/lib/volumeSellingLogic.ts";
 
 const rows = Array.from({ length: 150 }, (_, i) => ({
   trade_date: new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10),
@@ -23,22 +23,31 @@ rows[140].close = 102;
 assert.equal(findVolumeSellingSignal(rows)?.signal_date, rows[40].trade_date, "green candle cannot replace selling signal");
 assert.equal(findVolumeSellingSignal([...rows, ...Array.from({ length: 126 }, (_, i) => ({ ...rows[149], trade_date: new Date(Date.UTC(2026, 5, i + 1)).toISOString().slice(0, 10) }))]), null, "signals expire after 126 sessions");
 
-const clean = rows.map((row, index) => ({ ...row, high: index === 140 ? 105 : index === 40 ? 104 : 103 }));
-clean[140].close = 100;
-assert.equal(findCleanVolumeSellingSignal(clean, "2026-10-23")?.signal_date, clean[140].trade_date);
-const priorWick = clean.map(row => ({ ...row }));
-priorWick[143].high = 105;
-assert.equal(findCleanVolumeSellingSignal(priorWick, "2026-10-23"), null, "an earlier test of the line invalidates the latest signal");
-const priorClose = clean.map(row => ({ ...row }));
-priorClose[143].high = 106;
-priorClose[143].close = 105;
-assert.equal(findCleanVolumeSellingSignal(priorClose, "2026-10-23"), null, "an earlier close on the line invalidates the signal");
-const firstTestToday = clean.map(row => ({ ...row }));
-firstTestToday[149].trade_date = "2026-10-23";
-firstTestToday[149].high = 105;
-firstTestToday[149].is_provisional = true;
-assert.equal(findCleanVolumeSellingSignal(firstTestToday, "2026-10-23")?.signal_date, clean[140].trade_date, "today's first intraday test remains eligible");
-firstTestToday[149].is_provisional = false;
-firstTestToday[149].close = 105;
-assert.equal(findCleanVolumeSellingSignal(firstTestToday, "2026-10-23"), null, "a completed close on the line removes the stock");
+const falling = Array.from({ length: 60 }, (_, index) => ({
+  trade_date: new Date(Date.UTC(2026, 6, index + 1)).toISOString().slice(0, 10),
+  open: 161 - index, close: 160 - index, high: 162 - index, low: 159 - index,
+  volume: index === 40 ? 350 : 100, is_provisional: false,
+}));
+assert.equal(findVolumeSellingSetup(falling)?.phase, "BELOW", "a falling month and strong red bar qualify");
+assert.ok(findVolumeSellingSetup(falling).one_month_decline_pct < 0);
+const flat = falling.map(row => ({ ...row }));
+flat[38].close = 100;
+assert.equal(findVolumeSellingSetup(flat), null, "a stock without a falling latest month is excluded");
+const intradayTest = falling.map(row => ({ ...row }));
+intradayTest[43].high = falling[40].high + 1;
+assert.equal(findVolumeSellingSetup(intradayTest)?.phase, "BELOW", "an intraday test without a close above stays on the watchlist");
+const provisionalTest = falling.map(row => ({ ...row }));
+provisionalTest[59].is_provisional = true;
+provisionalTest[59].high = falling[40].high + 1;
+provisionalTest[59].close = falling[40].high + 1;
+assert.equal(findVolumeSellingSetup(provisionalTest)?.phase, "BELOW", "a provisional intraday move does not start the five-session countdown");
+const breakout = falling.map(row => ({ ...row }));
+breakout[54].close = falling[40].high;
+breakout[54].high = falling[40].high + 1;
+assert.equal(findVolumeSellingSetup(breakout)?.phase, "CLOSED_ABOVE");
+assert.equal(findVolumeSellingSetup(breakout)?.sessions_since_close_above, 5, "five following sessions remain eligible");
+assert.equal(findVolumeSellingSetup(breakout.slice(0, 55))?.sessions_since_close_above, 0, "breakout close is day zero");
+const expired = breakout.map(row => ({ ...row }));
+expired[53].close = falling[40].high;
+assert.equal(findVolumeSellingSetup(expired), null, "remove after the fifth following session");
 console.log("VolumeSelling tests passed");
