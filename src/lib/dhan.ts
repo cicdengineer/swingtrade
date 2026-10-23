@@ -16,7 +16,7 @@ async function dhanGet<T>(endpoint: string): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`https://api.dhan.co/v2${endpoint}`, {
-      headers: { "accept": "application/json", "access-token": process.env.DHAN_ACCESS_TOKEN! },
+      headers: { "accept": "application/json", "content-type": "application/json", "access-token": process.env.DHAN_ACCESS_TOKEN! },
       cache: "no-store",
     });
   } catch (error) {
