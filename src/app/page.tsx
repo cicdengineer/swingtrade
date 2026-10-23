@@ -32,8 +32,9 @@ import { parseResistanceWatchlist, qullamaggieWatchlistKey, resistanceWatchlist,
 import { fallingTrendScore, matchesCleanTrend } from "@/lib/cleanTrend";
 import { ABNORMAL_VOLUME_RATIO, RECENT_VOLUME_SESSIONS, VOLUME_BASELINE_SESSIONS, summarizeRecentVolume } from "@/lib/recentVolume";
 import QullamaggieView from "./QullamaggieView";
+import VolumeSellingView from "./VolumeSellingView";
 
-type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings";
+type View = "Dashboard" | "Stock Search" | "Data Status" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings";
 type DataSummary = { universe_name: UniverseName; total_constituents: number; mapped: number; stocks_downloaded: number; stocks_pending: number; stocks_failed: number; earliest_data_date: string | null; latest_data_date: string | null; total_ohlcv_rows: number; last_refresh: string | null; historical_sessions: number; latest_official?: number; latest_provisional?: number };
 type DataDownloadJob = { id?: string; status: string; total: number; completed: number; remaining: number; successful: number; failed: number; current_stock?: string; current_status?: string; progress: number; started_at?: string; finished_at?: string; last_successful_update?: string; data_through_date?: string; notice?: string; pending_eod_count?: number; trading_date?: string; historical_candles_backfilled?: number; official_candles_updated?: number; provisional_candles_created?: number; provisional_candles_reconciled?: number; already_up_to_date?: number; errors: string[] };
 type DataStatus = { dhan_connected: boolean; dhan_profile?: { ok: boolean; dhanClientId?: string; tokenValidity?: string; activeSegment?: string; dataPlan?: string; dataValidity?: string; error?: string }; database_size_bytes: number; price_adjustment_status: string; latest_market_data: null | { trading_date: string; official: number; provisional: number; data_status: string }; latest_job: null | DataDownloadJob; summaries: DataSummary[]; failures: { symbol: string; security_id: string; error_message: string; attempt_count: number; last_attempt: string }[]; quality_issues: unknown[]; universe_sources: Record<string, { label: string; url: string }> };
@@ -128,6 +129,7 @@ const nav: { name: View; icon: typeof Activity }[] = [
   { name: "Data Status", icon: Database },
   { name: "Seasonality", icon: CalendarDays },
   { name: "30 in 30", icon: TrendingUp },
+  { name: "VolumeSelling", icon: TrendingDown },
   { name: "Screener", icon: SlidersHorizontal },
   { name: "Qullamaggie", icon: TrendingUp },
   { name: "10 EMA Catchup", icon: TrendingUp },
@@ -3849,6 +3851,7 @@ export default function Home() {
     {view === "Hourly Breakout" && <HourlyBreakoutScreenerView data={hourlyBreakout} filters={hourlyBreakoutFilters} setFilters={setHourlyBreakoutFilters} loading={loading} onRun={runHourlyBreakoutScreener} onReset={() => setHourlyBreakoutFilters(defaultHourlyBreakoutFilters)} selected={selectedHourlyBreakout} setSelected={setSelectedHourlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={hourlyBreakoutUpdatedAt} />}
     {view === "Momentum Tight" && <MomentumContractionScreenerView data={momentumContraction} filters={momentumContractionFilters} setFilters={setMomentumContractionFilters} loading={loading} onRun={runMomentumContractionScreener} onReset={() => setMomentumContractionFilters(defaultMomentumContractionFilters)} selected={selectedMomentumContraction} setSelected={setSelectedMomentumContraction} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={momentumContractionUpdatedAt} />}
     {view === "30 in 30" && <ThirtyInThirtyScreenerView data={thirtyInThirty} filters={thirtyInThirtyFilters} setFilters={setThirtyInThirtyFilters} loading={loading} onRun={runThirtyInThirtyScreener} onReset={() => setThirtyInThirtyFilters(defaultThirtyInThirtyFilters)} selected={selectedThirtyInThirty} setSelected={setSelectedThirtyInThirty} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={thirtyInThirtyUpdatedAt} settings={tradingSettings} />}
+    {view === "VolumeSelling" && <VolumeSellingView />}
     {view === "Screener" && <CombinedScreenerView settings={tradingSettings} emaFilters={emaNoTouchFilters} stochFilters={stochRsiFilters} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Qullamaggie" && <QullamaggieView settings={tradingSettings} onOpenSettings={() => setView("Settings")} />}
     {view === "10 EMA Catchup" && <EmaNoTouchScreenerView data={emaNoTouch} filters={emaNoTouchFilters} setFilters={setEmaNoTouchFilters} loading={loading} onRun={runEmaNoTouchScreener} selected={selectedEmaNoTouch} setSelected={setSelectedEmaNoTouch} settings={tradingSettings} />}

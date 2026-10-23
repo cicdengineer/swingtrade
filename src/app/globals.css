@@ -94,3 +94,19 @@
 :root[data-theme="dark"] .thirty-in-thirty-screener-page .thirty-result-tile .thirty-in-thirty-chart{background:color-mix(in srgb,var(--text) 3%,transparent)}:root[data-theme="dark"] .thirty-in-thirty-screener-page .thirty-result-tile .thirty-in-thirty-chart .spark-area{fill:color-mix(in srgb,var(--green) 6%,transparent)}.thirty-in-thirty-screener-page .thirty-result-tile.pinned{border-color:var(--gold)}.thirty-in-thirty-screener-page .screenshot-tile.strong-start:not(.seasonal-tile),:root[data-theme="dark"] .thirty-in-thirty-screener-page .screenshot-tile.strong-start:not(.seasonal-tile){background:var(--panel)}.thirty-in-thirty-screener-page .pdh-badge{animation:pdhBadgeBlink 1.4s ease-in-out infinite}@keyframes pdhBadgeBlink{0%,45%,100%{opacity:1}55%,90%{opacity:.2}}@media(prefers-reduced-motion:reduce){.thirty-in-thirty-screener-page .pdh-badge{animation:none}}
 .combined-screener-page .screenshot-tile-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,235px),1fr))}
 @media(max-width:700px){.combined-screener-page .screenshot-tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.volume-selling-page .screenshot-tile-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,235px),1fr))}
+.volume-selling-page .thirty-in-thirty-summary{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.volume-selling-page .thirty-in-thirty-summary>div{display:grid;gap:3px;min-width:115px;padding:10px 14px;background:var(--panel);border:1px solid var(--line)}
+.volume-selling-page .thirty-in-thirty-summary span{color:var(--muted);font:10px "DM Mono";text-transform:uppercase}
+.volume-selling-page .thirty-in-thirty-summary b{font:800 16px "DM Mono"}
+.volume-selling-page .thirty-result-tile{height:190px;text-align:left;cursor:pointer}
+.volume-selling-page .thirty-result-top .tile-badges{font:700 9px "DM Mono";color:var(--green)}
+.volume-selling-page .vs-tile-footer{font:10px "DM Mono";color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.volume-selling-page .thirty-in-thirty-chart svg{display:block;width:100%;height:100%}
+.volume-selling-chart{width:100%;overflow-x:auto;background:var(--panel)}
+.volume-selling-chart svg{display:block;width:100%;min-width:650px;height:440px}
+.volume-selling-chart .vs-grid{stroke:var(--line);stroke-width:1}
+.volume-selling-chart .vs-axis{fill:var(--muted);font:11px "DM Mono"}
+.volume-selling-page .vs-signal-line{stroke:#265ee8;stroke-width:2;vector-effect:non-scaling-stroke}
+.volume-selling-chart .vs-signal-label{fill:#265ee8;font:700 12px "DM Mono"}
+@media(max-width:700px){.volume-selling-page .screenshot-tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.volume-selling-page .thirty-result-tile{height:155px}}
