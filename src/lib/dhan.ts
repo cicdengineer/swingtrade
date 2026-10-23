@@ -16,7 +16,7 @@ async function dhanGet<T>(endpoint: string): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`https://api.dhan.co/v2${endpoint}`, {
-      headers: { "accept": "application/json", "content-type": "application/json", "access-token": process.env.DHAN_ACCESS_TOKEN! },
+      headers: { "accept": "application/json", "content-type": "application/json", "access-token": process.env.DHAN_ACCESS_TOKEN!, "client-id": process.env.DHAN_CLIENT_ID! },
       cache: "no-store",
     });
   } catch (error) {
@@ -134,7 +134,7 @@ async function dhanPost<T>(endpoint: string, body: unknown): Promise<T> {
   try {
     response = await fetch(`https://api.dhan.co/v2${endpoint}`, {
       method: "POST",
-      headers: { "content-type": "application/json", "access-token": process.env.DHAN_ACCESS_TOKEN! },
+      headers: { "content-type": "application/json", "access-token": process.env.DHAN_ACCESS_TOKEN!, "client-id": process.env.DHAN_CLIENT_ID! },
       body: JSON.stringify(body),
       cache: "no-store",
     });
