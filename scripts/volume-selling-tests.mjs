@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { findVolumeSellingSignal } from "../src/lib/volumeSellingLogic.ts";
+import { findCleanVolumeSellingSignal, findVolumeSellingSignal } from "../src/lib/volumeSellingLogic.ts";
 
 const rows = Array.from({ length: 150 }, (_, i) => ({
   trade_date: new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10),
@@ -22,4 +22,23 @@ assert.equal(findVolumeSellingSignal(rows)?.signal_date, rows[140].trade_date, "
 rows[140].close = 102;
 assert.equal(findVolumeSellingSignal(rows)?.signal_date, rows[40].trade_date, "green candle cannot replace selling signal");
 assert.equal(findVolumeSellingSignal([...rows, ...Array.from({ length: 126 }, (_, i) => ({ ...rows[149], trade_date: new Date(Date.UTC(2026, 5, i + 1)).toISOString().slice(0, 10) }))]), null, "signals expire after 126 sessions");
+
+const clean = rows.map((row, index) => ({ ...row, high: index === 140 ? 105 : index === 40 ? 104 : 103 }));
+clean[140].close = 100;
+assert.equal(findCleanVolumeSellingSignal(clean, "2026-10-23")?.signal_date, clean[140].trade_date);
+const priorWick = clean.map(row => ({ ...row }));
+priorWick[143].high = 105;
+assert.equal(findCleanVolumeSellingSignal(priorWick, "2026-10-23"), null, "an earlier test of the line invalidates the latest signal");
+const priorClose = clean.map(row => ({ ...row }));
+priorClose[143].high = 106;
+priorClose[143].close = 105;
+assert.equal(findCleanVolumeSellingSignal(priorClose, "2026-10-23"), null, "an earlier close on the line invalidates the signal");
+const firstTestToday = clean.map(row => ({ ...row }));
+firstTestToday[149].trade_date = "2026-10-23";
+firstTestToday[149].high = 105;
+firstTestToday[149].is_provisional = true;
+assert.equal(findCleanVolumeSellingSignal(firstTestToday, "2026-10-23")?.signal_date, clean[140].trade_date, "today's first intraday test remains eligible");
+firstTestToday[149].is_provisional = false;
+firstTestToday[149].close = 105;
+assert.equal(findCleanVolumeSellingSignal(firstTestToday, "2026-10-23"), null, "a completed close on the line removes the stock");
 console.log("VolumeSelling tests passed");

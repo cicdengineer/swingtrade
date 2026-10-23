@@ -8,7 +8,7 @@ type Response = { evaluated: number; qualified: number; results: VolumeSellingRo
 type Tick = { securityId: string; ltp: number; dayHigh?: number; prevClose?: number; receivedAt: number };
 type Mode = "near" | "entry" | "all";
 type Sort = "distance" | "newest" | "redVolume" | "allVolume" | "price" | "symbol";
-const istDate = (value: number | string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
+const istDate = (value: number | string) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
 const money = (value: number) => `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
 const pct = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 
@@ -86,7 +86,7 @@ export default function VolumeSellingView() {
   const rows = useMemo(() => (data?.results ?? []).filter(row => {
     const gap = distance(row);
     return row.signal_age <= maxAge && price(row) >= minPrice && `${row.symbol} ${row.company_name}`.toLowerCase().includes(search.toLowerCase()) &&
-      (mode === "all" || mode === "entry" ? mode !== "entry" || entryToday(row) : gap >= -5 && gap <= 5);
+      (mode === "entry" ? entryToday(row) : price(row) < row.signal_high && (mode === "all" || gap >= -5));
   }).sort((a, b) => {
     const value = (row: VolumeSellingRow): number | string => sort === "distance" ? Math.abs(distance(row)) : sort === "newest" ? row.signal_age : sort === "redVolume" ? row.red_volume_ratio : sort === "allVolume" ? row.all_volume_ratio : sort === "price" ? price(row) : row.symbol;
     const av = value(a), bv = value(b);
@@ -94,9 +94,9 @@ export default function VolumeSellingView() {
     return (direction === "asc" ? comparison : -comparison) || a.symbol.localeCompare(b.symbol);
   }), [data, ticks, mode, maxAge, minPrice, search, sort, direction, today]);
   return <section className="research-page thirty-in-thirty-page thirty-in-thirty-screener-page volume-selling-page">
-    <div className="thirty-hero"><div><p className="eyebrow">VolumeSelling Screener · Nifty 500</p><h2>Strong red volume, one entry level</h2><small>Latest red candle in 126 sessions with volume &gt;2.5× its prior 20 red candles and &gt;2× all prior 20 candles. Entry level is that candle&apos;s high.</small></div><div className="thirty-hero-actions"><button className="primary" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/>{loading ? "Scanning…" : "Run Screener"}</button><button className="secondary compact" onClick={() => { setMode("near"); setSort("distance"); setDirection("asc"); setMaxAge(126); setMinPrice(0); setSearch(""); setMonths(6); }}>Reset</button></div></div>
+    <div className="thirty-hero"><div><p className="eyebrow">VolumeSelling Screener · Nifty 500</p><h2>Strong red volume, one clean entry level</h2><small>Latest red candle in 126 sessions with volume &gt;2.5× its prior 20 red candles and &gt;2× all prior 20 candles. No later close above its high or earlier-day test of that level.</small></div><div className="thirty-hero-actions"><button className="primary" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/>{loading ? "Scanning…" : "Run Screener"}</button><button className="secondary compact" onClick={() => { setMode("near"); setSort("distance"); setDirection("asc"); setMaxAge(126); setMinPrice(0); setSearch(""); setMonths(6); }}>Reset</button></div></div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
-      <label>View<select value={mode} onChange={event => setMode(event.target.value as Mode)}><option value="near">Near entry ±5%</option><option value="entry">Entry today</option><option value="all">All signals</option></select></label>
+      <label>View<select value={mode} onChange={event => setMode(event.target.value as Mode)}><option value="near">Below entry within 5%</option><option value="entry">First entry today</option><option value="all">All clean signals below</option></select></label>
       <label>Signal age ≤ sessions<input className="plain-input" type="number" min="0" max="126" value={maxAge} onChange={event => setMaxAge(Math.max(0, Math.min(126, Number(event.target.value))))}/></label>
       <label>Minimum price<input className="plain-input" type="number" min="0" value={minPrice} onChange={event => setMinPrice(Math.max(0, Number(event.target.value)))}/></label>
       <label>Search<input className="plain-input" value={search} onChange={event => setSearch(event.target.value)} placeholder="Symbol or company"/></label>

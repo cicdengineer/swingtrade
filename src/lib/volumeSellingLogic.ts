@@ -31,3 +31,17 @@ export function findVolumeSellingSignal(prices: DailyPriceRecord[], minRedRatio 
   }
   return null;
 }
+
+/** The level must remain untouched after the signal until today; today's first intraday test is allowed. */
+export function isCleanVolumeSellingSignal(prices: DailyPriceRecord[], signal: VolumeSellingSignal, today: string): boolean {
+  return prices.every(row => {
+    if (row.trade_date <= signal.signal_date) return true;
+    if (row.trade_date < today) return row.high < signal.signal_high;
+    return row.is_provisional || row.close < signal.signal_high;
+  });
+}
+
+export function findCleanVolumeSellingSignal(prices: DailyPriceRecord[], today: string, minRedRatio = 2.5): VolumeSellingSignal | null {
+  const signal = findVolumeSellingSignal(prices, minRedRatio);
+  return signal && isCleanVolumeSellingSignal(prices, signal, today) ? signal : null;
+}
