@@ -285,3 +285,38 @@ td, :root[data-theme="light"] td { border-color: var(--line); color: var(--text)
   .header-actions .icon-button { height: 31px; width: 31px; }
   .page-heading h1 { font-size: 18px; }
 }
+
+.strategy-nav-group { position: relative; min-width: 0; }
+.strategy-nav-toggle .strategy-nav-chevron { display: block; margin-left: auto; transition: transform .15s ease; }
+.strategy-nav-toggle[aria-expanded="true"] .strategy-nav-chevron { transform: rotate(180deg); }
+.strategy-nav-items { display: grid; gap: 3px; z-index: 40; }
+
+@media (min-width: 851px) {
+  aside { position: relative; z-index: 20; }
+  aside nav { overflow: visible; flex-wrap: wrap; align-items: center; }
+  aside nav .strategy-nav-toggle .strategy-nav-chevron { display: block; }
+  .strategy-nav-items {
+    position: absolute;
+    top: calc(100% + 7px);
+    left: 0;
+    width: 205px;
+    padding: 7px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--panel);
+    box-shadow: 0 14px 30px #0004;
+  }
+  aside nav .strategy-nav-items button,
+  :root[data-theme="light"] aside nav .strategy-nav-items button { width: 100%; border: 0; background: transparent; }
+  aside nav .strategy-nav-items button:hover,
+  :root[data-theme="light"] aside nav .strategy-nav-items button:hover { background: var(--panel-raised); }
+  aside nav .strategy-nav-items button.active,
+  :root[data-theme="light"] aside nav .strategy-nav-items button.active { background: var(--soft-green); color: var(--text); }
+}
+
+@media (max-width: 850px) {
+  aside nav { min-height: 0; overflow-y: auto; align-content: start; }
+  .strategy-nav-group { display: grid; gap: 3px; }
+  .strategy-nav-items { margin-left: 16px; padding-left: 9px; border-left: 1px solid var(--line); }
+  aside nav .strategy-nav-items button { width: 100%; padding: 9px; }
+}
