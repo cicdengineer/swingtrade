@@ -16,18 +16,20 @@ async function dhanGet<T>(endpoint: string): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`https://api.dhan.co/v2${endpoint}`, {
-      headers: { "content-type": "application/json", "access-token": process.env.DHAN_ACCESS_TOKEN! },
+      headers: { "accept": "application/json", "access-token": process.env.DHAN_ACCESS_TOKEN! },
       cache: "no-store",
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Network request failed";
     throw new Error(`Could not reach Dhan API for ${endpoint}: ${reason}`);
   }
-  const body = await response.json().catch(() => ({}));
+  const responseText = await response.text();
+  let body: any;
+  try { body = JSON.parse(responseText); } catch { body = {}; }
   if (!response.ok) {
-    const rawReason = body?.remarks ?? body?.message ?? body?.error;
-    const reason = typeof rawReason === "string" ? rawReason : rawReason ? JSON.stringify(rawReason) : `HTTP ${response.status}`;
-    throw new Error(`Dhan API request failed for ${endpoint}: ${reason}`);
+    const rawReason = body?.remarks ?? body?.message ?? body?.error ?? body?.data;
+    const reason = typeof rawReason === "string" ? rawReason : rawReason ? JSON.stringify(rawReason) : responseText.trim() || "No response details";
+    throw new Error(`Dhan API request failed for ${endpoint}: HTTP ${response.status} (${reason})`);
   }
   return body as T;
 }
@@ -190,23 +192,36 @@ export const getHoldings = () => dhanGet<DhanHolding[]>("/holdings");
 export const getPositions = () => dhanGet<DhanPosition[]>("/positions");
 export async function getTradeHistory(fromDate: string, toDate: string) {
   const trades: DhanTrade[] = [];
-  const seenPages = new Set<string>();
-  for (let page = 0; page < 500; page += 1) {
-    const rows = await dhanGet<DhanTrade[]>(`/trades/${fromDate}/${toDate}/${page}`);
-    if (!Array.isArray(rows) || rows.length === 0) break;
-    const pageKey = JSON.stringify(rows.map((row) => [
-      row.exchangeTradeId,
-      row.orderId,
-      row.exchangeTime,
-      row.securityId,
-      row.tradingSymbol,
-      row.transactionType,
-      row.tradedQuantity,
-      row.tradedPrice,
-    ]));
-    if (seenPages.has(pageKey)) break;
-    seenPages.add(pageKey);
-    trades.push(...rows);
+  let windowStart = new Date(`${fromDate}T00:00:00Z`);
+  const lastDay = new Date(`${toDate}T00:00:00Z`);
+  if (!Number.isFinite(windowStart.getTime()) || !Number.isFinite(lastDay.getTime()) || windowStart > lastDay) {
+    throw new Error("Invalid Dhan trade history date range.");
+  }
+  const formatDate = (value: Date) => value.toISOString().slice(0, 10);
+  while (windowStart <= lastDay) {
+    // Keep requests small; Dhan may reject a long history range with HTTP 400.
+    const windowEnd = new Date(Math.min(lastDay.getTime(), windowStart.getTime() + 29 * 86400000));
+    const start = formatDate(windowStart);
+    const end = formatDate(windowEnd);
+    const seenPages = new Set<string>();
+    for (let page = 0; page < 500; page += 1) {
+      const rows = await dhanGet<DhanTrade[]>(`/trades/${start}/${end}/${page}`);
+      if (!Array.isArray(rows) || rows.length === 0) break;
+      const pageKey = JSON.stringify(rows.map((row) => [
+        row.exchangeTradeId,
+        row.orderId,
+        row.exchangeTime,
+        row.securityId,
+        row.tradingSymbol,
+        row.transactionType,
+        row.tradedQuantity,
+        row.tradedPrice,
+      ]));
+      if (seenPages.has(pageKey)) break;
+      seenPages.add(pageKey);
+      trades.push(...rows);
+    }
+    windowStart = new Date(windowEnd.getTime() + 86400000);
   }
   return trades;
 }
