@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
 import { findVolumeSellingSetup, findVolumeSellingSignal } from "../src/lib/volumeSellingLogic.ts";
+import { latestDailyStop, swingLowBeforeLatest, positionSizingFromStop } from "../src/lib/entrySizing.ts";
+
+const sizingRows = [95, 94, 92, 93, 91, 96].map(low => ({ low }));
+assert.equal(latestDailyStop(sizingRows), 96, "daily stop uses the latest candle low");
+assert.equal(swingLowBeforeLatest(sizingRows)?.low, 91, "swing stop uses the five candles before the latest");
+assert.equal(swingLowBeforeLatest(sizingRows.slice(1)), undefined, "swing stop needs five preceding candles");
+assert.deepEqual(positionSizingFromStop(100, 91, { totalCapital: 450000, riskPercent: 1 }),
+  { quantity: 500, value: 50000, riskPerShare: 9, riskUnit: 4500, valid: true });
+assert.equal(positionSizingFromStop(100, 100, { totalCapital: 450000, riskPercent: 1 }).valid, false,
+  "an entry at or below the stop has no valid sizing");
 
 const rows = Array.from({ length: 150 }, (_, i) => ({
   trade_date: new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10),

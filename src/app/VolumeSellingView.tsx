@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, RefreshCw, X } from "lucide-react";
+import { latestDailyStop, swingLowBeforeLatest, type EntrySizingSettings } from "@/lib/entrySizing";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
+import EntrySizingTile from "./EntrySizingTile";
 
 type Response = { evaluated: number; qualified: number; results: VolumeSellingRow[]; generatedAt: string };
-type Tick = { securityId: string; ltp: number; dayHigh?: number; prevClose?: number; receivedAt: number };
+type Tick = { securityId: string; ltp: number; dayHigh?: number; dayLow?: number; prevClose?: number; receivedAt: number };
 type Mode = "near" | "entry" | "pullback" | "all";
 type Sort = "distance" | "newest" | "redVolume" | "allVolume" | "price" | "symbol";
 const istDate = (value: number | string) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
@@ -48,7 +50,7 @@ function TileChart({ row }: { row: VolumeSellingRow }) {
   return <span className="thirty-in-thirty-chart"><svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true"><path className="spark-line up" d={path}/><line className="vs-signal-line" x1={index >= 0 ? index * 220 / Math.max(1, points.length - 1) : 0} x2="220" y1={y(row.signal_high)} y2={y(row.signal_high)}/></svg></span>;
 }
 
-export default function VolumeSellingView() {
+export default function VolumeSellingView({ settings }: { settings?: EntrySizingSettings | null }) {
   const [data, setData] = useState<Response | null>(null);
   const [ticks, setTicks] = useState<Record<string, Tick>>({});
   const [loading, setLoading] = useState(false);
@@ -83,6 +85,14 @@ export default function VolumeSellingView() {
     const previousClose = row.current_date === today ? row.previous_close : row.current_close;
     return dayHigh !== undefined && dayHigh >= row.signal_high && previousClose < row.signal_high;
   };
+  const sizingLows = (row: VolumeSellingRow) => {
+    const lows = row.recent.map(point => ({ low: point.low }));
+    const tick = ticks[row.security_id];
+    if (!tick?.dayLow || tick.dayLow <= 0 || istDate(tick.receivedAt) !== today) return lows;
+    if (row.current_date === today && lows.length) lows[lows.length - 1] = { low: Math.min(lows.at(-1)!.low, tick.dayLow) };
+    else if (row.current_date < today) lows.push({ low: tick.dayLow });
+    return lows;
+  };
   const rows = useMemo(() => (data?.results ?? []).filter(row => {
     const gap = distance(row);
     return row.signal_age <= maxAge && price(row) >= minPrice && `${row.symbol} ${row.company_name}`.toLowerCase().includes(search.toLowerCase()) &&
@@ -93,6 +103,9 @@ export default function VolumeSellingView() {
     const comparison = typeof av === "string" && typeof bv === "string" ? av.localeCompare(bv) : Number(av) - Number(bv);
     return (direction === "asc" ? comparison : -comparison) || a.symbol.localeCompare(b.symbol);
   }), [data, ticks, mode, maxAge, minPrice, search, sort, direction, today]);
+  const selectedLows = selected ? sizingLows(selected) : [];
+  const selectedDailyStop = latestDailyStop(selectedLows);
+  const selectedSwingStop = swingLowBeforeLatest(selectedLows)?.low;
   return <section className="research-page thirty-in-thirty-page thirty-in-thirty-screener-page volume-selling-page">
     <div className="thirty-hero"><div><p className="eyebrow">VolumeSelling Screener · Nifty 500</p><h2>One-month decline, strong red volume</h2><small>Tracks the latest strong red-volume signal while the stock has fallen over 21 completed sessions. Intraday tests stay visible; after the first close above the blue line, keep the stock for five more trading sessions to watch for a pullback.</small></div><div className="thirty-hero-actions"><button className="primary" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/>{loading ? "Scanning…" : "Run Screener"}</button><button className="secondary compact" onClick={() => { setMode("all"); setSort("distance"); setDirection("asc"); setMaxAge(126); setMinPrice(0); setSearch(""); setMonths(6); }}>Reset</button></div></div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
@@ -106,6 +119,20 @@ export default function VolumeSellingView() {
     {error && <div className="error">{error}</div>}
     <div className="thirty-in-thirty-summary"><div><span>Evaluated</span><b>{data?.evaluated ?? 0}</b></div><div><span>Watchlist</span><b>{data?.qualified ?? 0}</b></div><div><span>Shown</span><b>{rows.length}</b></div><div><span>Data through</span><b>{data?.results.reduce((latest, row) => row.current_date > latest ? row.current_date : latest, "") || "—"}</b></div></div>
     <section className="screenshot-tile-grid">{rows.length ? rows.map(row => <button key={row.security_id} className="screenshot-tile thirty-result-tile" onClick={() => setSelected(row)}><span className="thirty-result-top"><b>{row.symbol}</b><span className="tile-badges">{entryToday(row) ? "ENTRY TODAY" : row.phase === "CLOSED_ABOVE" ? `PULLBACK ${row.sessions_since_close_above}/5` : `${pct(distance(row))} to level`}</span></span><span className="thirty-result-sub"><small>{row.company_name}</small><small>{money(price(row))}</small></span><TileChart row={row}/><span className="vs-tile-footer">1M {pct(row.one_month_decline_pct)} · {row.red_volume_ratio.toFixed(1)}× red vol · High {money(row.signal_high)}</span></button>) : <p className="panel-empty">{loading ? "Scanning stocks…" : "No stocks match these filters."}</p>}</section>
-    {selected && <div className="drawer" onClick={() => setSelected(null)}><div className="drawer-card chart-drawer" onClick={event => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => setSelected(null)} aria-label="Close chart"><X size={18}/></button><p className="eyebrow">VolumeSelling · {selected.signal_date}</p><h2>{selected.symbol} · {selected.company_name}</h2><p className="muted">Signal high {money(selected.signal_high)} · selling volume {selected.red_volume_ratio.toFixed(2)}× prior red average and {selected.all_volume_ratio.toFixed(2)}× overall average · one-month decline {pct(selected.one_month_decline_pct)} · {selected.signal_age} sessions ago</p><div className="chart-shell"><div className="chart-toolbar"><div><p className="eyebrow">Daily chart · {months} months</p><span>Latest qualifying signal only · volume below</span></div><a className="secondary compact tradingview-link" href={`https://www.tradingview.com/chart/?symbol=NSE%3A${encodeURIComponent(selected.symbol)}`} target="_blank" rel="noreferrer"><ArrowUpRight size={14}/>TradingView</a></div><SignalChart row={selected} months={months}/></div><div className="strategy-stat-grid"><div className="strategy-stat"><span>Current price</span><strong>{money(price(selected))}</strong></div><div className="strategy-stat"><span>Entry high</span><strong>{money(selected.signal_high)}</strong></div><div className="strategy-stat"><span>Distance</span><strong>{pct(distance(selected))}</strong></div><div className="strategy-stat"><span>Signal date</span><strong>{selected.signal_date}</strong></div><div className="strategy-stat"><span>Entry today</span><strong>{entryToday(selected) ? "Yes" : "No"}</strong></div><div className="strategy-stat"><span>Pullback window</span><strong>{selected.phase === "CLOSED_ABOVE" ? `${selected.sessions_since_close_above}/5 since ${selected.first_close_above_date}` : "Awaiting close above"}</strong></div></div></div></div>}
+    {selected && <div className="drawer" onClick={() => setSelected(null)}><div className="drawer-card chart-drawer" onClick={event => event.stopPropagation()}>
+      <button className="icon-button drawer-close" onClick={() => setSelected(null)} aria-label="Close chart"><X size={18}/></button>
+      <p className="eyebrow">VolumeSelling · {selected.signal_date}</p>
+      <h2>{selected.symbol} · {selected.company_name}</h2>
+      <p className="muted">Signal high {money(selected.signal_high)} · selling volume {selected.red_volume_ratio.toFixed(2)}× prior red average and {selected.all_volume_ratio.toFixed(2)}× overall average · one-month decline {pct(selected.one_month_decline_pct)} · {selected.signal_age} sessions ago</p>
+      <div className="chart-shell">
+        <div className="entry-sizing-grid">
+          <EntrySizingTile title="Daily Low Entry" entry={price(selected)} stop={selectedDailyStop} settings={settings}/>
+          <EntrySizingTile title="Swing Low Sizing" entry={price(selected)} stop={selectedSwingStop} settings={settings}/>
+        </div>
+        <div className="chart-toolbar"><div><p className="eyebrow">Daily chart · {months} months</p><span>Latest qualifying signal only · volume below</span></div><a className="secondary compact tradingview-link" href={`https://www.tradingview.com/chart/?symbol=NSE%3A${encodeURIComponent(selected.symbol)}`} target="_blank" rel="noreferrer"><ArrowUpRight size={14}/>TradingView</a></div>
+        <SignalChart row={selected} months={months}/>
+      </div>
+      <div className="strategy-stat-grid"><div className="strategy-stat"><span>Current price</span><strong>{money(price(selected))}</strong></div><div className="strategy-stat"><span>Entry high</span><strong>{money(selected.signal_high)}</strong></div><div className="strategy-stat"><span>Distance</span><strong>{pct(distance(selected))}</strong></div><div className="strategy-stat"><span>Signal date</span><strong>{selected.signal_date}</strong></div><div className="strategy-stat"><span>Entry today</span><strong>{entryToday(selected) ? "Yes" : "No"}</strong></div><div className="strategy-stat"><span>Pullback window</span><strong>{selected.phase === "CLOSED_ABOVE" ? `${selected.sessions_since_close_above}/5 since ${selected.first_close_above_date}` : "Awaiting close above"}</strong></div></div>
+    </div></div>}
   </section>;
 }

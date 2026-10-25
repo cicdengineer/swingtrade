@@ -34,6 +34,8 @@ import { fallingTrendScore, matchesCleanTrend } from "@/lib/cleanTrend";
 import { ABNORMAL_VOLUME_RATIO, RECENT_VOLUME_SESSIONS, VOLUME_BASELINE_SESSIONS, summarizeRecentVolume } from "@/lib/recentVolume";
 import QullamaggieView from "./QullamaggieView";
 import VolumeSellingView from "./VolumeSellingView";
+import EntrySizingTile from "./EntrySizingTile";
+import { latestDailyStop, swingLowBeforeLatest } from "@/lib/entrySizing";
 import { findVolumeSellingSignal, type VolumeSellingSignal } from "@/lib/volumeSellingLogic";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
 
@@ -661,22 +663,10 @@ const hasThreeRedCandlesInLastSixDays = (row: ThirtyInThirtyRow) => {
 };
 const thirtyInThirtySwingLowPoint = (rows: DailyChartPoint[]) => {
   // Match StochRSI's five candles before the signal, using the latest candle as this chart's anchor.
-  if (rows.length < 6) return undefined;
-  return rows.slice(-6, -1).reduce((lowest, point) => point.low < lowest.low ? point : lowest);
-};
-const latestDailyStop = (rows: DailyChartPoint[]) => {
-  return rows.at(-1)?.low;
+  return swingLowBeforeLatest(rows);
 };
 const latestHourlyStop = (rows: DailyChartPoint[]) => rows.at(-1)?.low;
 const stopLossPct = (entry: number, stop?: number) => entry > 0 && stop !== undefined && stop > 0 && entry > stop ? ((entry - stop) / entry) * 100 : undefined;
-const positionSizingFromStop = (entry: number, stop: number | undefined, settings?: TradingSettings | null) => {
-  const riskUnit = settings ? settings.totalCapital * settings.riskPercent / 100 : 0;
-  if (!settings || !stop || stop <= 0) return { quantity: 0, value: 0, riskPerShare: 0, riskUnit, valid: false };
-  const riskPerShare = entry - stop;
-  if (entry <= 0 || riskPerShare <= 0) return { quantity: 0, value: 0, riskPerShare, riskUnit, valid: false };
-  const quantity = Math.floor(riskUnit / riskPerShare);
-  return { quantity, value: quantity * entry, riskPerShare, riskUnit, valid: quantity > 0 };
-};
 const toneFromRange = (value: number | undefined, good: (value: number) => boolean, average: (value: number) => boolean): TileTone => {
   if (value === undefined || Number.isNaN(value)) return "neutral";
   if (good(value)) return "good";
@@ -2455,23 +2445,6 @@ function ThirtyInThirtyTileChart({ row, chartMonths, showEma10, onOpen, sellingS
   </span>;
 }
 
-function EntrySizingTile({ title, entry, stop, settings, loading }: { title: string; entry: number; stop?: number; settings?: TradingSettings | null; loading?: boolean }) {
-  const sizing = positionSizingFromStop(entry, stop, settings);
-  const riskPct = sizing.riskPerShare > 0 && entry > 0 ? (sizing.riskPerShare / entry) * 100 : 0;
-  return <div className={`entry-sizing-tile ${sizing.valid ? "good" : "bad"}`}>
-    <div>
-      <span>{title}</span>
-      <strong>{loading ? "Loading..." : sizing.valid ? `${sizing.quantity.toLocaleString("en-IN")} qty` : "No entry"}</strong>
-      <small className="entry-value">{sizing.valid ? rupees(sizing.value) : settings ? "Stop is not below entry" : "Settings unavailable"}</small>
-    </div>
-    <div>
-      <span>SL</span>
-      <b>{stop ? money(stop) : "—"}</b>
-      <small className="entry-value">{riskPct > 0 ? `${riskPct.toFixed(2)}%` : `Risk unit ${rupees(sizing.riskUnit)}`}</small>
-    </div>
-  </div>;
-}
-
 function ThirtyInThirtyRiskTiles({ selected, activeRows, settings }: { selected: ThirtyInThirtyRow; activeRows: DailyChartPoint[]; settings?: TradingSettings | null }) {
   const entry = selected.current_close;
   const dailyStop = latestDailyStop(activeRows.length ? activeRows : selected.recent);
@@ -3900,7 +3873,7 @@ export default function Home() {
     {view === "Hourly Breakout" && <HourlyBreakoutScreenerView data={hourlyBreakout} filters={hourlyBreakoutFilters} setFilters={setHourlyBreakoutFilters} loading={loading} onRun={runHourlyBreakoutScreener} onReset={() => setHourlyBreakoutFilters(defaultHourlyBreakoutFilters)} selected={selectedHourlyBreakout} setSelected={setSelectedHourlyBreakout} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={hourlyBreakoutUpdatedAt} />}
     {view === "Momentum Tight" && <MomentumContractionScreenerView data={momentumContraction} filters={momentumContractionFilters} setFilters={setMomentumContractionFilters} loading={loading} onRun={runMomentumContractionScreener} onReset={() => setMomentumContractionFilters(defaultMomentumContractionFilters)} selected={selectedMomentumContraction} setSelected={setSelectedMomentumContraction} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={momentumContractionUpdatedAt} />}
     {view === "30 in 30" && <ThirtyInThirtyScreenerView data={thirtyInThirty} filters={thirtyInThirtyFilters} setFilters={setThirtyInThirtyFilters} loading={loading} onRun={runThirtyInThirtyScreener} onReset={() => setThirtyInThirtyFilters(defaultThirtyInThirtyFilters)} selected={selectedThirtyInThirty} setSelected={setSelectedThirtyInThirty} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={thirtyInThirtyUpdatedAt} settings={tradingSettings} />}
-    {view === "VolumeSelling" && <VolumeSellingView />}
+    {view === "VolumeSelling" && <VolumeSellingView settings={tradingSettings} />}
     {view === "Screener" && <CombinedScreenerView settings={tradingSettings} emaFilters={emaNoTouchFilters} stochFilters={stochRsiFilters} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Qullamaggie" && <QullamaggieView settings={tradingSettings} onOpenSettings={() => setView("Settings")} />}
     {view === "10 EMA Catchup" && <EmaNoTouchScreenerView data={emaNoTouch} filters={emaNoTouchFilters} setFilters={setEmaNoTouchFilters} loading={loading} onRun={runEmaNoTouchScreener} selected={selectedEmaNoTouch} setSelected={setSelectedEmaNoTouch} settings={tradingSettings} />}
