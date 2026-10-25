@@ -113,3 +113,12 @@
 .combined-screener-page .selling-climax-label{fill:#265ee8;font:700 10px "DM Mono"}
 .screener-tag-selling{background:#e1e8ff;border-color:#9fb3f7!important;color:#2145af}
 @media(max-width:700px){.volume-selling-page .screenshot-tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.volume-selling-page .thirty-result-tile{height:155px}}
+.screener-volume-legend{display:flex;flex-wrap:wrap;gap:12px;padding:6px 0;color:var(--muted);font:10px "DM Mono";text-transform:uppercase}
+.screener-volume-legend span{display:inline-flex;align-items:center;gap:5px}
+.screener-volume-legend i{display:inline-block;width:12px;height:7px;border-radius:1px}
+.screener-volume-high,.legend-high-volume{background:#22a7ff}
+.screener-volume-low,.legend-low-volume{background:#ffb13b}
+.thirty-reference-volume .volume-high{fill:#22a7ff;opacity:1}
+.thirty-reference-volume .volume-low{fill:#ffb13b;opacity:1}
+.chart-shell .signal-chart .outside-volume-bar.high{background:#22a7ff;box-shadow:0 -3px 10px #22a7ff55;opacity:1}
+.chart-shell .signal-chart .outside-volume-bar.low{background:#ffb13b;box-shadow:0 -3px 10px #ffb13b55;opacity:1}

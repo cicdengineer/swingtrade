@@ -462,6 +462,8 @@ const smaValues = (values: number[], period: number) => values.map((_, index) =>
   const slice = values.slice(index - period + 1, index + 1);
   return slice.reduce((sum, value) => sum + value, 0) / period;
 });
+const volumeHighlight = (volume: number, average?: number) =>
+  average && average > 0 ? volume >= average * 1.5 ? "high" : volume <= average * 0.3 ? "low" : "" : "";
 const rsiValues = (closes: number[], period = 14) => closes.map((_, index) => {
   if (index < period) return undefined;
   let gains = 0;
@@ -2571,7 +2573,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
         </div>
       </div>
     </div>
-    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} showScreenerStoch={showScreenerStoch} sellingSignal={sellingSignal} />
+    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} sellingSignal={sellingSignal} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>;
 }
@@ -2975,7 +2977,7 @@ function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signal
   const swingLowIndex = swingLowPoint ? chartRows.findIndex((row) => row.trade_date === swingLowPoint.trade_date) : -1;
   const swingLowY = swingLowPoint ? scaleValue(swingLowPoint.low, priceMin, priceMax, priceHeight, 8) : undefined;
   return <div className="clean-chart signal-chart">
-    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />10 EMA</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}<span><i className="legend-green-signal" />Green entry</span><span><i className="legend-blue-signal" />Blue entry</span><span><i className="legend-high-volume" />Unusual volume</span></div>
+    <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />10 EMA</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}<span><i className="legend-green-signal" />Green entry</span><span><i className="legend-blue-signal" />Blue entry</span><span><i className="legend-high-volume" />High volume ≥1.5× avg</span><span><i className="legend-low-volume" />Low volume ≤0.3× avg</span></div>
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart with StochRSI entry markers`}>
       {swingLowY !== undefined && <line className="swing-low-line" x1={swingLowIndex >= 0 ? swingLowIndex * candleSlot + candleSlot / 2 : 0} x2={width} y1={swingLowY} y2={swingLowY}><title>{`Swing low ${money(swingLowPoint!.low)} on ${swingLowPoint!.trade_date}`}</title></line>}
       {signalLineY !== undefined && <line className="signal-high-line" x1={signalLineX} x2={width} y1={signalLineY} y2={signalLineY} />}
@@ -3003,8 +3005,8 @@ function SignalCandleChart({ rows, timeframe, loading, error, signalHigh, signal
         const up = row.close >= row.open;
         const height = Math.max(7, (row.volume / maxVolume) * (volumeHeight - 12));
         const avg = volumeSma[index];
-        const high = avg ? row.volume / avg >= 1.5 : false;
-        return <span key={row.trade_date} className={`outside-volume-bar ${up ? "up" : "down"} ${high ? "high" : ""}`} style={{ height }} title={`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}${avg ? ` (${(row.volume / avg).toFixed(1)}x)` : ""}`} />;
+        const highlight = volumeHighlight(row.volume, avg);
+        return <span key={row.trade_date} className={`outside-volume-bar ${up ? "up" : "down"} ${highlight}`} style={{ height }} title={`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}${avg ? ` (${(row.volume / avg).toFixed(2)}x 20-bar average)` : ""}`} />;
       })}
     </div>
   </div>;
@@ -3437,7 +3439,7 @@ function StochDPanel({ values, width, label }: { values: Array<number | undefine
   </svg></div>;
 }
 
-function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, showScreenerStoch = false, sellingSignal }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; showScreenerStoch?: boolean; sellingSignal?: VolumeSellingSignal }) {
+function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, sellingSignal }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; sellingSignal?: VolumeSellingSignal }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -3504,7 +3506,15 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
         <title>{`${chartDateLabel(latestReclaimMarker.row.trade_date, timeframe)} reclaimed ${emaLabel}: previous close below, latest close ${latestReclaimMarker.row.close.toFixed(2)} above ${latestReclaimMarker.ema.toFixed(2)}`}</title>
       </polygon>}
     </svg>
-    {referenceStyle ? <div className="thirty-reference-volume" aria-label="Volume"><svg viewBox={`0 0 ${width} ${volumeHeight}`} role="img" aria-label={`${timeframe} volume bars`}>{chartRows.map((row, index) => { const barHeight = Math.max(1, row.volume / Math.max(1, maxVolume) * (volumeHeight - 7)); return <rect key={row.trade_date} className={row.close >= row.open ? "volume-up" : "volume-down"} x={index * candleSlot + 1} y={volumeHeight - barHeight} width={Math.max(1, candleSlot - 2)} height={barHeight}><title>{`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}`}</title></rect>; })}</svg></div> : <div className="outside-volume" style={{ height: volumeHeight }}>
+    {referenceStyle ? <div className="thirty-reference-volume" aria-label="Volume">
+      {highlightVolume && <div className="screener-volume-legend"><span><i className="screener-volume-high" />Blue ≥1.5× 20-bar average</span><span><i className="screener-volume-low" />Orange ≤0.3× 20-bar average</span></div>}
+      <svg viewBox={`0 0 ${width} ${volumeHeight}`} role="img" aria-label={`${timeframe} volume bars`}>{chartRows.map((row, index) => {
+        const barHeight = Math.max(1, row.volume / Math.max(1, maxVolume) * (volumeHeight - 7));
+        const avg = volumeSma[index];
+        const highlight = highlightVolume ? volumeHighlight(row.volume, avg) : "";
+        return <rect key={row.trade_date} className={`${row.close >= row.open ? "volume-up" : "volume-down"} ${highlight && `volume-${highlight}`}`} x={index * candleSlot + 1} y={volumeHeight - barHeight} width={Math.max(1, candleSlot - 2)} height={barHeight}><title>{`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}${avg ? ` (${(row.volume / avg).toFixed(2)}x 20-bar average)` : ""}`}</title></rect>;
+      })}</svg>
+    </div> : <div className="outside-volume" style={{ height: volumeHeight }}>
       {chartRows.map((row, index) => {
         const up = row.close >= row.open;
         const avg = volumeSma[index];
