@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { findVolumeSellingSetup, findVolumeSellingSignal } from "../src/lib/volumeSellingLogic.ts";
 import { latestDailyStop, swingLowBeforeLatest, positionSizingFromStop } from "../src/lib/entrySizing.ts";
+import { currentSessionQuote, liveEntryCrossed } from "../src/lib/volumeSellingLive.ts";
 
 const sizingRows = [95, 94, 92, 93, 91, 96].map(low => ({ low }));
 assert.equal(latestDailyStop(sizingRows), 96, "daily stop uses the latest candle low");
@@ -10,6 +11,17 @@ assert.deepEqual(positionSizingFromStop(100, 91, { totalCapital: 450000, riskPer
   { quantity: 500, value: 50000, riskPerShare: 9, riskUnit: 4500, valid: true });
 assert.equal(positionSizingFromStop(100, 100, { totalCapital: 450000, riskPercent: 1 }).valid, false,
   "an entry at or below the stop has no valid sizing");
+
+const liveDate = "2026-10-26";
+const liveTick = { ltp: 98, dayHigh: 102, prevClose: 95, lastTradeTime: Date.parse("2026-10-26T05:00:00Z") / 1000, receivedAt: Date.parse("2026-10-26T05:00:01Z") };
+const entryReference = { signal_date: "2026-10-19", signal_high: 100, current_date: "2026-10-23", current_close: 95, previous_close: 96 };
+assert.equal(liveEntryCrossed(entryReference, liveTick, liveDate), true, "today's quote high triggers a live entry even after price pulls back");
+assert.equal(liveEntryCrossed(entryReference, { ...liveTick, prevClose: 101 }, liveDate), false, "an already crossed prior close is not a first entry");
+assert.equal(liveEntryCrossed(entryReference, { ...liveTick, dayHigh: 99 }, liveDate), false, "the entry line must actually be crossed");
+assert.equal(currentSessionQuote({ ...liveTick, lastTradeTime: Date.parse("2026-10-23T05:00:00Z") / 1000 }, liveDate), undefined,
+  "a cached quote from a previous session must not become a live signal");
+assert.equal(liveEntryCrossed(entryReference, { ...liveTick, lastTradeTime: undefined }, liveDate), false,
+  "a quote without a trade timestamp cannot establish a live crossing");
 
 const rows = Array.from({ length: 150 }, (_, i) => ({
   trade_date: new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10),

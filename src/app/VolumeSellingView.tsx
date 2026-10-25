@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, RefreshCw, X } from "lucide-react";
 import { latestDailyStop, swingLowBeforeLatest, type EntrySizingSettings } from "@/lib/entrySizing";
+import { currentSessionQuote, liveEntryCrossed } from "@/lib/volumeSellingLive";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
 import EntrySizingTile from "./EntrySizingTile";
 
 type Response = { evaluated: number; qualified: number; results: VolumeSellingRow[]; generatedAt: string };
-type Tick = { securityId: string; ltp: number; dayHigh?: number; dayLow?: number; prevClose?: number; receivedAt: number };
+type Tick = { securityId: string; ltp: number; dayHigh?: number; dayLow?: number; prevClose?: number; lastTradeTime?: number; receivedAt: number };
+type FeedStatus = "idle" | "connecting" | "live" | "error";
 type Mode = "near" | "entry" | "pullback" | "all";
 type Sort = "distance" | "newest" | "redVolume" | "allVolume" | "price" | "symbol";
 const istDate = (value: number | string) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
@@ -50,7 +52,7 @@ function TileChart({ row }: { row: VolumeSellingRow }) {
   return <span className="thirty-in-thirty-chart"><svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true"><path className="spark-line up" d={path}/><line className="vs-signal-line" x1={index >= 0 ? index * 220 / Math.max(1, points.length - 1) : 0} x2="220" y1={y(row.signal_high)} y2={y(row.signal_high)}/></svg></span>;
 }
 
-export default function VolumeSellingView({ settings }: { settings?: EntrySizingSettings | null }) {
+export default function VolumeSellingView({ settings, setLiveFeedStatus }: { settings?: EntrySizingSettings | null; setLiveFeedStatus: (status: FeedStatus, message?: string) => void }) {
   const [data, setData] = useState<Response | null>(null);
   const [ticks, setTicks] = useState<Record<string, Tick>>({});
   const [loading, setLoading] = useState(false);
@@ -63,32 +65,45 @@ export default function VolumeSellingView({ settings }: { settings?: EntrySizing
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<VolumeSellingRow | null>(null);
   const [months, setMonths] = useState<3 | 6>(6);
+  const [feedStatus, setFeedStatus] = useState<FeedStatus>("idle");
+  const [feedMessage, setFeedMessage] = useState("Waiting for scan results");
+  const reportFeedStatus = useCallback((status: FeedStatus, message: string) => {
+    setFeedStatus(status);
+    setFeedMessage(message);
+    setLiveFeedStatus(status, message);
+  }, [setLiveFeedStatus]);
   const load = useCallback(async () => { setLoading(true); try { const response = await fetch("/api/volume-selling-screener", { cache: "no-store" }); const json = await response.json(); if (!response.ok) throw new Error(json.error ?? "Scan failed"); setData(json); setError(""); } catch (cause) { setError(cause instanceof Error ? cause.message : "Scan failed"); } finally { setLoading(false); } }, []);
   useEffect(() => { void load(); const timer = window.setInterval(() => void load(), 120_000); return () => window.clearInterval(timer); }, [load]);
   useEffect(() => { setSelected(current => current ? data?.results.find(row => row.security_id === current.security_id) ?? null : null); }, [data]);
   useEffect(() => {
     const ids = (data?.results ?? []).slice(0, 500).map(row => row.security_id);
-    if (!ids.length) return;
+    if (!ids.length) {
+      reportFeedStatus("idle", "No VolumeSelling stocks to stream");
+      return;
+    }
+    reportFeedStatus("connecting", "Connecting to Dhan quote feed");
     const source = new EventSource(`/api/volume-selling-screener/live?ids=${encodeURIComponent(ids.join(","))}`);
+    source.onopen = () => reportFeedStatus("connecting", "Waiting for Dhan websocket status");
+    source.addEventListener("status", event => {
+      try {
+        const status = JSON.parse((event as MessageEvent).data) as { state?: FeedStatus; message?: string };
+        if (status.state === "idle" || status.state === "connecting" || status.state === "live" || status.state === "error") reportFeedStatus(status.state, status.message ?? "Dhan quote feed status updated");
+      } catch {}
+    });
     source.addEventListener("snapshot", event => { try { const values = JSON.parse((event as MessageEvent).data) as Tick[]; setTicks(previous => ({ ...previous, ...Object.fromEntries(values.map(tick => [tick.securityId, tick])) })); } catch {} });
-    source.addEventListener("tick", event => { try { const tick = JSON.parse((event as MessageEvent).data) as Tick; setTicks(previous => ({ ...previous, [tick.securityId]: tick })); } catch {} });
-    return () => source.close();
-  }, [data]);
+    source.addEventListener("tick", event => { try { const tick = JSON.parse((event as MessageEvent).data) as Tick; setTicks(previous => ({ ...previous, [tick.securityId]: tick })); reportFeedStatus("live", "Receiving Dhan quotes"); } catch {} });
+    source.onerror = () => reportFeedStatus("error", "VolumeSelling quote stream disconnected; reconnecting");
+    return () => { source.close(); setLiveFeedStatus("idle"); };
+  }, [data, reportFeedStatus, setLiveFeedStatus]);
   const today = istDate(Date.now());
-  const price = (row: VolumeSellingRow) => ticks[row.security_id]?.ltp || row.current_close;
+  const liveQuote = (row: VolumeSellingRow) => currentSessionQuote(ticks[row.security_id], today);
+  const price = (row: VolumeSellingRow) => liveQuote(row)?.ltp ?? row.current_close;
   const distance = (row: VolumeSellingRow) => (price(row) / row.signal_high - 1) * 100;
-  const entryToday = (row: VolumeSellingRow) => {
-    if (row.signal_date >= today) return false;
-    const tick = ticks[row.security_id];
-    const liveToday = tick && istDate(tick.receivedAt) === today;
-    const dayHigh = liveToday ? tick.dayHigh : row.current_date === today ? row.current_high : undefined;
-    const previousClose = row.current_date === today ? row.previous_close : row.current_close;
-    return dayHigh !== undefined && dayHigh >= row.signal_high && previousClose < row.signal_high;
-  };
+  const entryToday = (row: VolumeSellingRow) => liveEntryCrossed(row, ticks[row.security_id], today);
   const sizingLows = (row: VolumeSellingRow) => {
     const lows = row.recent.map(point => ({ low: point.low }));
-    const tick = ticks[row.security_id];
-    if (!tick?.dayLow || tick.dayLow <= 0 || istDate(tick.receivedAt) !== today) return lows;
+    const tick = liveQuote(row);
+    if (!tick?.dayLow || tick.dayLow <= 0) return lows;
     if (row.current_date === today && lows.length) lows[lows.length - 1] = { low: Math.min(lows.at(-1)!.low, tick.dayLow) };
     else if (row.current_date < today) lows.push({ low: tick.dayLow });
     return lows;
@@ -106,8 +121,9 @@ export default function VolumeSellingView({ settings }: { settings?: EntrySizing
   const selectedLows = selected ? sizingLows(selected) : [];
   const selectedDailyStop = latestDailyStop(selectedLows);
   const selectedSwingStop = swingLowBeforeLatest(selectedLows)?.low;
+  const liveEntryCount = (data?.results ?? []).filter(entryToday).length;
   return <section className="research-page thirty-in-thirty-page thirty-in-thirty-screener-page volume-selling-page">
-    <div className="thirty-hero"><div><p className="eyebrow">VolumeSelling Screener · Nifty 500</p><h2>One-month decline, strong red volume</h2><small>Tracks the latest strong red-volume signal while the stock has fallen over 21 completed sessions. Intraday tests stay visible; after the first close above the blue line, keep the stock for five more trading sessions to watch for a pullback.</small></div><div className="thirty-hero-actions"><button className="primary" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/>{loading ? "Scanning…" : "Run Screener"}</button><button className="secondary compact" onClick={() => { setMode("all"); setSort("distance"); setDirection("asc"); setMaxAge(126); setMinPrice(0); setSearch(""); setMonths(6); }}>Reset</button></div></div>
+    <div className="thirty-hero"><div><p className="eyebrow">VolumeSelling Screener · Nifty 500</p><h2>One-month decline, strong red volume</h2><small>Completed daily candles define the watchlist. Dhan quotes update entry-line crossings and prices during the live session.</small></div><div className="thirty-hero-actions"><div className="refresh-status" title={feedMessage}><span className={feedStatus === "live" ? "ready" : feedStatus === "error" ? "pending" : "idle-dot"}/><b>{feedStatus === "live" ? "Dhan feed connected" : feedStatus === "connecting" ? "Connecting quotes" : feedStatus === "error" ? "Feed disconnected" : "Feed idle"}</b><small>{liveEntryCount} entry signals today</small></div><button className="primary" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/>{loading ? "Scanning…" : "Run Screener"}</button><button className="secondary compact" onClick={() => { setMode("all"); setSort("distance"); setDirection("asc"); setMaxAge(126); setMinPrice(0); setSearch(""); setMonths(6); }}>Reset</button></div></div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
       <label>View<select value={mode} onChange={event => setMode(event.target.value as Mode)}><option value="all">Watchlist</option><option value="near">Below entry within 5%</option><option value="entry">First entry today</option><option value="pullback">5-day pullback window</option></select></label>
       <label>Signal age ≤ sessions<input className="plain-input" type="number" min="0" max="126" value={maxAge} onChange={event => setMaxAge(Math.max(0, Math.min(126, Number(event.target.value))))}/></label>
