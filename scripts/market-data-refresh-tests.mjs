@@ -41,7 +41,9 @@ function loadTs(file) {
 const {
   aggregateIntradayToDaily,
   getIndiaTradingDate,
+  getLatestTradingSessionDate,
   isIndianMarketClosed,
+  missingDateRangesFromLatest,
   safeDailyHistoricalFallbackToDate,
   validateConstructedDailyCandle,
   withRetry,
@@ -78,6 +80,17 @@ const atUtc = (iso) => new Date(iso);
 {
   assert.equal(getIndiaTradingDate(atUtc("2026-10-05T19:00:00.000Z")), "2026-10-06", "CASE 9: UTC server time must resolve to IST trading date");
   assert.equal(isIndianMarketClosed(atUtc("2026-10-05T10:01:00.000Z")), true, "CASE 9: market close check uses IST");
+}
+
+{
+  const sunday = atUtc("2026-10-25T06:00:00.000Z");
+  assert.equal(getLatestTradingSessionDate(sunday), "2026-10-23", "Sunday refresh must target Friday's session");
+  assert.deepEqual(missingDateRangesFromLatest("2026-10-23", sunday).ranges, [
+    { fromDate: "2026-10-23", toDate: "2026-10-24" },
+  ], "Dhan's exclusive toDate must include Friday's official candle for reconciliation");
+  assert.equal(getLatestTradingSessionDate(atUtc("2026-10-20T11:00:00.000Z")), "2026-10-19", "NSE holiday must use the previous session");
+  assert.equal(getLatestTradingSessionDate(atUtc("2026-10-26T04:00:00.000Z")), "2026-10-23", "Before market close, the previous completed session is latest");
+  assert.equal(getLatestTradingSessionDate(atUtc("2026-10-26T10:01:00.000Z")), "2026-10-26", "After market close, today's session is eligible");
 }
 
 {

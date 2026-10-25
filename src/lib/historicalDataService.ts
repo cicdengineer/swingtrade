@@ -58,6 +58,12 @@ const marketCloseMinutes = 15 * 60 + 30;
 const provisionalDataSource = "DHAN_INTRADAY_AGGREGATED" as const;
 const officialDataSource = "DHAN_DAILY" as const;
 const fixedNseHolidayMonthDays = new Set(["01-26", "08-15", "10-02", "12-25"]);
+// NSE equity trading holidays published for 2026 (in addition to weekends).
+const nse2026Holidays = new Set([
+  "2026-01-15", "2026-01-26", "2026-03-03", "2026-03-26", "2026-03-31",
+  "2026-04-03", "2026-04-14", "2026-05-01", "2026-05-28", "2026-06-26",
+  "2026-09-14", "2026-10-02", "2026-10-20", "2026-11-10", "2026-11-24", "2026-12-25",
+]);
 const dhanReason = (body: any, fallback: string) => {
   const reason = body?.errorMessage ?? body?.remarks ?? body?.message ?? body?.error ?? body?.status ?? fallback;
   const text = typeof reason === "string" ? reason : JSON.stringify(reason);
@@ -269,10 +275,13 @@ export async function getMissingDateRanges(securityId: string) {
   return missingDateRangesFromLatest(latestPriceDate(db, securityId)).ranges;
 }
 
-function missingDateRangesFromLatest(latest?: string) {
-  const tradingDate = getIndiaTradingDate();
-  if (!latest) return { latest, ranges: [{ fromDate: requiredHistoryStartDate(), toDate: tradingDate }] };
-  return { latest, ranges: latest <= tradingDate ? [{ fromDate: latest, toDate: tradingDate }] : [] };
+export function missingDateRangesFromLatest(latest?: string, now = new Date()) {
+  const tradingDate = getLatestTradingSessionDate(now);
+  // Dhan Daily's toDate is exclusive. Include the target session even when it
+  // is already stored provisionally so the official candle can replace it.
+  const endExclusive = addDays(tradingDate, 1);
+  if (!latest) return { latest, ranges: [{ fromDate: requiredHistoryStartDate(), toDate: endExclusive }] };
+  return { latest, ranges: latest <= tradingDate ? [{ fromDate: latest, toDate: endExclusive }] : [] };
 }
 
 function addDays(date: string, days: number) {
@@ -290,7 +299,17 @@ export function safeDailyHistoricalFallbackToDate(fromDate: string, toDate: stri
 function isNseBusinessDay(date: string) {
   const day = new Date(`${date}T00:00:00Z`).getUTCDay();
   if (day === 0 || day === 6) return false;
-  return !fixedNseHolidayMonthDays.has(date.slice(5));
+  return !fixedNseHolidayMonthDays.has(date.slice(5)) && !nse2026Holidays.has(date);
+}
+
+export function getLatestTradingSessionDate(now = new Date()) {
+  const india = getIndiaNow(now);
+  let date = india.date;
+  if (isNseBusinessDay(date) && india.hour * 60 + india.minute >= marketCloseMinutes) return date;
+  do {
+    date = addDays(date, -1);
+  } while (!isNseBusinessDay(date));
+  return date;
 }
 
 function dateRange(fromDate: string, toDate: string) {
@@ -323,7 +342,7 @@ function isDhanInputException(error: unknown) {
 
 function isNoIntradayDataError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return isNoHistoricalDataError(error) || isDhanInputException(error) || message.includes("incorrect parameters");
+  return isNoHistoricalDataError(error) || isDhanInputException(error) || message.includes("incorrect parameters") || message.includes("no intraday candles");
 }
 
 function dhanExchangeSegment(segment?: string) {
@@ -691,7 +710,7 @@ async function downloadHistoricalDataForMember(member: UniverseMemberRecord | Se
   const security = securityFromMember(member);
   if (!security.securityId) throw new Error(`No Dhan security ID is mapped for ${security.symbol}.`);
   const { ranges } = missingDateRangesFromLatest(latest);
-  const tradingDate = getIndiaTradingDate();
+  const tradingDate = getLatestTradingSessionDate();
   let total = 0;
   let dataThroughDate: string | undefined = latest;
   const candlesByRange: Candle[][] = [];
@@ -703,7 +722,7 @@ async function downloadHistoricalDataForMember(member: UniverseMemberRecord | Se
       if (isNoHistoricalDataError(error)) {
         continue;
       }
-      if (isDhanInputException(error) && range.toDate >= tradingDate) {
+      if (isDhanInputException(error) && range.toDate > tradingDate) {
         const fallbackToDate = safeDailyHistoricalFallbackToDate(range.fromDate, range.toDate, tradingDate);
         if (fallbackToDate) {
           try {
@@ -748,12 +767,13 @@ export async function refreshInstrumentData(member: UniverseMemberRecord | Secur
   const security = securityFromMember(member);
   const db = await readDatabase();
   const result = await downloadHistoricalDataForMember(member, latestPriceDate(db, security.securityId));
-  const tradingDate = getIndiaTradingDate();
+  const tradingDate = getLatestTradingSessionDate();
+  const isTodaySession = tradingDate === getIndiaTradingDate();
   const hasOfficialToday = result.candles.some((candle) => candle.date === tradingDate);
   let provisionalAggregate: ReturnType<typeof aggregateIntradayToDaily> | null = null;
   let provisionalReason: string | undefined;
 
-  if (!hasOfficialToday && isIndianMarketClosed()) {
+  if (!hasOfficialToday && isTodaySession && isIndianMarketClosed()) {
     try {
       const intraday = await getIntradayDataForSession(result.security, tradingDate, 5);
       provisionalAggregate = aggregateIntradayToDaily(intraday, tradingDate, new Date(), 5);
@@ -819,7 +839,7 @@ function startJob(universeName: UniverseName | undefined, total: number): DataDo
     progress: 0,
     current_status: "Starting",
     started_at: new Date().toISOString(),
-    trading_date: getIndiaTradingDate(),
+    trading_date: getLatestTradingSessionDate(),
     historical_candles_backfilled: 0,
     official_candles_updated: 0,
     provisional_candles_created: 0,
@@ -915,7 +935,7 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
       job.total = members.length;
       job.remaining = members.length;
       job.progress = members.length ? 0 : 100;
-      job.trading_date = getIndiaTradingDate();
+      job.trading_date = getLatestTradingSessionDate();
       job.current_status = members.length ? "Starting downloads" : "No instruments to refresh";
     });
 
@@ -1041,7 +1061,7 @@ export async function updateHistoricalData(universeName?: UniverseName, retryFai
     ? db.universe_members.filter((member) => db.download_failures.some((failure) => failure.status === "open" && failure.security_id === member.security_id))
     : db.universe_members.filter((member) => !universeName || member.universe_name === universeName);
   const job = startJob(universeName, members.length);
-  job.trading_date = getIndiaTradingDate();
+  job.trading_date = getLatestTradingSessionDate();
   db.data_download_jobs.unshift(job);
   await writeDatabase(db);
 
