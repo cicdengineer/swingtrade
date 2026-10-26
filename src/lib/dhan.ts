@@ -190,7 +190,68 @@ export async function placeOrder(input: DhanOrderRequest) {
 
 export const getHoldings = () => dhanGet<DhanHolding[]>("/holdings");
 export const getPositions = () => dhanGet<DhanPosition[]>("/positions");
+
+const tradeWindowCache = new Map<string, { trades: DhanTrade[]; expiresAt: number }>();
+const tradeWindowLoads = new Map<string, Promise<DhanTrade[]>>();
+let tradeRequestQueue: Promise<void> = Promise.resolve();
+let nextTradeRequestAt = 0;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function queuedTradePage(endpoint: string): Promise<DhanTrade[]> {
+  const request = tradeRequestQueue.then(async () => {
+    await wait(Math.max(0, nextTradeRequestAt - Date.now()));
+    nextTradeRequestAt = Date.now() + 300;
+    return dhanGet<DhanTrade[]>(endpoint);
+  });
+  tradeRequestQueue = request.then(() => undefined, () => undefined);
+  return request;
+}
+
+async function tradePage(endpoint: string): Promise<DhanTrade[]> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await queuedTradePage(endpoint);
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("HTTP 429")) throw error;
+      if (attempt === 3) throw new Error(`Dhan trade history is rate limited after retries. Please try again in a minute. (${error.message})`);
+      await wait(1000 * 2 ** attempt);
+    }
+  }
+  throw new Error("Dhan trade history could not be loaded.");
+}
+
+async function loadTradeWindow(start: string, end: string): Promise<DhanTrade[]> {
+  const key = `${process.env.DHAN_CLIENT_ID}/${start}/${end}`;
+  const cached = tradeWindowCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.trades;
+  const pending = tradeWindowLoads.get(key);
+  if (pending) return pending;
+
+  const load = (async () => {
+    const trades: DhanTrade[] = [];
+    const seenPages = new Set<string>();
+    for (let page = 0; page < 500; page += 1) {
+      const rows = await tradePage(`/trades/${start}/${end}/${page}`);
+      if (!Array.isArray(rows) || rows.length === 0) break;
+      const pageKey = JSON.stringify(rows.map((row) => [
+        row.exchangeTradeId, row.orderId, row.exchangeTime, row.securityId,
+        row.tradingSymbol, row.transactionType, row.tradedQuantity, row.tradedPrice,
+      ]));
+      if (seenPages.has(pageKey)) break;
+      seenPages.add(pageKey);
+      trades.push(...rows);
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    tradeWindowCache.set(key, { trades, expiresAt: Date.now() + (end >= today ? 15_000 : 86_400_000) });
+    return trades;
+  })();
+  tradeWindowLoads.set(key, load);
+  try { return await load; } finally { tradeWindowLoads.delete(key); }
+}
+
 export async function getTradeHistory(fromDate: string, toDate: string) {
+  if (!hasDhanCredentials()) throw new Error("Dhan credentials are not configured.");
   const trades: DhanTrade[] = [];
   let windowStart = new Date(`${fromDate}T00:00:00Z`);
   const lastDay = new Date(`${toDate}T00:00:00Z`);
@@ -203,24 +264,7 @@ export async function getTradeHistory(fromDate: string, toDate: string) {
     const windowEnd = new Date(Math.min(lastDay.getTime(), windowStart.getTime() + 29 * 86400000));
     const start = formatDate(windowStart);
     const end = formatDate(windowEnd);
-    const seenPages = new Set<string>();
-    for (let page = 0; page < 500; page += 1) {
-      const rows = await dhanGet<DhanTrade[]>(`/trades/${start}/${end}/${page}`);
-      if (!Array.isArray(rows) || rows.length === 0) break;
-      const pageKey = JSON.stringify(rows.map((row) => [
-        row.exchangeTradeId,
-        row.orderId,
-        row.exchangeTime,
-        row.securityId,
-        row.tradingSymbol,
-        row.transactionType,
-        row.tradedQuantity,
-        row.tradedPrice,
-      ]));
-      if (seenPages.has(pageKey)) break;
-      seenPages.add(pageKey);
-      trades.push(...rows);
-    }
+    trades.push(...await loadTradeWindow(start, end));
     windowStart = new Date(windowEnd.getTime() + 86400000);
   }
   return trades;
