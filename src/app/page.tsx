@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { Dispatch, FormEvent, SetStateAction } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -2612,7 +2612,7 @@ function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedS
   </>;
 }
 
-function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings, seasonal, month, setMonth, onBuild, onOpenSeasonality, combined, membership = {}, source = "All watchlists", setSource }: { data: ThirtyInThirtyResponse | SeasonalStocksResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: (row: ThirtyInThirtyRow | null) => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null; seasonal?: boolean; month?: number; setMonth?: (month: number) => void; onBuild?: () => void; onOpenSeasonality?: () => void; combined?: boolean; membership?: ScreenerMembership; source?: ScreenerSource | "All watchlists"; setSource?: (source: ScreenerSource | "All watchlists") => void }) {
+function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings, seasonal, month, setMonth, onBuild, onOpenSeasonality, combined, membership = {}, source = "All watchlists", setSource }: { data: ThirtyInThirtyResponse | SeasonalStocksResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: Dispatch<SetStateAction<ThirtyInThirtyRow | null>>; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null; seasonal?: boolean; month?: number; setMonth?: (month: number) => void; onBuild?: () => void; onOpenSeasonality?: () => void; combined?: boolean; membership?: ScreenerMembership; source?: ScreenerSource | "All watchlists"; setSource?: (source: ScreenerSource | "All watchlists") => void }) {
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: seasonal ? "seasonal_avg" : "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [cleanTrendOnly, setCleanTrendOnly] = useState(false);
@@ -2671,7 +2671,9 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   useEffect(() => {
     if (!selected) return;
     const replacement = liveRows.find((row) => row.security_id === selected.security_id);
-    if (replacement && replacement !== selected) setSelected(replacement);
+    if (replacement && replacement !== selected) {
+      setSelected((current) => current === selected ? replacement : current);
+    }
   }, [liveRows, selected, setSelected]);
   useEffect(() => {
     const rows = (activeData?.results ?? []).filter(row => combined ? (source === "All watchlists" ? Boolean(membership[row.security_id]?.length) : membership[row.security_id]?.includes(source)) : !qMode || qIdSet.has(row.security_id));
@@ -2883,9 +2885,9 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         }) : <p className="panel-empty">{qMode ? qWatchlistLoading ? "Loading Qullamaggie resistance stocks…" : "No Qullamaggie stocks with confirmed resistance were found." : seasonal ? "No stocks in this month's seasonal watchlist match the selected filters." : "No stocks matched the selected 30 in 30 criteria."}</p>}
       </section>
     </>}
-    {selected && <div className="drawer" onClick={() => setSelected(null)}>
-      <div className="drawer-card chart-drawer" onClick={(event) => event.stopPropagation()}>
-        <button className="icon-button drawer-close" onClick={() => setSelected(null)}>×</button>
+    {selected && <div className="drawer" onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
+      <div className="drawer-card chart-drawer">
+        <button className="icon-button drawer-close" onClick={() => setSelected(null)} aria-label="Close chart">×</button>
         <p className="eyebrow">{combined ? `Screener · ${membership[selected.security_id]?.join(" · ")}` : qMode ? `Qullamaggie watchlist · resistance ${qResistance(selected.security_id)}` : seasonal ? `Seasonal Stocks · ${selected.seasonal_window} · ${selected.seasonal_avg_return?.toFixed(1)}% average` : `30 in 30 · ${selected.best_return_pct.toFixed(1)}%`}</p>
         <h2>{selected.symbol} · {selected.company_name}</h2>
         <p className="muted">{selected.reason}</p>
