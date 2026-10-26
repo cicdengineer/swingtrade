@@ -8,6 +8,7 @@ Local, rules-based Indian equity seasonality research. It contains no technical 
 - A `.data/seasonality-edge-db.json` database for local development, with optional MySQL-backed JSON storage in production via `DATABASE_URL`
 - Current Nifty 500 (NSE:CNX500) universe loading from the NSE/Nifty Indices constituent CSV
 - Dhan Security ID mapping from the official detailed Dhan scrip master
+- USA → USA Data runs a read-only, one-stock probe for a year of US daily OHLCV. It resolves a Dhan US Security ID from Dhan's Global Stocks instrument list and tests `/v2/charts/historical` with `INX_EQ`. The page displays the HTTP response, candle count, date span, and latest ten candles; it does not save probe data.
 - Daily OHLCV analysis for Dhan's available rolling five-year history
 - Smart refresh behavior: new securities download from the required start date, existing securities request only dates after the latest stored trade date
 - Self-healing refresh behavior: existing securities request from their latest stored date through today, so skipped days are backfilled from Dhan Daily Historical data

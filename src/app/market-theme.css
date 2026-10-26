@@ -287,6 +287,18 @@ td, :root[data-theme="light"] td { border-color: var(--line); color: var(--text)
 }
 
 .strategy-nav-group { position: relative; min-width: 0; }
+.usa-data-page { display: grid; gap: 16px; }
+.usa-data-intro { padding: 20px; }
+.usa-data-intro h2 { margin: 4px 0 8px; }
+.usa-data-intro p:last-child { max-width: 800px; color: var(--muted); line-height: 1.55; }
+.usa-data-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 20px; }
+.usa-data-form label { display: grid; gap: 7px; min-width: 180px; font-size: 12px; font-weight: 700; }
+.usa-data-form label small { display: inline; font-weight: 400; color: var(--muted); }
+.usa-data-form .primary { min-height: 38px; }
+.usa-data-result .metric-list { padding: 0 20px 20px; }
+.usa-data-sample-title { margin: 0; padding: 0 20px 12px; font-size: 14px; }
+.usa-data-result .table-wrap { padding: 0 20px 20px; }
+@media (max-width: 620px) { .usa-data-form label, .usa-data-form .primary { width: 100%; } }
 .strategy-nav-toggle .strategy-nav-chevron { display: block; margin-left: auto; transition: transform .15s ease; }
 .strategy-nav-toggle[aria-expanded="true"] .strategy-nav-chevron { transform: rotate(180deg); }
 .strategy-nav-items { display: grid; gap: 3px; z-index: 40; }
