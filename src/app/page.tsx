@@ -928,18 +928,22 @@ function liveHourlySignal(signal?: HourlySignal, ltp?: number): HourlySignal | u
   return { ...signal, state: "red", ltp, distancePct, label: "Too far below hourly 50 EMA" };
 }
 
-function liveAdjustedPortfolio(portfolio: PortfolioResponse | null, liveTicks: Record<string, LiveTick>, liveDailyRows: Record<string, DailyChartPoint> = {}) {
+function liveAdjustedPortfolio(portfolio: PortfolioResponse | null, liveTicks: Record<string, LiveTick>, liveDailyRows: Record<string, DailyChartPoint> = {}, intradayUpdatedAt: Record<string, number> = {}) {
   if (!portfolio) return null;
   const holdings = portfolio.holdings.map((holding) => {
-    const tick = liveTicks[holding.securityId];
     const liveDaily = liveDailyRows[holding.securityId];
+    const candidateTick = liveTicks[holding.securityId];
+    const tick = isCurrentSessionTick(candidateTick) && !(liveDaily && intradayUpdatedAt[holding.securityId] > candidateTick.receivedAt && Date.now() - candidateTick.receivedAt > 45_000) ? candidateTick : undefined;
     const tickAdjustedDaily = liveDaily && tick?.ltp ? { ...liveDaily, close: tick.ltp, high: Math.max(liveDaily.high, tick.ltp), low: Math.min(liveDaily.low, tick.ltp) } : liveDaily;
     const adjustedHolding = liveAdjustedPortfolioHolding(holding, tickAdjustedDaily ?? null);
     if (!tick?.ltp) return adjustedHolding;
     return {
       ...adjustedHolding,
       currentPrice: tick.ltp,
-      todayChangePct: tick.prevClose && tick.prevClose > 0 ? ((tick.ltp / tick.prevClose) - 1) * 100 : holding.todayChangePct,
+      todayChangePct: (() => {
+        const previousClose = tick.prevClose ?? holding.recent?.filter((row) => row.trade_date < liveTradeDate()).at(-1)?.close;
+        return previousClose && previousClose > 0 ? ((tick.ltp / previousClose) - 1) * 100 : adjustedHolding.todayChangePct;
+      })(),
       unrealizedPnl: (tick.ltp - holding.avgCostPrice) * holding.totalQty,
       distanceFrom10EmaPct: adjustedHolding.ema10 ? ((tick.ltp - adjustedHolding.ema10) / adjustedHolding.ema10) * 100 : adjustedHolding.distanceFrom10EmaPct,
       distanceFrom50EmaPct: adjustedHolding.ema50 ? ((tick.ltp - adjustedHolding.ema50) / adjustedHolding.ema50) * 100 : adjustedHolding.distanceFrom50EmaPct,
@@ -1462,7 +1466,7 @@ function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHoldin
   return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume, StochRSI %D, entry and stored SL.</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={ema10FromAvgCost === undefined ? undefined : pct2(ema10FromAvgCost)} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
 }
 
-function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHolding[]; onStopLossSaved: () => Promise<void> | void }) {
+function PortfolioTable({ holdings, ticks, intradayUpdatedAt, priceClock, onStopLossSaved }: { holdings: PortfolioHolding[]; ticks: Record<string, LiveTick>; intradayUpdatedAt: Record<string, number>; priceClock: number; onStopLossSaved: () => Promise<void> | void }) {
   const [selected, setSelected] = useState<PortfolioHolding | null>(null);
   return <section className="panel portfolio-holdings-panel">
     <div className="panel-head">
@@ -1479,6 +1483,8 @@ function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHold
             const days = holding.brokerTradingDaysHeld;
             const above50Ema = holding.distanceFrom50EmaPct !== undefined && holding.distanceFrom50EmaPct >= 0;
             const todayTone = holding.todayChangePct === undefined ? "neutral" : holding.todayChangePct >= 0 ? "positive" : "negative";
+            const tick = ticks[holding.securityId];
+            const priceLabel = !isNseSessionOpen() ? "market closed" : tick && isCurrentSessionTick(tick) && priceClock - tick.receivedAt < 45_000 ? "live tick" : intradayUpdatedAt[holding.securityId] && priceClock - intradayUpdatedAt[holding.securityId] < 90_000 ? "1m intraday" : "price delayed";
             return <tr key={holding.securityId}>
               <td className="window">{holding.tradingSymbol}<small className="sample-warning">{holding.brokerEntryDate ? `Since ${holding.brokerEntryDate}` : "Entry date unavailable"}</small></td>
               <td><HoldingMiniChart holding={holding} onOpen={() => setSelected(holding)} /></td>
@@ -1488,7 +1494,7 @@ function PortfolioTable({ holdings, onStopLossSaved }: { holdings: PortfolioHold
               <td><PortfolioStopInput holding={holding} onSaved={onStopLossSaved} /></td>
               <td><RiskCell holding={holding} /></td>
               <td>{rupees(holding.invested)}</td>
-              <td className={`portfolio-live-price ${todayTone}`}>{holding.currentPrice === undefined ? "—" : money(holding.currentPrice)}<small>{holding.todayChangePct === undefined ? "waiting tick" : "live tick"}</small></td>
+              <td className={`portfolio-live-price ${todayTone}`}>{holding.currentPrice === undefined ? "—" : money(holding.currentPrice)}<small>{priceLabel}</small></td>
               <td className={`portfolio-live-change ${todayTone}`}>{holding.todayChangePct === undefined ? "—" : pct2(holding.todayChangePct)}</td>
               <td className={`portfolio-pnl ${holding.unrealizedPnl >= 0 ? "positive" : "negative"}`}>{rupees(holding.unrealizedPnl)}</td>
               <td><TenEmaCell holding={holding} /></td>
@@ -1746,6 +1752,12 @@ function BasketBacktestView({ filters, setFilters, data, loading, onRun }: { fil
 function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { portfolio: PortfolioResponse | null; loading: boolean; onRefresh: () => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void }) {
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
   const [liveDailyRows, setLiveDailyRows] = useState<Record<string, DailyChartPoint>>({});
+  const [intradayUpdatedAt, setIntradayUpdatedAt] = useState<Record<string, number>>({});
+  const [priceClock, setPriceClock] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setPriceClock(Date.now()), 10_000);
+    return () => window.clearInterval(timer);
+  }, []);
   useEffect(() => {
     const ids = (portfolio?.holdings ?? []).map((holding) => holding.securityId).filter(Boolean).join(",");
     setLiveTicks({});
@@ -1753,28 +1765,47 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
       setLiveFeedStatus("idle");
       return;
     }
-    setLiveFeedStatus("connecting", "Starting Portfolio live P&L");
-    const source = new EventSource(`/api/portfolio/live?ids=${encodeURIComponent(ids)}`);
-    source.onopen = () => setLiveFeedStatus("connecting", "Waiting for Dhan portfolio ticks");
-    source.addEventListener("status", (event) => {
-      const status = JSON.parse((event as MessageEvent).data) as LiveFeedStatusUpdate;
-      if (status.state === "idle" || status.state === "connecting" || status.state === "live" || status.state === "error") setLiveFeedStatus(status.state, status.message);
-    });
-    source.addEventListener("snapshot", (event) => {
-      const ticks = JSON.parse((event as MessageEvent).data) as LiveTick[];
-      setLiveTicks(Object.fromEntries(ticks.map((tick) => [tick.securityId, tick])));
-      if (ticks.length) setLiveFeedStatus("live", "Portfolio live P&L streaming");
-    });
-    source.addEventListener("tick", (event) => {
-      const tick = JSON.parse((event as MessageEvent).data) as LiveTick;
-      setLiveTicks((current) => ({ ...current, [tick.securityId]: tick }));
-      setLiveFeedStatus("live", "Portfolio live P&L streaming");
-    });
-    source.addEventListener("error", () => {
-      setLiveFeedStatus("error", "Portfolio live feed disconnected");
-    });
+    let source: EventSource;
+    let lastTickAt = Date.now();
+    const connect = () => {
+      source = new EventSource(`/api/portfolio/live?ids=${encodeURIComponent(ids)}`);
+      setLiveFeedStatus("connecting", "Waiting for Dhan portfolio price ticks");
+      source.addEventListener("status", (event) => {
+        const status = JSON.parse((event as MessageEvent).data) as LiveFeedStatusUpdate;
+        if (status.state === "error") setLiveFeedStatus("error", status.message);
+        else if (status.state === "connecting") setLiveFeedStatus("connecting", status.message);
+      });
+      source.addEventListener("snapshot", (event) => {
+        const ticks = (JSON.parse((event as MessageEvent).data) as LiveTick[]).filter(isCurrentSessionTick);
+        setLiveTicks((current) => ({ ...current, ...Object.fromEntries(ticks.filter((tick) => tick.receivedAt > (current[tick.securityId]?.receivedAt ?? 0)).map((tick) => [tick.securityId, tick])) }));
+        if (ticks.some((tick) => Date.now() - tick.receivedAt < 45_000)) {
+          lastTickAt = Date.now();
+          setLiveFeedStatus("live", "Receiving fresh Portfolio prices");
+        }
+      });
+      source.addEventListener("tick", (event) => {
+        const tick = JSON.parse((event as MessageEvent).data) as LiveTick;
+        setLiveTicks((current) => tick.receivedAt >= (current[tick.securityId]?.receivedAt ?? 0) ? { ...current, [tick.securityId]: tick } : current);
+        if (Date.now() - tick.receivedAt < 45_000) {
+          lastTickAt = Date.now();
+          setLiveFeedStatus("live", "Receiving fresh Portfolio prices");
+        }
+      });
+      source.addEventListener("error", () => setLiveFeedStatus("connecting", "Portfolio feed disconnected; reconnecting"));
+    };
+    connect();
+    const watchdog = window.setInterval(() => {
+      if (!isNseSessionOpen()) {
+        setLiveFeedStatus("idle", "Market closed · showing last available prices");
+      } else if (Date.now() - lastTickAt > 60_000) {
+        source.close();
+        lastTickAt = Date.now();
+        connect();
+      }
+    }, 10_000);
     return () => {
       source.close();
+      window.clearInterval(watchdog);
       setLiveFeedStatus("idle");
     };
   }, [portfolio, setLiveFeedStatus]);
@@ -1782,19 +1813,26 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
     const holdings = portfolio?.holdings ?? [];
     const securities = holdings.map((holding) => holding.securityId).filter((value): value is string => Boolean(value));
     setLiveDailyRows({});
+    setIntradayUpdatedAt({});
     if (!securities.length) return;
     let cancelled = false;
     const loadDailyRows = async () => {
       const uniqueIds = [...new Set(securities)];
       const entries = await Promise.all(uniqueIds.map(async (securityId) => {
         try {
-          const candles = await fetchThirtyUpIntraday(securityId, false, "thirty-up-screener");
-          return [securityId, aggregateIntradayDaily(candles)] as const;
+          const candles = await fetchThirtyUpIntraday(securityId, false, "thirty-up-screener", 1, 1);
+          const daily = aggregateIntradayDaily(candles);
+          const latestCandleAt = Date.parse(candles.at(-1)?.trade_date ?? "");
+          return daily?.trade_date === liveTradeDate() && Number.isFinite(latestCandleAt) && Date.now() - latestCandleAt < 180_000 ? [securityId, daily] as const : null;
         } catch {
           return null;
         }
       }));
-      if (!cancelled) setLiveDailyRows(Object.fromEntries(entries.filter((entry): entry is readonly [string, DailyChartPoint] => entry !== null)));
+      if (!cancelled) {
+        const currentEntries = entries.filter((entry): entry is readonly [string, DailyChartPoint] => entry !== null);
+        setLiveDailyRows(Object.fromEntries(currentEntries));
+        setIntradayUpdatedAt(Object.fromEntries(currentEntries.map(([securityId]) => [securityId, Date.now()])));
+      }
     };
     void loadDailyRows();
     const timer = window.setInterval(() => void loadDailyRows(), 60_000);
@@ -1803,7 +1841,7 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
       window.clearInterval(timer);
     };
   }, [portfolio]);
-  const livePortfolio = useMemo(() => liveAdjustedPortfolio(portfolio, liveTicks, liveDailyRows), [portfolio, liveTicks, liveDailyRows]);
+  const livePortfolio = useMemo(() => liveAdjustedPortfolio(portfolio, liveTicks, liveDailyRows, intradayUpdatedAt), [portfolio, liveTicks, liveDailyRows, intradayUpdatedAt]);
   const settings = livePortfolio?.tradeManagement?.settings;
   const riskUnit = livePortfolio?.tradeManagement?.summary.riskUnit ?? (settings ? settings.totalCapital * settings.riskPercent / 100 : 0);
   const liveHoldings = livePortfolio?.holdings.length ?? 0;
@@ -1811,8 +1849,9 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
   const totalCapital = settings?.totalCapital ?? 0;
   const accountRiskPct = totalCapital > 0 ? (accountRisk / totalCapital) * 100 : 0;
   const riskTone = accountRiskPct > 0.7 ? "danger" : accountRiskPct > 0.5 ? "warn" : "good";
-  const liveTickCount = Object.keys(liveTicks).length;
-  return <section className="portfolio-page"><div className="data-toolbar portfolio-hero"><div><p className="eyebrow">Connected portfolio</p><h2>Dhan holdings</h2><small>{livePortfolio ? `Live P&L ${liveTickCount ? `on for ${liveTickCount}/${liveHoldings}` : "connecting"} · trading-day age and SL-based account risk.` : "Live holdings, trading-day age, and account risk."}</small></div><button className="primary" onClick={onRefresh} disabled={loading}><WalletCards size={15} />Refresh Portfolio</button></div>{!livePortfolio ? <section className="empty"><div className="empty-art"><WalletCards size={30} /></div><p className="eyebrow">Portfolio</p><h2>Fetch your Dhan holdings</h2><p>Your Dhan access token remains server-side. This view will populate with live holdings and account risk.</p></section> : <><div className="portfolio-risk-strip"><div><span>Invested</span><b>{rupees(livePortfolio.stats.totalInvested)}</b><small>{liveHoldings} live holdings</small></div><div><span>Risk Unit</span><b>{rupees(riskUnit)}</b><small>{settings ? `${settings.riskPercent.toFixed(2)}% per holding` : "Settings unavailable"}</small></div><div><span>Open P&amp;L</span><b className={livePortfolio.stats.unrealizedPnl >= 0 ? "positive" : "negative"}>{rupees(livePortfolio.stats.unrealizedPnl)}</b><small>Live broker ticks</small></div><div className={`account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div></div><PortfolioTable holdings={livePortfolio.holdings} onStopLossSaved={onRefresh} /></>}</section>;
+  const liveTickCount = Object.values(liveTicks).filter((tick) => isCurrentSessionTick(tick) && priceClock - tick.receivedAt < 45_000).length;
+  const intradayCount = Object.entries(intradayUpdatedAt).filter(([securityId, updatedAt]) => !liveTicks[securityId] || priceClock - liveTicks[securityId].receivedAt >= 45_000 ? priceClock - updatedAt < 90_000 : false).length;
+  return <section className="portfolio-page"><div className="data-toolbar portfolio-hero"><div><p className="eyebrow">Connected portfolio</p><h2>Dhan holdings</h2><small>{livePortfolio ? `${liveTickCount} live · ${intradayCount} intraday · ${liveHoldings} holdings · trading-day age and SL-based account risk.` : "Live holdings, trading-day age, and account risk."}</small></div><button className="primary" onClick={onRefresh} disabled={loading}><WalletCards size={15} />Refresh Portfolio</button></div>{!livePortfolio ? <section className="empty"><div className="empty-art"><WalletCards size={30} /></div><p className="eyebrow">Portfolio</p><h2>Fetch your Dhan holdings</h2><p>Your Dhan access token remains server-side. This view will populate with live holdings and account risk.</p></section> : <><div className="portfolio-risk-strip"><div><span>Invested</span><b>{rupees(livePortfolio.stats.totalInvested)}</b><small>{liveHoldings} holdings</small></div><div><span>Risk Unit</span><b>{rupees(riskUnit)}</b><small>{settings ? `${settings.riskPercent.toFixed(2)}% per holding` : "Settings unavailable"}</small></div><div><span>Open P&amp;L</span><b className={livePortfolio.stats.unrealizedPnl >= 0 ? "positive" : "negative"}>{rupees(livePortfolio.stats.unrealizedPnl)}</b><small>{liveTickCount ? "Live broker ticks" : intradayCount ? "1m intraday fallback" : "Last available prices"}</small></div><div className={`account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div></div><PortfolioTable holdings={livePortfolio.holdings} ticks={liveTicks} intradayUpdatedAt={intradayUpdatedAt} priceClock={priceClock} onStopLossSaved={onRefresh} /></>}</section>;
 }
 
 function DataStatusView({ status, loading, onRefresh, onRefreshUniverse, onRetryFailures }: { status: DataStatus | null; loading: boolean; onRefresh: () => void; onRefreshUniverse: (universe?: UniverseName) => void; onRetryFailures: () => void }) {
