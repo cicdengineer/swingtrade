@@ -96,7 +96,7 @@ class DhanLiveFeed {
       this.connected = true;
       this.connecting = false;
       this.retryDelayMs = 1500;
-      this.setStatus("live", "Dhan websocket live");
+      this.setStatus("connecting", "Dhan websocket connected; waiting for price ticks");
       this.flushSubscriptions();
     });
     this.ws.addEventListener("message", (event) => {
@@ -187,7 +187,7 @@ class DhanLiveFeed {
       this.previousCloses.set(securityId, prevClose);
       const current = this.ticks.get(securityId);
       if (!current?.ltp) return;
-      const tick = { ...current, securityId, ltp: current.ltp, prevClose, lastTradeTime: current.lastTradeTime, receivedAt: Date.now() };
+      const tick = { ...current, securityId, ltp: current.ltp, prevClose, lastTradeTime: current.lastTradeTime, receivedAt: current.receivedAt };
       this.ticks.set(securityId, tick);
       this.listeners.forEach((listener) => listener(tick));
       return;
@@ -216,6 +216,7 @@ class DhanLiveFeed {
         receivedAt: Date.now(),
       };
       this.ticks.set(securityId, tick);
+      if (this.status.state !== "live") this.setStatus("live", "Receiving Dhan price ticks");
       this.listeners.forEach((listener) => listener(tick));
       return;
     }
@@ -227,6 +228,7 @@ class DhanLiveFeed {
     const current = this.ticks.get(securityId);
     const tick = { ...current, securityId, ltp, prevClose: current?.prevClose ?? this.previousCloses.get(securityId), lastTradeTime, receivedAt: Date.now() };
     this.ticks.set(securityId, tick);
+    if (this.status.state !== "live") this.setStatus("live", "Receiving Dhan price ticks");
     this.listeners.forEach((listener) => listener(tick));
   }
 }

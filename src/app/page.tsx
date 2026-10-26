@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import {
   Activity,
@@ -58,7 +58,7 @@ type DailyChartPoint = { trade_date: string; open: number; high: number; low: nu
 type ChartTimeframe = "daily" | "hourly";
 type HourlySignalState = "loading" | "green" | "yellow" | "red" | "error";
 type HourlySignal = { state: HourlySignalState; ltp?: number; ema50?: number; distancePct?: number; belowTwoDays?: boolean; label: string };
-type LiveTick = { securityId: string; ltp: number; prevClose?: number; dayOpen?: number; dayHigh?: number; dayLow?: number; volume?: number; lastTradeTime?: number; receivedAt: number };
+type LiveTick = { securityId: string; ltp: number; prevClose?: number; dayOpen?: number; dayHigh?: number; dayLow?: number; volume?: number; lastTradeTime?: number; receivedAt: number; source?: "websocket" | "intraday" };
 type LiveFeedStatus = "idle" | "connecting" | "live" | "error";
 type LiveFeedStatusUpdate = { state?: LiveFeedStatus; message?: string };
 type ThirtyUpSortKey = "status" | "symbol" | "universe" | "setup_path" | "hourly_signal" | "ltp" | "today_change" | "close" | "ema_dist" | "move" | "impulse_vol" | "higher_highs" | "base_days" | "base_depth" | "breakout_dist" | "current_vol" | "since_high" | "pullback" | "retrace" | "falling_trend";
@@ -399,13 +399,13 @@ function parseServerSentEvents(chunk: string, onEvent: (event: string, data: str
   if (data.length) onEvent(event, data.join("\n"));
 }
 
-async function fetchThirtyUpIntraday(securityId: string, force = false, endpoint = "thirty-up-screener") {
-  const cacheKey = `${endpoint}:${securityId}`;
+async function fetchThirtyUpIntraday(securityId: string, force = false, endpoint = "thirty-up-screener", interval = 60, days = 30) {
+  const cacheKey = `${endpoint}:${securityId}:${interval}:${days}`;
   const cached = intradayCache.get(cacheKey);
   if (!force && cached && Date.now() - cached.fetchedAt < intradayCacheMs) return cached.rows;
   const existing = intradayRequests.get(cacheKey);
   if (!force && existing) return existing;
-  const request = fetch(`/api/${endpoint}/${securityId}/intraday?interval=60&days=30`)
+  const request = fetch(`/api/${endpoint}/${securityId}/intraday?interval=${interval}&days=${days}`, { cache: "no-store" })
     .then(async (response) => {
       const body = await readJsonResponse<{ candles: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }> }>(response, "Intraday data unavailable");
       return (body.candles as Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }>).map((candle) => ({
@@ -537,10 +537,17 @@ const mergeLiveDailyCandle = (dailyRows: DailyChartPoint[], liveDaily: DailyChar
   return rows;
 };
 const liveTradeDate = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+const isCurrentSessionTick = (tick?: LiveTick) => Boolean(tick && new Date(tick.receivedAt).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) === liveTradeDate());
+const isNseSessionOpen = () => {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
+  const minutes = Number(part("hour")) * 60 + Number(part("minute"));
+  return !["Sat", "Sun"].includes(part("weekday")) && minutes >= 9 * 60 + 15 && minutes <= 15 * 60 + 30;
+};
 const pctChange = (from: number | undefined, to: number) => from && from > 0 ? ((to / from) - 1) * 100 : 0;
 const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): ThirtyInThirtyRow => {
-  if (!tick?.ltp) return row;
+  if (!tick?.ltp || !isCurrentSessionTick(tick)) return row;
   const liveClose = tick.ltp;
   const today = liveTradeDate();
   const recent = [...row.recent];
@@ -594,6 +601,7 @@ const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): Th
   };
 };
 const todayReturnPct = (row: ThirtyInThirtyRow, tick?: LiveTick) => {
+  if (!isCurrentSessionTick(tick)) tick = undefined;
   if (!tick && row.current_date !== liveTradeDate()) return undefined;
   const previousClose = tick?.prevClose ?? previousDailyRow(row)?.close;
   return previousClose ? pctChange(previousClose, row.current_close) : undefined;
@@ -2562,7 +2570,10 @@ function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedS
   const [error, setError] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const runInFlight = useRef(false);
   const run = useCallback(async () => {
+    if (runInFlight.current) return;
+    runInFlight.current = true;
     setLoading(true);
     setError("");
     const post = async <T,>(url: string, body: unknown): Promise<T> => readJsonResponse<T>(await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), `${url} unavailable`);
@@ -2602,9 +2613,15 @@ function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedS
       setSourceErrors(issues);
       setUpdatedAt(new Date().toISOString());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Screener unavailable"); }
-    finally { setLoading(false); }
+    finally { runInFlight.current = false; setLoading(false); }
   }, [filters, month, emaFilters, stochFilters]);
   useEffect(() => { void run(); }, [month]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && isNseSessionOpen()) void run();
+    }, 120_000);
+    return () => window.clearInterval(timer);
+  }, [run]);
   return <>
     {error && <div className="error">{error}</div>}
     {sourceErrors.length > 0 && <div className="notice"><AlertTriangle size={18}/><span>{sourceErrors.join(" · ")}</span></div>}
@@ -2619,6 +2636,11 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [showTileEma10, setShowTileEma10] = useState(true);
   const [tileLimit, setTileLimit] = useState(9999);
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
+  const liveTicksRef = useRef(liveTicks);
+  liveTicksRef.current = liveTicks;
+  const [priceClock, setPriceClock] = useState(Date.now());
+  const sessionDate = liveTradeDate();
+  const [streamState, setStreamState] = useState<LiveFeedStatus>("connecting");
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const [watchlistMode, setWatchlistMode] = useState<"thirty" | "qullamaggie">("thirty");
   const [qWatchlist, setQWatchlist] = useState<QWatchlist | null>(null);
@@ -2627,6 +2649,10 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [qWatchlistError, setQWatchlistError] = useState("");
   const [qWatchlistRevision, setQWatchlistRevision] = useState(0);
   const qMode = !seasonal && watchlistMode === "qullamaggie";
+  useEffect(() => {
+    const timer = window.setInterval(() => setPriceClock(Date.now()), 10_000);
+    return () => window.clearInterval(timer);
+  }, []);
   useEffect(() => {
     if (!qMode) return;
     setSelected(null);
@@ -2667,7 +2693,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     const rows = (activeData?.results ?? []).filter(row => combined ? (source === "All watchlists" ? Boolean(membership[row.security_id]?.length) : membership[row.security_id]?.includes(source)) : !qMode || qIdSet.has(row.security_id));
     const uniqueRows = qMode ? [...new Map(rows.map(row => [row.security_id, row])).values()] : rows;
     return uniqueRows.map(row => liveAdjustedThirtyInThirty(row, liveTicks[row.security_id]));
-  }, [activeData, liveTicks, qMode, qIdSet, combined, source, membership]);
+  }, [activeData, liveTicks, sessionDate, qMode, qIdSet, combined, source, membership]);
   useEffect(() => {
     if (!selected) return;
     const replacement = liveRows.find((row) => row.security_id === selected.security_id);
@@ -2679,54 +2705,98 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     const rows = (activeData?.results ?? []).filter(row => combined ? (source === "All watchlists" ? Boolean(membership[row.security_id]?.length) : membership[row.security_id]?.includes(source)) : !qMode || qIdSet.has(row.security_id));
     if (!rows.length) {
       setLiveTicks({});
+      setStreamState("idle");
       setLiveFeedStatus("idle");
       return;
     }
     const liveRows = rows.slice(0, Math.min(tileLimit, thirtyInThirtyLiveFeedLimit));
     const ids = liveRows.map((row) => row.security_id);
-    const controller = new AbortController();
-    setLiveFeedStatus("connecting", `Starting live prices for ${ids.length} of ${rows.length} ${seasonal ? "seasonal" : "30 in 30"} stocks`);
+    let controller = new AbortController();
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let watchdog: ReturnType<typeof setInterval> | undefined;
+    let disposed = false;
+    let retryDelay = 1500;
+    let lastTickAt = Date.now();
+    const status = (state: LiveFeedStatus, message: string) => {
+      if (disposed) return;
+      setStreamState(state);
+      setLiveFeedStatus(state, message);
+    };
+    status("connecting", `Starting live prices for ${ids.length} of ${rows.length} stocks`);
 
     const handleEvent = (event: string, data: string) => {
       if (event === "status") {
-        const status = JSON.parse(data) as LiveFeedStatusUpdate;
-        if (status.state === "idle" || status.state === "connecting" || status.state === "live" || status.state === "error") setLiveFeedStatus(status.state, status.message);
+        const update = JSON.parse(data) as LiveFeedStatusUpdate;
+        if (update.state === "error") status("error", update.message ?? "Dhan feed error");
+        else if (update.state === "connecting") status("connecting", update.message ?? "Connecting to Dhan");
       } else if (event === "snapshot") {
-        const ticks = JSON.parse(data) as LiveTick[];
+        const ticks = (JSON.parse(data) as LiveTick[]).filter((tick) => new Date(tick.receivedAt).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) === liveTradeDate());
         if (ticks.length) {
-          setLiveTicks((current) => ({ ...current, ...Object.fromEntries(ticks.map((tick) => [tick.securityId, tick])) }));
+          setLiveTicks((current) => ({ ...current, ...Object.fromEntries(ticks.filter((tick) => tick.receivedAt > (current[tick.securityId]?.receivedAt ?? 0)).map((tick) => [tick.securityId, { ...tick, source: "websocket" as const }])) }));
+          if (ticks.some((tick) => Date.now() - tick.receivedAt < 45_000)) {
+            lastTickAt = Date.now();
+            status("live", "Receiving fresh Dhan prices");
+          }
         }
       } else if (event === "tick") {
         const tick = JSON.parse(data) as LiveTick;
-        setLiveTicks((current) => ({ ...current, [tick.securityId]: tick }));
-        setLiveFeedStatus("live", `${seasonal ? "Seasonal" : "30 in 30"} live prices streaming`);
+        setLiveTicks((current) => tick.receivedAt >= (current[tick.securityId]?.receivedAt ?? 0) ? { ...current, [tick.securityId]: { ...tick, source: "websocket" } } : current);
+        if (Date.now() - tick.receivedAt < 45_000) {
+          lastTickAt = Date.now();
+          status("live", "Receiving fresh Dhan prices");
+        }
       }
     };
 
-    void fetch("/api/thirty-in-thirty-screener/live", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ids }),
-      signal: controller.signal,
-    }).then(async (response) => {
-      if (!response.ok || !response.body) throw new Error(`Live feed failed: HTTP ${response.status}`);
-      setLiveFeedStatus("connecting", "Waiting for Dhan websocket status");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (!controller.signal.aborted) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split(/\n\n|\r\n\r\n/);
-        buffer = events.pop() ?? "";
-        events.forEach((chunk) => parseServerSentEvents(chunk, handleEvent));
+    const connect = () => {
+      if (disposed) return;
+      controller = new AbortController();
+      lastTickAt = Date.now();
+      status("connecting", "Connecting to Dhan live prices");
+      void fetch("/api/thirty-in-thirty-screener/live", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids }),
+        signal: controller.signal,
+        cache: "no-store",
+      }).then(async (response) => {
+        if (!response.ok || !response.body) throw new Error(`Live feed failed: HTTP ${response.status}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) throw new Error("Live stream ended");
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split(/\n\n|\r\n\r\n/);
+          buffer = events.pop() ?? "";
+          events.forEach((chunk) => parseServerSentEvents(chunk, handleEvent));
+        }
+      }).catch((error) => {
+        if (disposed || controller.signal.aborted) return;
+        status("connecting", `${error instanceof Error ? error.message : "Live feed disconnected"}; reconnecting`);
+        retryTimer = setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 30_000);
+      });
+    };
+    connect();
+    watchdog = setInterval(() => {
+      if (!isNseSessionOpen()) {
+        status("idle", "Market closed · showing last available prices");
+        return;
       }
-    }).catch((error) => {
-      if (!controller.signal.aborted) setLiveFeedStatus("error", error instanceof Error ? error.message : "Live feed disconnected");
-    });
+      if (Date.now() - lastTickAt > 60_000) {
+        status("connecting", "Prices paused · reconnecting to Dhan");
+        controller.abort();
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = setTimeout(connect, 1000);
+      }
+    }, 10_000);
     return () => {
+      disposed = true;
       controller.abort();
+      if (retryTimer) clearTimeout(retryTimer);
+      if (watchdog) clearInterval(watchdog);
       setLiveFeedStatus("idle");
     };
   }, [activeData, setLiveFeedStatus, tileLimit, seasonal, qMode, qIdSet, combined, source, membership]);
@@ -2770,18 +2840,17 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "swing_sl_pct" || key === "closest_red_entry" ? "asc" : "desc" });
 
   useEffect(() => {
-    if (seasonal) return; // Live websocket supplies seasonal tiles; avoid one intraday HTTP request per tile.
-    const rows = visibleRows.filter((row) => row.current_date !== liveTradeDate() || !liveTicks[row.security_id]);
-    if (!rows.length) return;
     let cancelled = false;
+    let offset = 0;
     const hydrateRow = async (row: ThirtyInThirtyRow) => {
       try {
-        const candles = await fetchThirtyUpIntraday(row.security_id, false, "thirty-in-thirty-screener");
+        const fetchedAt = Date.now();
+        const candles = await fetchThirtyUpIntraday(row.security_id, false, "thirty-in-thirty-screener", 1, 1);
         if (cancelled) return;
         const liveDaily = aggregateIntradayDaily(candles);
-        if (!liveDaily) return;
+        if (!liveDaily || liveDaily.trade_date !== liveTradeDate()) return;
         const previousClose = previousDailyRow(row)?.close;
-        setLiveTicks((current) => current[row.security_id]?.receivedAt && current[row.security_id].receivedAt > Date.now() - 5000 ? current : {
+        setLiveTicks((current) => current[row.security_id]?.source === "websocket" && current[row.security_id].receivedAt > fetchedAt - 45_000 ? current : {
           ...current,
           [row.security_id]: {
             securityId: row.security_id,
@@ -2792,19 +2861,26 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
             dayLow: liveDaily.low,
             volume: liveDaily.volume,
             receivedAt: Date.now(),
+            source: "intraday",
           },
         });
       } catch {}
     };
     const run = async () => {
-      for (let index = 0; index < rows.length; index += 12) {
-        if (cancelled) return;
-        await Promise.all(rows.slice(index, index + 12).map(hydrateRow));
-      }
+      if (!isNseSessionOpen()) return;
+      const rows = visibleRows.filter((row) => !liveTicksRef.current[row.security_id] || liveTicksRef.current[row.security_id].source !== "websocket" || Date.now() - liveTicksRef.current[row.security_id].receivedAt > 45_000);
+      const batch = rows.slice(offset, offset + 20);
+      offset = rows.length ? (offset + batch.length) % rows.length : 0;
+      for (let index = 0; index < batch.length; index += 5) await Promise.all(batch.slice(index, index + 5).map(hydrateRow));
     };
     void run();
-    return () => { cancelled = true; };
-  }, [visibleSecurityKey, seasonal]);
+    const timer = window.setInterval(() => void run(), 60_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [visibleSecurityKey]);
+
+  const freshPriceCount = visibleRows.filter((row) => liveTicks[row.security_id]?.source === "websocket" && priceClock - liveTicks[row.security_id].receivedAt < 45_000).length;
+  const intradayPriceCount = visibleRows.filter((row) => liveTicks[row.security_id]?.source === "intraday" && priceClock - liveTicks[row.security_id].receivedAt < 90_000).length;
+  const priceStatus = !isNseSessionOpen() ? "Market closed" : freshPriceCount ? "Live prices" : intradayPriceCount ? "Intraday backup" : streamState === "error" ? "Feed error" : "Waiting for prices";
 
   return <section className={`research-page thirty-in-thirty-page thirty-in-thirty-screener-page ${combined ? "combined-screener-page" : ""}`}>
     <div className="thirty-hero thirty-in-thirty-hero">
@@ -2814,7 +2890,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <small>{combined ? "30 in 30, Qullamaggie, 10 EMA Catchup, StochRSI, Seasonal Stocks and SellingClimax. One tile per stock, with common chart, sizing, filters and sorting." : qMode ? "The stocks with confirmed Qullamaggie resistance, shown with 30 in 30 charts and sizing. Their inclusion does not mean they passed the 30 in 30 scan." : seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
       </div>
       <div className="thirty-hero-actions">
-        <div className="refresh-status"><span className={Object.keys(liveTicks).length ? "ready" : "pending"} /><b>{Object.keys(liveTicks).length ? "Live prices" : "Last run"}</b><small>{Object.keys(liveTicks).length ? `${Object.keys(liveTicks).length} ticking` : formatTime(updatedAt)}</small></div>
+        <div className="refresh-status"><span className={freshPriceCount && isNseSessionOpen() ? "ready" : "pending"} /><b>{priceStatus}</b><small>{freshPriceCount} live · {intradayPriceCount} intraday · {visibleRows.length} shown</small></div>
         <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{combined ? loading ? "Scanning…" : "Refresh All" : qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button>}
         <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
@@ -2862,13 +2938,15 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       </div>
       <section className="screenshot-tile-grid">
         {visibleRows.length ? visibleRows.map((row) => {
-          const todayReturn = todayReturnPct(row, liveTicks[row.security_id]);
+          const tileTick = liveTicks[row.security_id];
+          const tilePriceState = !isNseSessionOpen() ? "closed" : tileTick?.source === "websocket" && priceClock - tileTick.receivedAt < 45_000 ? "live" : tileTick?.source === "intraday" && priceClock - tileTick.receivedAt < 90_000 ? "intraday" : "stale";
+          const todayReturn = todayReturnPct(row, tileTick);
           const pinned = pinnedIds.includes(row.security_id);
           const strongStart = isStrongStart(row, liveTicks[row.security_id]);
           const nearPdh = isBreakingPreviousDayHigh(row);
           return <div key={row.security_id} className={`screenshot-tile ${!seasonal && !qMode ? "thirty-result-tile" : ""} ${combined ? "combined-result-tile" : ""} ${seasonal ? "seasonal-tile" : ""} ${pinned ? "pinned" : ""} ${strongStart ? "strong-start" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={combined ? membership[row.security_id]?.join(", ") : qMode ? `Qullamaggie resistance ${qResistance(row.security_id)}` : seasonal ? `${row.seasonal_window}: ${row.seasonal_avg_return?.toFixed(1)}% average over ${row.seasonal_observations} years` : `${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
             {!seasonal && !qMode ? <>
-              <div className="thirty-result-top"><b style={combined ? { fontSize: `${Math.max(8, Math.min(14, 125 / Math.max(row.symbol.length, 1)))}px` } : undefined}>{row.symbol}</b><span className="tile-badges">{strongStart && <i>SS</i>}{nearPdh && <i className="pdh-badge">PDH</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span></div>
+              <div className="thirty-result-top"><b style={combined ? { fontSize: `${Math.max(8, Math.min(14, 125 / Math.max(row.symbol.length, 1)))}px` } : undefined}>{row.symbol}</b><span className="tile-badges"><i className={`tile-price-state ${tilePriceState}`} title={tileTick ? `Last price received ${new Date(tileTick.receivedAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })} IST` : "No intraday price received"}>{tilePriceState === "live" ? "LIVE" : tilePriceState === "intraday" ? "1M" : tilePriceState === "closed" ? "CLOSED" : "STALE"}</i>{strongStart && <i>SS</i>}{nearPdh && <i className="pdh-badge">PDH</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span></div>
               {todayReturn !== undefined && <span className={`tile-today-return ${todayReturn >= 0 ? "positive" : "negative"}`}>{pct2(todayReturn)}</span>}
               {!combined && <div className="thirty-result-sub"><small>{row.company_name}</small></div>}
               {combined && <div className="screener-source-dots" role="img" aria-label={`Watchlists: ${membership[row.security_id]?.join(", ")}`}>{membership[row.security_id]?.map(name => <span key={name} title={name} aria-hidden="true" />)}</div>}
