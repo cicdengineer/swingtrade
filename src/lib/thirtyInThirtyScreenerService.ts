@@ -27,6 +27,7 @@ export type ThirtyInThirtyFilters = {
   threeRedCandleOnly: boolean;
   stoch20Only: boolean;
   stoch80Only: boolean;
+  stochBelow80Only: boolean;
   showAll: boolean;
 };
 
@@ -103,6 +104,7 @@ export const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   threeRedCandleOnly: false,
   stoch20Only: false,
   stoch80Only: false,
+  stochBelow80Only: false,
   showAll: false,
 };
 
@@ -187,11 +189,12 @@ export function analyzeStock(input: {
   const positive6mPass = !input.filters.positive6MonthsOnly || current6mReturn > 0;
   const stoch20Pass = !input.filters.stoch20Only || (currentDailyStochD !== undefined && currentDailyStochD < 21);
   const stoch80Pass = !input.filters.stoch80Only || (currentDailyStochD !== undefined && currentDailyStochD > 80);
+  const stochBelow80Pass = !input.filters.stochBelow80Only || (currentDailyStochD !== undefined && currentDailyStochD < 80);
   let status: ThirtyInThirtyRow["status"] = "ELIGIBLE";
   if (!liquidPass) status = "ILLIQUID";
   else if (!movePass) status = "NO_30D_MOVE";
-  else if (!positive3mPass || !positive6mPass || !stoch20Pass || !stoch80Pass) status = "FILTERED";
-  const qualifies = liquidPass && movePass && positive3mPass && positive6mPass && stoch20Pass && stoch80Pass;
+  else if (!positive3mPass || !positive6mPass || !stoch20Pass || !stoch80Pass || !stochBelow80Pass) status = "FILTERED";
+  const qualifies = liquidPass && movePass && positive3mPass && positive6mPass && stoch20Pass && stoch80Pass && stochBelow80Pass;
   const recent = rows.slice(-126).map((row, index, recentRows) => {
     const originalIndex = rows.length - recentRows.length + index;
     const volAvg = volumeSma20[originalIndex];
@@ -254,6 +257,8 @@ export function analyzeStock(input: {
             ? "Daily StochRSI is not below 21."
             : !stoch80Pass
               ? "Daily StochRSI is not above 80."
+              : !stochBelow80Pass
+                ? "Daily StochRSI is not below 80."
               : "Filtered out by positive 3M / 6M performance setting.",
     recent,
   };
