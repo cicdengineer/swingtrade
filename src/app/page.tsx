@@ -258,6 +258,11 @@ const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   stochBelow80Only: false,
   showAll: false,
 };
+const defaultCombinedScreenerFilters: ThirtyInThirtyFilters = {
+  ...defaultThirtyInThirtyFilters,
+  upTodayOnly: true,
+  stochBelow80Only: true,
+};
 const defaultEmaNoTouchFilters: EmaNoTouchFilters = { universe: "ALL", minAverageDailyTradedValue: 0, baseDays: 5, minPriorAdvancePct: 8, maxBaseRangePct: 7, maxDistanceFromEmaPct: 4, minCatchupPct: 0.5 };
 const defaultStochRsiFilters: StochRsiFilters = {
   universe: "ALL",
@@ -2602,7 +2607,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
 }
 
 function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedStatus }: { settings?: TradingSettings | null; emaFilters: EmaNoTouchFilters; stochFilters: StochRsiFilters; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void }) {
-  const [filters, setFilters] = useState<ThirtyInThirtyFilters>(defaultThirtyInThirtyFilters);
+  const [filters, setFilters] = useState<ThirtyInThirtyFilters>(defaultCombinedScreenerFilters);
   const [source, setSource] = useState<ScreenerSource | "All watchlists">("All watchlists");
   const [month, setMonth] = useState(new Date().getMonth());
   const [data, setData] = useState<ThirtyInThirtyResponse | null>(null);
@@ -2667,7 +2672,7 @@ function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedS
   return <>
     {error && <div className="error">{error}</div>}
     {sourceErrors.length > 0 && <div className="notice"><AlertTriangle size={18}/><span>{sourceErrors.join(" · ")}</span></div>}
-    <ThirtyInThirtyScreenerView combined data={data} membership={membership} source={source} setSource={setSource} month={month} setMonth={setMonth} filters={filters} setFilters={setFilters} loading={loading} onRun={run} onReset={() => { setFilters(defaultThirtyInThirtyFilters); setSource("All watchlists"); setMonth(new Date().getMonth()); }} selected={selected} setSelected={setSelected} setLiveFeedStatus={setLiveFeedStatus} updatedAt={updatedAt} settings={settings} />
+    <ThirtyInThirtyScreenerView combined data={data} membership={membership} source={source} setSource={setSource} month={month} setMonth={setMonth} filters={filters} setFilters={setFilters} loading={loading} onRun={run} onReset={() => { setFilters(defaultCombinedScreenerFilters); setSource("All watchlists"); setMonth(new Date().getMonth()); }} selected={selected} setSelected={setSelected} setLiveFeedStatus={setLiveFeedStatus} updatedAt={updatedAt} settings={settings} />
   </>;
 }
 
@@ -2948,25 +2953,25 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     </div>
     {!qMode && <div className="thirty-in-thirty-switches">
       {!seasonal && <label title={`Show clean up and down trends on the selected ${chartMonths}M chart`}><input type="checkbox" checked={cleanTrendOnly} onChange={(e) => setCleanTrendOnly(e.target.checked)}/><span>Clean {chartMonths}M Trend</span></label>}
-      {!seasonal && <label title={`At least one of the last ${RECENT_VOLUME_SESSIONS} completed sessions had volume ≥${ABNORMAL_VOLUME_RATIO}× its preceding ${VOLUME_BASELINE_SESSIONS}-session average`}><input type="checkbox" checked={filters.abnormalVolume10dOnly} onChange={(e) => setFilters({ ...filters, abnormalVolume10dOnly: e.target.checked })}/><span>Abnormal Vol 10D</span></label>}
-      <label><input type="checkbox" checked={filters.above10EmaOnly} onChange={(e) => setFilters({ ...filters, above10EmaOnly: e.target.checked })}/><span>Above 10EMA</span></label>
       <label><input type="checkbox" checked={filters.upTodayOnly} onChange={(e) => setFilters({ ...filters, upTodayOnly: e.target.checked })}/><span>Up</span></label>
-      <label title="Three consecutive red daily candles anywhere in the last six completed sessions"><input type="checkbox" checked={filters.threeRedCandleOnly} onChange={(e) => setFilters({ ...filters, threeRedCandleOnly: e.target.checked })}/><span>3Red Candle</span></label>
-      <label><input type="checkbox" checked={filters.redCandleOnly} onChange={(e) => setFilters({ ...filters, redCandleOnly: e.target.checked })}/><span>Red Candle</span></label>
+      <label title="Daily StochRSI %D below 80"><input type="checkbox" checked={filters.stochBelow80Only} onChange={(e) => setFilters({ ...filters, stochBelow80Only: e.target.checked })}/><span>Stoch&lt;80</span></label>
       <label><input type="checkbox" checked={filters.earlyVolumeOnly} onChange={(e) => setFilters({ ...filters, earlyVolumeOnly: e.target.checked })}/><span>Early Vol</span></label>
       <label><input type="checkbox" checked={filters.highVolumeOnly} onChange={(e) => setFilters({ ...filters, highVolumeOnly: e.target.checked })}/><span>High Volume</span></label>
+      {!seasonal && <label title={`At least one of the last ${RECENT_VOLUME_SESSIONS} completed sessions had volume ≥${ABNORMAL_VOLUME_RATIO}× its preceding ${VOLUME_BASELINE_SESSIONS}-session average`}><input type="checkbox" checked={filters.abnormalVolume10dOnly} onChange={(e) => setFilters({ ...filters, abnormalVolume10dOnly: e.target.checked })}/><span>Abnormal Vol 10D</span></label>}
+      <label><input type="checkbox" checked={filters.above10EmaOnly} onChange={(e) => setFilters({ ...filters, above10EmaOnly: e.target.checked })}/><span>Above 10EMA</span></label>
+      <label><input type="checkbox" checked={filters.above50EmaOnly} onChange={(e) => setFilters({ ...filters, above50EmaOnly: e.target.checked })}/><span>Above 50EMA</span></label>
+      <label title="Strong Start: live day open is above previous close and below previous high"><input type="checkbox" checked={filters.strongStartOnly} onChange={(e) => setFilters({ ...filters, strongStartOnly: e.target.checked })}/><span>SS</span></label>
+      <label title="Three consecutive red daily candles anywhere in the last six completed sessions"><input type="checkbox" checked={filters.threeRedCandleOnly} onChange={(e) => setFilters({ ...filters, threeRedCandleOnly: e.target.checked })}/><span>3Red Candle</span></label>
+      <label><input type="checkbox" checked={filters.redCandleOnly} onChange={(e) => setFilters({ ...filters, redCandleOnly: e.target.checked })}/><span>Red Candle</span></label>
       <label title={`Latest completed volume <= ${thirtyInThirtyDryVolumeRatio}x average of previous ${thirtyInThirtyDryVolumeLookback} sessions`}><input type="checkbox" checked={filters.dryVolumeOnly} onChange={(e) => setFilters({ ...filters, dryVolumeOnly: e.target.checked })}/><span>Dry Volume</span></label>
       <label><input type="checkbox" checked={filters.decliningVolumeOnly} onChange={(e) => setFilters({ ...filters, decliningVolumeOnly: e.target.checked })}/><span>Declining Vol</span></label>
       {!seasonal && <label title="Show the 10-day exponential moving average on tile charts"><input type="checkbox" checked={showTileEma10} onChange={(e) => setShowTileEma10(e.target.checked)}/><span>Show 10EMA</span></label>}
       <label><input type="checkbox" checked={filters.positive3MonthsOnly} onChange={(e) => setFilters({ ...filters, positive3MonthsOnly: e.target.checked })}/><span>Positive in 3M</span></label>
       <label><input type="checkbox" checked={filters.positive6MonthsOnly} onChange={(e) => setFilters({ ...filters, positive6MonthsOnly: e.target.checked })}/><span>Positive in 6M</span></label>
-      <label><input type="checkbox" checked={filters.above50EmaOnly} onChange={(e) => setFilters({ ...filters, above50EmaOnly: e.target.checked })}/><span>Above 50EMA</span></label>
       <label><input type="checkbox" checked={filters.nearPreviousDayHighOnly} onChange={(e) => setFilters({ ...filters, nearPreviousDayHighOnly: e.target.checked })}/><span>Near PD High</span></label>
       <label><input type="checkbox" checked={filters.nearSwingHighOnly} onChange={(e) => setFilters({ ...filters, nearSwingHighOnly: e.target.checked })}/><span>Swing High</span></label>
-      <label title="Strong Start: live day open is above previous close and below previous high"><input type="checkbox" checked={filters.strongStartOnly} onChange={(e) => setFilters({ ...filters, strongStartOnly: e.target.checked })}/><span>SS</span></label>
       <label title="Daily StochRSI %D below 21"><input type="checkbox" checked={filters.stoch20Only} onChange={(e) => setFilters({ ...filters, stoch20Only: e.target.checked })}/><span>Stoch20</span></label>
       <label title="Daily StochRSI %D above 80"><input type="checkbox" checked={filters.stoch80Only} onChange={(e) => setFilters({ ...filters, stoch80Only: e.target.checked })}/><span>Stoch80</span></label>
-      <label title="Daily StochRSI %D below 80"><input type="checkbox" checked={filters.stochBelow80Only} onChange={(e) => setFilters({ ...filters, stochBelow80Only: e.target.checked })}/><span>Stoch&lt;80</span></label>
     </div>}
     {seasonal && data && "needsBuild" in data && data.needsBuild && <div className="notice"><AlertTriangle size={18}/><span>No saved watchlists yet. If statistics are empty, open Seasonality and select Rebuild Seasonality Statistics, then return here and select Build Watchlists.</span><button className="secondary compact" onClick={onOpenSeasonality}>Open Seasonality</button></div>}
     {seasonal && data?.generatedAt && <div className="count">Watchlists built {new Date(data.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST · live prices update without rebuilding</div>}
