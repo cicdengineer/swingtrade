@@ -475,6 +475,63 @@ export async function writeDatabase(db: SeasonalityDatabase) {
   return writeQueue;
 }
 
+// A market refresh changes only these security shards plus small shared lists.
+// Replacing every shard for each progress update makes a large refresh stall.
+export async function writeMarketDataBatch(db: SeasonalityDatabase, securityIds: string[]) {
+  if (!useMysqlStorage) return writeDatabase(db);
+  const ids = new Set(securityIds);
+  const write = async () => {
+    await ensureMysqlDb();
+    db.updated_at = new Date().toISOString();
+    const shared: MysqlShard[] = [
+      { collectionName: "__meta__", shardKey: "default", data: { schema_version: db.schema_version, created_at: db.created_at, updated_at: db.updated_at } },
+      { collectionName: "instruments", shardKey: "default", data: db.instruments },
+      { collectionName: "data_download_jobs", shardKey: "default", data: db.data_download_jobs },
+      { collectionName: "download_failures", shardKey: "default", data: db.download_failures },
+    ];
+    const priceGroups = groupBySecurityId(db.daily_prices.filter((row) => ids.has(row.security_id)));
+    const issueGroups = groupBySecurityId(db.data_quality_issues.filter((row) => ids.has(row.security_id)));
+    await withMysqlRetry(async () => {
+      const connection = await getMysqlPool().getConnection();
+      try {
+        await connection.beginTransaction();
+        for (const shard of shared) {
+          await connection.execute(
+            `INSERT INTO seasonality_json_collections (document_id, collection_name, shard_key, data)
+             VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)`,
+            [mysqlDatabaseId, shard.collectionName, shard.shardKey, JSON.stringify(shard.data)],
+          );
+        }
+        for (const id of ids) {
+          for (const [collectionName, groups] of [["daily_prices", priceGroups], ["data_quality_issues", issueGroups]] as const) {
+            const rows = groups.get(id);
+            if (rows?.length) {
+              await connection.execute(
+                `INSERT INTO seasonality_json_collections (document_id, collection_name, shard_key, data)
+                 VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)`,
+                [mysqlDatabaseId, collectionName, id, JSON.stringify(rows)],
+              );
+            } else {
+              await connection.execute(
+                "DELETE FROM seasonality_json_collections WHERE document_id = ? AND collection_name = ? AND shard_key = ?",
+                [mysqlDatabaseId, collectionName, id],
+              );
+            }
+          }
+        }
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback().catch(() => {});
+        throw error;
+      } finally {
+        connection.release();
+      }
+    });
+  };
+  writeQueue = writeQueue.then(write, write);
+  return writeQueue;
+}
+
 export async function getDatabaseSizeBytes() {
   if (useMysqlStorage) return getMysqlDatabaseSizeBytes();
 
@@ -524,8 +581,14 @@ export function replaceQualityIssues(db: SeasonalityDatabase, securityId: string
   db.data_quality_issues = db.data_quality_issues.filter((issue) => issue.security_id !== securityId).concat(issues);
 }
 
+const dailyPriceIndexes = new WeakMap<SeasonalityDatabase, Map<string, number>>();
+
 export function upsertDailyPrices(db: SeasonalityDatabase, rows: DailyPriceRecord[]) {
-  const existing = new Map(db.daily_prices.map((row, index) => [`${row.security_id}:${row.trade_date}`, index]));
+  let existing = dailyPriceIndexes.get(db);
+  if (!existing) {
+    existing = new Map(db.daily_prices.map((row, index) => [`${row.security_id}:${row.trade_date}`, index]));
+    dailyPriceIndexes.set(db, existing);
+  }
   for (const row of rows) {
     const key = `${row.security_id}:${row.trade_date}`;
     const index = existing.get(key);

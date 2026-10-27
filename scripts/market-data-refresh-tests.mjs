@@ -111,6 +111,15 @@ const atUtc = (iso) => new Date(iso);
 }
 
 {
+  let attempts = 0;
+  await assert.rejects(withRetry("invalid request", async () => {
+    attempts += 1;
+    throw new Error("DH-905 bad values for parameters");
+  }), /DH-905/);
+  assert.equal(attempts, 1, "permanent Dhan errors must not hold a worker through retries");
+}
+
+{
   const securities = ["OK1", "FAIL", "OK2"];
   const results = await Promise.all(securities.map(async (securityId) => {
     try {

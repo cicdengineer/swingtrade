@@ -14,7 +14,7 @@ Local, rules-based Indian equity seasonality research. It contains no technical 
 - Self-healing refresh behavior: existing securities request from their latest stored date through today, so skipped days are backfilled from Dhan Daily Historical data
 - After the NSE close, when Dhan Daily has not posted today's candle yet, the app constructs today's daily OHLCV from completed 5-minute Dhan intraday candles and stores it in the same daily dataset
 - Duplicate prevention through a `security_id + trade_date` upsert key; provisional candles are reconciled in place when Dhan Daily later returns the official candle
-- Controlled sequential refresh, retry/backoff for Dhan transient errors, failure logging, and retry of failed downloads
+- Controlled three-worker refresh (configurable with `DATA_REFRESH_CONCURRENCY`), retry/backoff for Dhan transient errors, failure logging, and retry of failed downloads
 - Data Status workspace with per-universe counts, latest job progress, failures, export links, and Dhan connection status
 - Monthly, quarterly, and every rolling 3-month return distribution
 - Average, median, win rate, best/worst return, standard deviation, individual-year observations in the API response, and MAE / MAE percentile calculations

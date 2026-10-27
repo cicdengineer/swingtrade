@@ -24,6 +24,7 @@ import {
   upsertFailure,
   upsertInstrument,
   writeDatabase,
+  writeMarketDataBatch,
 } from "./localDatabase";
 import type { SeasonalityDatabase } from "./localDatabase";
 
@@ -368,7 +369,9 @@ export async function withRetry<T>(label: string, task: () => Promise<T>, attemp
       return await task();
     } catch (error) {
       last = error;
-      if (attempt === attempts) break;
+      const message = error instanceof Error ? error.message : String(error);
+      // Invalid parameters and empty history will not improve after a delay.
+      if (attempt === attempts || (attempt >= 2 && !message.includes("429")) || /no (daily|intraday) candles|no data|input_exception|dh-905|missing required fields|bad values for parameters|incorrect parameters/i.test(message)) break;
       await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1)));
     }
   }
@@ -378,10 +381,12 @@ export async function withRetry<T>(label: string, task: () => Promise<T>, attemp
 async function postDhanJson(pathname: string, payload: Record<string, unknown>) {
   return new Promise<{ ok: boolean; status: number; body: any }>((resolve, reject) => {
     const body = JSON.stringify(payload);
+    const deadline = AbortSignal.timeout(15000);
     const request = https.request({
       hostname: "api.dhan.co",
       path: `/v2${pathname}`,
       method: "POST",
+      signal: deadline,
       rejectUnauthorized: false,
       headers: {
         "accept": "application/json",
@@ -763,10 +768,9 @@ async function downloadHistoricalDataForMember(member: UniverseMemberRecord | Se
   return { security, candles: candlesByRange.flat(), downloadedRows: total, skipped: ranges.length === 0 && total === 0, dataThroughDate };
 }
 
-export async function refreshInstrumentData(member: UniverseMemberRecord | Security) {
+async function fetchInstrumentRefresh(member: UniverseMemberRecord | Security, latest?: string) {
   const security = securityFromMember(member);
-  const db = await readDatabase();
-  const result = await downloadHistoricalDataForMember(member, latestPriceDate(db, security.securityId));
+  const result = await downloadHistoricalDataForMember(member, latest);
   const tradingDate = getLatestTradingSessionDate();
   const isTodaySession = tradingDate === getIndiaTradingDate();
   const hasOfficialToday = result.candles.some((candle) => candle.date === tradingDate);
@@ -796,33 +800,46 @@ export async function refreshInstrumentData(member: UniverseMemberRecord | Secur
     }
   }
 
+  return { result, provisionalAggregate, provisionalReason };
+}
+
+function applyInstrumentRefresh(db: SeasonalityDatabase, prepared: Awaited<ReturnType<typeof fetchInstrumentRefresh>>) {
+  const { result, provisionalAggregate, provisionalReason } = prepared;
+  const official = result.candles.length ? applyHistoricalData(db, result.security, result.candles, officialDataSource, false) : { insertedOrUpdated: 0, dataThroughDate: result.dataThroughDate, reconciled: 0 };
+  let provisionalCreated = 0;
+  let pendingEod = false;
+  let dataThroughDate = official.dataThroughDate ?? result.dataThroughDate;
+
+  if (provisionalAggregate?.candle && provisionalAggregate.valid) {
+    const saved = applyHistoricalData(db, result.security, [provisionalAggregate.candle], provisionalDataSource, true);
+    provisionalCreated = saved.insertedOrUpdated;
+    pendingEod = true;
+    dataThroughDate = saved.dataThroughDate ?? dataThroughDate;
+  }
+
+  markFailureResolved(db, result.security.securityId);
+  return {
+    downloadedRows: official.insertedOrUpdated + provisionalCreated,
+    historicalBackfilled: official.insertedOrUpdated,
+    officialUpdated: official.insertedOrUpdated,
+    reconciled: official.reconciled,
+    provisionalCreated,
+    skipped: official.insertedOrUpdated === 0 && provisionalCreated === 0,
+    pendingEod,
+    provisionalReason,
+    dataThroughDate,
+  };
+}
+
+export async function refreshInstrumentData(member: UniverseMemberRecord | Security) {
+  const security = securityFromMember(member);
+  const db = await readDatabase();
+  const prepared = await fetchInstrumentRefresh(member, latestPriceDate(db, security.securityId));
   return mutateDataStore(async () => {
-    const db = await readDatabase();
-    const official = result.candles.length ? applyHistoricalData(db, result.security, result.candles, officialDataSource, false) : { insertedOrUpdated: 0, dataThroughDate: result.dataThroughDate, reconciled: 0 };
-    let provisionalCreated = 0;
-    let pendingEod = false;
-    let dataThroughDate = official.dataThroughDate ?? result.dataThroughDate;
-
-    if (provisionalAggregate?.candle && provisionalAggregate.valid) {
-      const saved = applyHistoricalData(db, result.security, [provisionalAggregate.candle], provisionalDataSource, true);
-      provisionalCreated = saved.insertedOrUpdated;
-      pendingEod = true;
-      dataThroughDate = saved.dataThroughDate ?? dataThroughDate;
-    }
-
-    markFailureResolved(db, security.securityId);
-    await writeDatabase(db);
-    return {
-      downloadedRows: official.insertedOrUpdated + provisionalCreated,
-      historicalBackfilled: official.insertedOrUpdated,
-      officialUpdated: official.insertedOrUpdated,
-      reconciled: official.reconciled,
-      provisionalCreated,
-      skipped: official.insertedOrUpdated === 0 && provisionalCreated === 0,
-      pendingEod,
-      provisionalReason,
-      dataThroughDate,
-    };
+    const current = await readDatabase();
+    const result = applyInstrumentRefresh(current, prepared);
+    await writeDatabase(current);
+    return result;
   });
 }
 
@@ -944,43 +961,63 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
       job.current_status = members.length ? `Downloading with ${Math.min(concurrency, members.length)} workers` : "No instruments to refresh";
     });
 
-    for (let start = 0; start < members.length; start += concurrency) {
-      const batch = members.slice(start, start + concurrency);
-      const results = await Promise.all(batch.map(async (member) => {
+    // Persist several completed downloads together: the database can be hundreds
+    // of MB, so one full read/write for every symbol dominates the API time.
+    const latestBySecurity = new Map<string, string>();
+    for (const price of db.daily_prices) {
+      const latest = latestBySecurity.get(price.security_id);
+      if (!latest || price.trade_date > latest) latestBySecurity.set(price.security_id, price.trade_date);
+    }
+    const batchSize = Math.max(concurrency, 9);
+    for (let start = 0; start < members.length; start += batchSize) {
+      const batch = members.slice(start, start + batchSize);
+      const results: Array<{ member: UniverseMemberRecord; result: Awaited<ReturnType<typeof fetchInstrumentRefresh>> } | { member: UniverseMemberRecord; error: unknown }> = [];
+      await runMemberWorkers(batch, concurrency, async (member) => {
         try {
-          const result = await refreshInstrumentData(member);
-          return { member, result };
+          const result = await fetchInstrumentRefresh(member, latestBySecurity.get(member.security_id));
+          results.push({ member, result });
         } catch (error) {
-          return { member, error };
+          results.push({ member, error });
         }
-      }));
+      });
 
       await mutateDataStore(async () => {
         const db = await readDatabase();
         const job = db.data_download_jobs.find((row) => row.id === jobId);
         for (const item of results) {
-          if ("error" in item) {
+          let report: ReturnType<typeof applyInstrumentRefresh> | undefined;
+          let failure: unknown;
+          if ("result" in item) {
+            try {
+              report = applyInstrumentRefresh(db, item.result);
+            } catch (error) {
+              failure = error;
+            }
+          } else {
+            failure = item.error;
+          }
+          if (!report) {
             upsertFailure(db, {
               symbol: item.member.symbol,
               security_id: item.member.security_id || `UNMAPPED:${item.member.symbol}`,
-              error_code: item.error instanceof Error && item.error.message.includes("429") ? "HTTP_429" : "DOWNLOAD_FAILED",
-              error_message: item.error instanceof Error ? item.error.message : "Unknown download error",
+              error_code: failure instanceof Error && failure.message.includes("429") ? "HTTP_429" : "DOWNLOAD_FAILED",
+              error_message: failure instanceof Error ? failure.message : "Unknown download error",
             });
             if (job) {
               job.failed += 1;
-              job.errors.push(`${item.member.symbol}: ${item.error instanceof Error ? item.error.message : "Unknown error"}`);
+              job.errors.push(`${item.member.symbol}: ${failure instanceof Error ? failure.message : "Unknown error"}`);
             }
           } else {
             if (job) {
               job.successful += 1;
               job.last_successful_update = new Date().toISOString();
-              job.data_through_date = item.result.dataThroughDate ?? job.data_through_date;
-              job.historical_candles_backfilled = (job.historical_candles_backfilled ?? 0) + (item.result.historicalBackfilled ?? 0);
-              job.official_candles_updated = (job.official_candles_updated ?? 0) + (item.result.officialUpdated ?? 0);
-              job.provisional_candles_created = (job.provisional_candles_created ?? 0) + (item.result.provisionalCreated ?? 0);
-              job.provisional_candles_reconciled = (job.provisional_candles_reconciled ?? 0) + (item.result.reconciled ?? 0);
-              if (item.result.skipped) job.already_up_to_date = (job.already_up_to_date ?? 0) + 1;
-              if (item.result.pendingEod) {
+              job.data_through_date = report.dataThroughDate ?? job.data_through_date;
+              job.historical_candles_backfilled = (job.historical_candles_backfilled ?? 0) + (report.historicalBackfilled ?? 0);
+              job.official_candles_updated = (job.official_candles_updated ?? 0) + (report.officialUpdated ?? 0);
+              job.provisional_candles_created = (job.provisional_candles_created ?? 0) + (report.provisionalCreated ?? 0);
+              job.provisional_candles_reconciled = (job.provisional_candles_reconciled ?? 0) + (report.reconciled ?? 0);
+              if (report.skipped) job.already_up_to_date = (job.already_up_to_date ?? 0) + 1;
+              if (report.pendingEod) {
                 job.pending_eod_count = (job.pending_eod_count ?? 0) + 1;
                 job.notice = pendingEodNotice();
               }
@@ -1001,7 +1038,7 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
               ? "Finished; waiting for Dhan EOD candle"
               : "Finished";
         }
-        await writeDatabase(db);
+        await writeMarketDataBatch(db, batch.map((member) => member.security_id).filter(Boolean));
         if (job) emitDataStatusJob(job);
       });
     }
