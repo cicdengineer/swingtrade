@@ -2,7 +2,7 @@ export const RECENT_VOLUME_SESSIONS = 10;
 export const VOLUME_BASELINE_SESSIONS = 20;
 export const ABNORMAL_VOLUME_RATIO = 2;
 
-type VolumePoint = { trade_date: string; volume: number };
+type VolumePoint = { trade_date: string; volume: number; high?: number; is_provisional?: boolean };
 
 export type RecentVolumeSummary = {
   evaluatedDays: number;
@@ -10,16 +10,18 @@ export type RecentVolumeSummary = {
   peakRatio: number | null;
   latestRatio: number | null;
   sessionsSinceLastSpike: number | null;
+  latestSpike: { trade_date: string; high: number; ratio: number } | null;
 };
 
 export function summarizeRecentVolume(points: VolumePoint[], currentDate: string): RecentVolumeSummary {
-  const completed = points.filter((point) => point.trade_date < currentDate);
+  const completed = points.filter((point) => point.trade_date < currentDate && !point.is_provisional);
   const firstRecentIndex = Math.max(0, completed.length - RECENT_VOLUME_SESSIONS);
   let evaluatedDays = 0;
   let spikeCount = 0;
   let peakRatio: number | null = null;
   let latestRatio: number | null = null;
   let sessionsSinceLastSpike: number | null = null;
+  let latestSpike: RecentVolumeSummary["latestSpike"] = null;
 
   for (let index = firstRecentIndex; index < completed.length; index += 1) {
     const preceding = completed.slice(index - VOLUME_BASELINE_SESSIONS, index);
@@ -35,8 +37,10 @@ export function summarizeRecentVolume(points: VolumePoint[], currentDate: string
     if (ratio >= ABNORMAL_VOLUME_RATIO) {
       spikeCount += 1;
       sessionsSinceLastSpike = completed.length - 1 - index;
+      const point = completed[index];
+      latestSpike = Number.isFinite(point.high) && point.high! > 0 ? { trade_date: point.trade_date, high: point.high!, ratio } : null;
     }
   }
 
-  return { evaluatedDays, spikeCount, peakRatio, latestRatio, sessionsSinceLastSpike };
+  return { evaluatedDays, spikeCount, peakRatio, latestRatio, sessionsSinceLastSpike, latestSpike };
 }
