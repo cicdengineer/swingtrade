@@ -64,6 +64,7 @@ export type ThirtyInThirtyRow = {
   lowest_volume_5d_vs_20d: number;
   demand_supply_score: number;
   daily_stoch_d?: number;
+  previous_daily_stoch_d?: number;
   monthly_stoch_d?: number;
   previous_monthly_stoch_d?: number;
   averageDailyTradedValue: number;
@@ -258,6 +259,7 @@ export function analyzeStock(input: {
     lowest_volume_5d_vs_20d: lowestVolume5dVs20d,
     demand_supply_score: demandSupplyScore,
     daily_stoch_d: currentDailyStochD,
+    previous_daily_stoch_d: dailyStochD[currentIndex - 1],
     monthly_stoch_d: currentMonthlyStochD,
     previous_monthly_stoch_d: previousMonthlyStochD,
     averageDailyTradedValue,
