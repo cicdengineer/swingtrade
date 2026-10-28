@@ -107,6 +107,18 @@ const emptyDb = (): SeasonalityDatabase => {
 
 function normalizeDatabase(raw: Partial<SeasonalityDatabase> | null | undefined): SeasonalityDatabase {
   const db = { ...emptyDb(), ...(raw ?? {}) };
+  // Older shards may contain both the provisional and official row for a session.
+  // Keep the official row when rebuilding the in-memory price series.
+  const pricesBySession = new Map<string, DailyPriceRecord>();
+  for (const row of db.daily_prices) {
+    const key = `${row.security_id}:${row.trade_date}`;
+    const previous = pricesBySession.get(key);
+    if (!previous || (previous.is_provisional && !row.is_provisional) ||
+        Boolean(previous.is_provisional) === Boolean(row.is_provisional) && (row.updated_at ?? "") > (previous.updated_at ?? "")) {
+      pricesBySession.set(key, row);
+    }
+  }
+  db.daily_prices = [...pricesBySession.values()];
   // Keep historical prices while retiring the old index memberships.
   db.universe_members = db.universe_members.filter((member) => member.universe_name === "CNX500");
   db.seasonal_observations = db.seasonal_observations.filter((row) => row.universe_name === "CNX500");

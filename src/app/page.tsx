@@ -32,6 +32,7 @@ import type { QRow } from "@/lib/qullamaggieLogic";
 import { parseResistanceWatchlist, qullamaggieWatchlistKey, resistanceWatchlist, type QWatchlist } from "@/lib/qullamaggieWatchlist";
 import { fallingTrendScore, matchesCleanTrend } from "@/lib/cleanTrend";
 import { ABNORMAL_VOLUME_RATIO, RECENT_VOLUME_SESSIONS, VOLUME_BASELINE_SESSIONS, summarizeRecentVolume } from "@/lib/recentVolume";
+import { mergeLiveDailyCandle as mergeDailyChartRows } from "@/lib/dailyChartRows";
 import QullamaggieView from "./QullamaggieView";
 import VolumeSellingView from "./VolumeSellingView";
 import USADataView from "./USADataView";
@@ -536,14 +537,10 @@ const aggregateIntradayDaily = (candles: DailyChartPoint[]): DailyChartPoint | n
   };
 };
 const mergeLiveDailyCandle = (dailyRows: DailyChartPoint[], liveDaily: DailyChartPoint | null) => {
-  if (!liveDaily) return dailyRows;
-  const rows = [...dailyRows];
-  const existingIndex = rows.findIndex((row) => row.trade_date === liveDaily.trade_date);
-  if (existingIndex >= 0) rows[existingIndex] = { ...rows[existingIndex], ...liveDaily, ema10: rows[existingIndex].ema10, ema50: rows[existingIndex].ema50, volume_ratio: rows[existingIndex].volume_ratio };
-  else if (liveDaily.volume > 0 && (!rows.length || liveDaily.trade_date > rows.at(-1)!.trade_date)) rows.push(liveDaily);
-  return rows;
+  return mergeDailyChartRows(dailyRows, liveDaily, liveTradeDate());
 };
 const liveTradeDate = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+const showLiveDailyCandle = (rows: DailyChartPoint[], liveDaily: DailyChartPoint | null) => Boolean(liveDaily && liveDaily.trade_date === liveTradeDate() && !rows.some((row) => row.trade_date.slice(0, 10) === liveDaily.trade_date && !row.is_provisional));
 const isCurrentSessionTick = (tick?: LiveTick) => Boolean(tick && new Date(tick.receivedAt).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) === liveTradeDate());
 const isNseSessionOpen = () => {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
@@ -882,7 +879,7 @@ function ThirtyUpChartPanel({ selected, onTradeCreated, intradayEndpoint = "thir
     <div className="chart-toolbar">
       <div>
         <p className="eyebrow">Chart timeframe</p>
-        <span>{timeframe === "daily" ? `Last 3 months daily${liveDailyRow ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
+        <span>{timeframe === "daily" ? `Last 3 months daily${showLiveDailyCandle(selected.recent, liveDailyRow) ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
       </div>
       <div className="segmented-control" role="group" aria-label="Chart timeframe">
         <button className={timeframe === "daily" ? "active" : ""} onClick={() => setTimeframe("daily")}>Daily</button>
@@ -2589,7 +2586,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
     <div className="chart-toolbar">
       <div>
         <div className="chart-timeframe-heading"><p className="eyebrow">Chart timeframe</p>{sources?.length ? <div className="chart-source-tags" aria-label="Watchlists">{sources.map(name => <span className={`screener-tag-${screenerSourceClasses[name]}`} key={name}>{name}</span>)}</div> : null}</div>
-        <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${liveDailyRow ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
+        <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${showLiveDailyCandle(selected.recent, liveDailyRow) ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
       </div>
       <div className="chart-toolbar-actions">
         <a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer" title={`Open ${selected.symbol} in TradingView`}>
@@ -3185,7 +3182,7 @@ function StochRsiChartPanel({ selected, chartMonths, settings }: { selected: Sto
     <div className="chart-toolbar">
       <div>
         <p className="eyebrow">Chart timeframe</p>
-        <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${liveDailyRow ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
+        <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${showLiveDailyCandle(selected.recent, liveDailyRow) ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
       </div>
       <div className="chart-toolbar-actions">
         <a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer" title={`Open ${selected.symbol} in TradingView`}><ArrowUpRight size={14}/>TradingView</a>
@@ -3683,7 +3680,7 @@ function HourlyBreakoutChartPanel({ selected, filters }: { selected: HourlyBreak
     <div className="chart-toolbar">
       <div>
         <p className="eyebrow">Clean breakout chart</p>
-        <span>{timeframe === "daily" ? `Daily candles${liveDailyRow ? " + live intraday candle" : ""}` : signal?.label ?? "Latest 60-minute candles"}</span>
+        <span>{timeframe === "daily" ? `Daily candles${showLiveDailyCandle(selected.recent, liveDailyRow) ? " + live intraday candle" : ""}` : signal?.label ?? "Latest 60-minute candles"}</span>
       </div>
       <div className="segmented-control" role="group" aria-label="Chart timeframe">
         <button className={timeframe === "daily" ? "active" : ""} onClick={() => setTimeframe("daily")}>Daily</button>

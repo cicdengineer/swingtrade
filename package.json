@@ -15,6 +15,7 @@
     "test:trade-management": "node scripts/trade-management-tests.mjs",
     "test:dhan-trades": "node scripts/dhan-trade-history-tests.mjs",
     "test:market-data": "node scripts/market-data-refresh-tests.mjs",
+    "test:daily-chart": "node --experimental-strip-types scripts/daily-chart-rows-tests.mjs",
     "test:ema-catchup": "node scripts/ema-catchup-tests.mjs",
     "test:qullamaggie": "node scripts/qullamaggie-tests.mjs",
     "test:clean-trend": "node --experimental-strip-types scripts/clean-trend-tests.mjs",
