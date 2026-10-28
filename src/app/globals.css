@@ -114,6 +114,7 @@
 .thirty-in-thirty-screener-page .abnormal-volume-line{stroke:#265ee8;stroke-width:2;stroke-dasharray:none;vector-effect:non-scaling-stroke}
 .thirty-in-thirty-screener-page .abnormal-volume-label{fill:#265ee8;font:700 10px "DM Mono"}
 .screener-tag-selling{background:#e1e8ff;border-color:#9fb3f7!important;color:#2145af}
+.screener-tag-monthly-stoch{background:#f0e4f2;border-color:#c9a8d1!important;color:#6b3976}
 @media(max-width:700px){.volume-selling-page .screenshot-tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.volume-selling-page .thirty-result-tile{height:155px}}
 .screener-volume-legend{display:flex;flex-wrap:wrap;gap:12px;padding:6px 0;color:var(--muted);font:10px "DM Mono";text-transform:uppercase}
 .screener-volume-legend span{display:inline-flex;align-items:center;gap:5px}

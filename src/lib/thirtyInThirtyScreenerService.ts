@@ -64,6 +64,7 @@ export type ThirtyInThirtyRow = {
   lowest_volume_5d_vs_20d: number;
   demand_supply_score: number;
   daily_stoch_d?: number;
+  monthly_stoch_d?: number;
   averageDailyTradedValue: number;
   reason: string;
   recent: Array<{
@@ -132,6 +133,14 @@ export function analyzeStock(input: {
   const ema10 = calculateEma(closes, 10);
   const ema50 = calculateEma(closes, 50);
   const dailyStochD = calculateStochRsiD(closes);
+  const monthlyCloses: number[] = [];
+  let latestMonth = "";
+  for (const row of rows) {
+    const month = row.trade_date.slice(0, 7);
+    if (month === latestMonth) monthlyCloses[monthlyCloses.length - 1] = row.close;
+    else { monthlyCloses.push(row.close); latestMonth = month; }
+  }
+  const currentMonthlyStochD = calculateStochRsiD(monthlyCloses).at(-1);
   const currentEma10 = ema10[currentIndex];
   const currentEma = ema50[currentIndex];
   const currentDailyStochD = dailyStochD[currentIndex];
@@ -246,6 +255,7 @@ export function analyzeStock(input: {
     lowest_volume_5d_vs_20d: lowestVolume5dVs20d,
     demand_supply_score: demandSupplyScore,
     daily_stoch_d: currentDailyStochD,
+    monthly_stoch_d: currentMonthlyStochD,
     averageDailyTradedValue,
     reason: qualifies
       ? `Best ${input.filters.windowDays}-session return was ${best.returnPct.toFixed(1)}% inside the last ${input.filters.lookbackDays} sessions.`
