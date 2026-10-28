@@ -28,6 +28,7 @@ export type ThirtyInThirtyFilters = {
   stoch20Only: boolean;
   stoch80Only: boolean;
   stochBelow80Only: boolean;
+  stochRisingOnly: boolean;
   showAll: boolean;
 };
 
@@ -108,6 +109,7 @@ export const defaultThirtyInThirtyFilters: ThirtyInThirtyFilters = {
   stoch20Only: false,
   stoch80Only: false,
   stochBelow80Only: false,
+  stochRisingOnly: false,
   showAll: false,
 };
 
@@ -203,11 +205,12 @@ export function analyzeStock(input: {
   const stoch20Pass = !input.filters.stoch20Only || (currentDailyStochD !== undefined && currentDailyStochD < 21);
   const stoch80Pass = !input.filters.stoch80Only || (currentDailyStochD !== undefined && currentDailyStochD > 80);
   const stochBelow80Pass = !input.filters.stochBelow80Only || (currentDailyStochD !== undefined && currentDailyStochD < 80);
+  const stochRisingPass = !input.filters.stochRisingOnly || (currentDailyStochD !== undefined && dailyStochD[currentIndex - 1] !== undefined && currentDailyStochD > dailyStochD[currentIndex - 1]! && currentMonthlyStochD !== undefined && previousMonthlyStochD !== undefined && currentMonthlyStochD > previousMonthlyStochD);
   let status: ThirtyInThirtyRow["status"] = "ELIGIBLE";
   if (!liquidPass) status = "ILLIQUID";
   else if (!movePass) status = "NO_30D_MOVE";
-  else if (!positive3mPass || !positive6mPass || !stoch20Pass || !stoch80Pass || !stochBelow80Pass) status = "FILTERED";
-  const qualifies = liquidPass && movePass && positive3mPass && positive6mPass && stoch20Pass && stoch80Pass && stochBelow80Pass;
+  else if (!positive3mPass || !positive6mPass || !stoch20Pass || !stoch80Pass || !stochBelow80Pass || !stochRisingPass) status = "FILTERED";
+  const qualifies = liquidPass && movePass && positive3mPass && positive6mPass && stoch20Pass && stoch80Pass && stochBelow80Pass && stochRisingPass;
   const recent = rows.slice(-126).map((row, index, recentRows) => {
     const originalIndex = rows.length - recentRows.length + index;
     const volAvg = volumeSma20[originalIndex];
@@ -275,6 +278,8 @@ export function analyzeStock(input: {
               ? "Daily StochRSI is not above 80."
               : !stochBelow80Pass
                 ? "Daily StochRSI is not below 80."
+              : !stochRisingPass
+                ? "Daily and monthly StochRSI are not both rising."
               : "Filtered out by positive 3M / 6M performance setting.",
     recent,
   };
