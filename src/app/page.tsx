@@ -591,10 +591,16 @@ const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): Th
   const breakoutDistance = pctChange(row.breakout_level, liveClose);
   const distanceFrom10Ema = pctChange(row.ema10, liveClose);
   const distanceFromEma = pctChange(row.ema50, liveClose);
+  const liveDailyStochValues = recent.at(-1)?.trade_date === today && recent.at(-1)?.is_provisional ? chartStochDValues(recent.map((point) => point.close)) : null;
+  const liveDailyStochD = liveDailyStochValues?.at(-1);
+  const previousLiveDailyStochD = recent.at(-2)?.daily_stoch_d ?? liveDailyStochValues?.at(-2);
+  if (liveDailyStochD !== undefined) recent[recent.length - 1] = { ...recent.at(-1)!, daily_stoch_d: liveDailyStochD };
   return {
     ...row,
     current_date: today,
     current_close: liveClose,
+    daily_stoch_d: liveDailyStochD ?? row.daily_stoch_d,
+    previous_daily_stoch_d: liveDailyStochD === undefined ? row.previous_daily_stoch_d : previousLiveDailyStochD,
     distance_from_10ema_pct: distanceFrom10Ema,
     distance_from_ema_pct: distanceFromEma,
     return_1m_pct: pctChange(lastTradingMonths(recent, 21)[0]?.close, liveClose),
@@ -2515,18 +2521,20 @@ function ThirtyInThirtyRiskTiles({ selected, activeRows, settings }: { selected:
   </div>;
 }
 
-function ThirtyInThirtyScoreTiles({ selected, chartMonths }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6 }) {
+function ThirtyInThirtyScoreTiles({ selected, chartMonths, liveDailyStochD, livePreviousDailyStochD }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; liveDailyStochD?: number; livePreviousDailyStochD?: number }) {
+  const dailyStochD = liveDailyStochD ?? selected.daily_stoch_d;
+  const previousDailyStochD = liveDailyStochD === undefined ? selected.previous_daily_stoch_d : livePreviousDailyStochD;
   const nearHigh = chartMonths === 6 ? selected.pullback_from_6m_high_pct : selected.pullback_from_3m_high_pct;
   const chartReturn = chartMonths === 6 ? selected.current_6m_return_pct : selected.current_3m_return_pct;
   const volume = summarizeRecentVolume(selected.recent, liveTradeDate());
   const volumeRecency = volume.sessionsSinceLastSpike === null ? "" : volume.sessionsSinceLastSpike === 0 ? "latest session" : `${volume.sessionsSinceLastSpike} sessions ago`;
   const volumeDetail = volume.evaluatedDays === 0 ? `Need ${VOLUME_BASELINE_SESSIONS} prior sessions` : `${volume.peakRatio?.toFixed(1)}× peak · ${volumeRecency || "no spike"} · latest ${volume.latestRatio?.toFixed(1) ?? "—"}×`;
-  const dailyTrend = selected.daily_stoch_d === undefined || selected.previous_daily_stoch_d === undefined ? "neutral" : selected.daily_stoch_d > selected.previous_daily_stoch_d ? "good" : selected.daily_stoch_d < selected.previous_daily_stoch_d ? "bad" : "neutral";
+  const dailyTrend = dailyStochD === undefined || previousDailyStochD === undefined ? "neutral" : dailyStochD > previousDailyStochD ? "good" : dailyStochD < previousDailyStochD ? "bad" : "neutral";
   const dailyTrendLabel = dailyTrend === "good" ? "Rising" : dailyTrend === "bad" ? "Falling" : "Flat";
   const monthlyTrend = selected.monthly_stoch_d === undefined || selected.previous_monthly_stoch_d === undefined ? "neutral" : selected.monthly_stoch_d > selected.previous_monthly_stoch_d ? "good" : selected.monthly_stoch_d < selected.previous_monthly_stoch_d ? "bad" : "neutral";
   const monthlyTrendLabel = monthlyTrend === "good" ? "Rising" : monthlyTrend === "bad" ? "Falling" : "Flat";
   return <div className="strategy-stat-grid">
-    <StrategyStat label="Daily StochRSI" value={selected.daily_stoch_d === undefined ? "—" : selected.daily_stoch_d.toFixed(1)} sub={selected.previous_daily_stoch_d === undefined ? undefined : `${dailyTrendLabel} vs prior day (${selected.previous_daily_stoch_d.toFixed(1)})`} tone={dailyTrend} />
+    <StrategyStat label="Daily StochRSI" value={dailyStochD === undefined ? "—" : dailyStochD.toFixed(1)} sub={previousDailyStochD === undefined ? undefined : `${liveDailyStochD === undefined ? "" : "Live · "}${dailyTrendLabel} vs prior day (${previousDailyStochD.toFixed(1)})`} tone={dailyTrend} />
     <StrategyStat label="Monthly StochRSI %D" value={selected.monthly_stoch_d === undefined ? "—" : selected.monthly_stoch_d.toFixed(1)} sub={selected.previous_monthly_stoch_d === undefined ? "Current month" : `${monthlyTrendLabel} vs prior month (${selected.previous_monthly_stoch_d.toFixed(1)})`} tone={monthlyTrend} />
     <StrategyStat label="Best Window" value={pct(selected.best_return_pct)} sub={`${selected.best_start_date ?? "—"} to ${selected.best_end_date ?? "—"}`} tone={toneFromRange(selected.best_return_pct, (value) => value >= 45, (value) => value >= 30)} />
     <StrategyStat label="Current Close" value={money(selected.current_close)} sub={selected.current_date} tone="neutral" />
@@ -2542,7 +2550,7 @@ function ThirtyInThirtyScoreTiles({ selected, chartMonths }: { selected: ThirtyI
   </div>;
 }
 
-function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceStyle = false, sources, showScreenerStoch = false, abnormalSignal }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[]; showScreenerStoch?: boolean; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
+function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceStyle = false, sources, showScreenerStoch = false, abnormalSignal, seasonal = false }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[]; showScreenerStoch?: boolean; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]>; seasonal?: boolean }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
   const [hourlyLoading, setHourlyLoading] = useState(false);
@@ -2588,13 +2596,15 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
   }, [selected.security_id, timeframe]);
 
   const mergedDailyRows = mergeLiveDailyCandle(selected.recent, liveDailyRow) as Array<DailyChartPoint & { daily_stoch_d?: number }>;
-  if (showScreenerStoch && liveDailyRow && mergedDailyRows.length) {
-    const liveD = chartStochDValues(mergedDailyRows.map((row) => row.close)).at(-1);
-    mergedDailyRows[mergedDailyRows.length - 1] = { ...mergedDailyRows.at(-1)!, daily_stoch_d: liveD };
-  }
+  const latestDailyRow = mergedDailyRows.at(-1);
+  const hasLiveDailyCandle = latestDailyRow?.trade_date === liveTradeDate() && (Boolean(latestDailyRow.is_provisional) || showLiveDailyCandle(selected.recent, liveDailyRow));
+  const liveStochValues = hasLiveDailyCandle ? chartStochDValues(mergedDailyRows.map((row) => row.close)) : null;
+  const liveDailyStochD = liveStochValues?.at(-1);
+  const livePreviousDailyStochD = mergedDailyRows.at(-2)?.daily_stoch_d ?? liveStochValues?.at(-2);
+  if (liveDailyStochD !== undefined) mergedDailyRows[mergedDailyRows.length - 1] = { ...latestDailyRow!, daily_stoch_d: liveDailyStochD };
   const dailyRows = lastTradingMonths(mergedDailyRows, chartMonths === 6 ? 126 : 63);
   const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
-  return <div className="chart-shell">
+  return <><div className="chart-shell">
     <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} settings={settings} />
     <div className="chart-toolbar">
       <div>
@@ -2613,7 +2623,10 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
     </div>
     <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} abnormalSignal={abnormalSignal} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
-  </div>;
+  </div>
+    {seasonal && <div className="strategy-stat-grid"><StrategyStat label="Next 3M Seasonal Average" value={pct(selected.seasonal_avg_return ?? 0)} sub={`${selected.seasonal_window} · ${selected.seasonal_observations} completed years`} tone="good" /></div>}
+    <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} />
+  </>;
 }
 
 function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedStatus }: { settings?: TradingSettings | null; emaFilters: EmaNoTouchFilters; stochFilters: StochRsiFilters; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void }) {
@@ -3031,9 +3044,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <p className="eyebrow">{combined ? `Screener · ${membership[selected.security_id]?.join(" · ")}` : qMode ? `Qullamaggie watchlist · resistance ${qResistance(selected.security_id)}` : seasonal ? `Seasonal Stocks · ${selected.seasonal_window} · ${selected.seasonal_avg_return?.toFixed(1)}% average` : `30 in 30 · ${selected.best_return_pct.toFixed(1)}%`}</p>
         <h2>{selected.symbol} · {selected.company_name}</h2>
         <p className="muted">{selected.reason}</p>
-        <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} settings={settings} referenceStyle={!seasonal} sources={combined ? membership[selected.security_id] : undefined} showScreenerStoch={combined} abnormalSignal={!seasonal ? summarizeRecentVolume(selected.recent, sessionDate).latestSpike ?? undefined : undefined} />
-        {seasonal && <div className="strategy-stat-grid"><StrategyStat label="Next 3M Seasonal Average" value={pct(selected.seasonal_avg_return ?? 0)} sub={`${selected.seasonal_window} · ${selected.seasonal_observations} completed years`} tone="good" /></div>}
-        <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} />
+        <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} settings={settings} referenceStyle={!seasonal} sources={combined ? membership[selected.security_id] : undefined} showScreenerStoch={combined} abnormalSignal={!seasonal ? summarizeRecentVolume(selected.recent, sessionDate).latestSpike ?? undefined : undefined} seasonal={seasonal} />
       </div>
     </div>}
   </section>;
