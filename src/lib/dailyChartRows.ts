@@ -24,3 +24,8 @@ export function mergeLiveDailyCandle<T extends ChartCandle>(dailyRows: T[], live
   }
   return rows;
 }
+
+export function isCurrentIndiaTrade(lastTradeTime: number | undefined, today: string): boolean {
+  if (!lastTradeTime || !Number.isFinite(lastTradeTime)) return false;
+  return new Date(lastTradeTime * 1000).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) === today;
+}

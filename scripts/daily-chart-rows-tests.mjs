@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mergeLiveDailyCandle } from "../src/lib/dailyChartRows.ts";
+import { isCurrentIndiaTrade, mergeLiveDailyCandle } from "../src/lib/dailyChartRows.ts";
 
 const candle = (trade_date, close, is_provisional = false) => ({ trade_date, open: close, high: close, low: close, close, volume: 100, is_provisional });
 const provisional = candle("2026-10-27", 10, true);
@@ -10,5 +10,7 @@ assert.deepEqual(mergeLiveDailyCandle([provisional, official], olderIntraday, "2
 assert.deepEqual(mergeLiveDailyCandle([official, provisional], null, "2026-10-28"), [official], "official candle wins regardless of row order");
 assert.deepEqual(mergeLiveDailyCandle([official], olderIntraday, "2026-10-27"), [official], "intraday data never replaces an official candle");
 assert.deepEqual(mergeLiveDailyCandle([official], candle("2026-10-28", 13), "2026-10-28"), [official, candle("2026-10-28", 13)], "today's live candle is appended once");
+assert.equal(isCurrentIndiaTrade(Date.parse("2026-10-27T09:45:00Z") / 1000, "2026-10-28"), false, "a quote received today must not turn yesterday's last trade into a new candle");
+assert.equal(isCurrentIndiaTrade(Date.parse("2026-10-28T03:45:00Z") / 1000, "2026-10-28"), true, "a current NSE trade can update today's candle");
 
 console.log("daily chart row tests passed");

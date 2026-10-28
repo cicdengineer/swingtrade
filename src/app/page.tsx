@@ -32,7 +32,7 @@ import type { QRow } from "@/lib/qullamaggieLogic";
 import { parseResistanceWatchlist, qullamaggieWatchlistKey, resistanceWatchlist, type QWatchlist } from "@/lib/qullamaggieWatchlist";
 import { fallingTrendScore, matchesCleanTrend } from "@/lib/cleanTrend";
 import { ABNORMAL_VOLUME_RATIO, RECENT_VOLUME_SESSIONS, VOLUME_BASELINE_SESSIONS, summarizeRecentVolume } from "@/lib/recentVolume";
-import { mergeLiveDailyCandle as mergeDailyChartRows } from "@/lib/dailyChartRows";
+import { isCurrentIndiaTrade, mergeLiveDailyCandle as mergeDailyChartRows } from "@/lib/dailyChartRows";
 import QullamaggieView from "./QullamaggieView";
 import VolumeSellingView from "./VolumeSellingView";
 import USADataView from "./USADataView";
@@ -552,6 +552,7 @@ const pctChange = (from: number | undefined, to: number) => from && from > 0 ? (
 const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): ThirtyInThirtyRow => {
   if (!tick?.ltp || !isCurrentSessionTick(tick)) return row;
+  if (tick.source !== "intraday" && !isCurrentIndiaTrade(tick.lastTradeTime, liveTradeDate())) return row;
   const liveClose = tick.ltp;
   const today = liveTradeDate();
   const recent = [...row.recent];
@@ -568,8 +569,9 @@ const liveAdjustedThirtyInThirty = (row: ThirtyInThirtyRow, tick?: LiveTick): Th
     ema50: row.ema50,
     volume: tick.volume ?? 0,
     volume_ratio: liveVolumeRatio,
+    is_provisional: true,
   };
-  if (last?.trade_date === today) {
+  if (last?.trade_date === today && last.is_provisional) {
     recent[recent.length - 1] = {
       ...last,
       ...liveDaily,
@@ -3605,6 +3607,7 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
         <title>{`${chartDateLabel(latestReclaimMarker.row.trade_date, timeframe)} reclaimed ${emaLabel}: previous close below, latest close ${latestReclaimMarker.row.close.toFixed(2)} above ${latestReclaimMarker.ema.toFixed(2)}`}</title>
       </polygon>}
     </svg>
+    {timeframe === "daily" && <div className="chart-session-dates">Latest sessions, left to right: {chartRows.slice(-3).map((row) => row.trade_date.slice(0, 10)).join(" · ")}</div>}
     {referenceStyle ? <div className="thirty-reference-volume" aria-label="Volume">
       {highlightVolume && <div className="screener-volume-legend"><span><i className="screener-volume-high" />Blue ≥1.5× 20-bar average</span><span><i className="screener-volume-low" />Orange ≤0.3× 20-bar average</span></div>}
       <svg viewBox={`0 0 ${width} ${volumeHeight}`} role="img" aria-label={`${timeframe} volume bars`}>{chartRows.map((row, index) => {
