@@ -58,6 +58,7 @@ const marketOpenMinutes = 9 * 60 + 15;
 const marketCloseMinutes = 15 * 60 + 30;
 const provisionalDataSource = "DHAN_INTRADAY_AGGREGATED" as const;
 const officialDataSource = "DHAN_DAILY" as const;
+const nifty500Symbol = "NIFTY 500";
 const fixedNseHolidayMonthDays = new Set(["01-26", "08-15", "10-02", "12-25"]);
 // NSE equity trading holidays published for 2026 (in addition to weekends).
 const nse2026Holidays = new Set([
@@ -196,7 +197,7 @@ export async function getSecurityMaster(force = false): Promise<InstrumentRecord
       const tradingSymbol = first(row, ["TRADING_SYMBOL", "SEM_TRADING_SYMBOL", "UNDERLYING_SYMBOL", "SYMBOL", "Trading Symbol"]) || symbol;
       const isin = first(row, ["ISIN", "SEM_ISIN_CODE", "ISIN_CODE"]);
       const isNseEquity = exchange === "NSE" && segment === "E" && instrument.toUpperCase().includes("EQUITY");
-      const isNseIndex = exchange === "NSE" && segment === "I";
+      const isNseIndex = segment === "I";
       const exchangeSegment = isNseIndex ? "IDX_I" : isNseEquity ? "NSE_EQ" : "";
       return {
         security_id: securityId,
@@ -213,6 +214,51 @@ export async function getSecurityMaster(force = false): Promise<InstrumentRecord
       } satisfies InstrumentRecord;
     })
     .filter((row) => row.security_id && row.status === "ACTIVE");
+}
+
+async function getNifty500Index(): Promise<Security> {
+  const master = await getSecurityMaster();
+  const index = master.find((row) => row.exchange_segment === "IDX_I" &&
+    [row.symbol, row.trading_symbol, row.company_name].some((name) =>
+      name.toUpperCase().replace(/[^A-Z0-9]/g, "") === "NIFTY500"));
+  if (!index) throw new Error("Nifty 500 index is missing from the Dhan instrument master.");
+  return { securityId: index.security_id, symbol: nifty500Symbol, name: nifty500Symbol, exchange: "NSE", segment: "IDX_I", instrument: "INDEX" };
+}
+
+export async function getNifty500Snapshot() {
+  const db = await readDatabase();
+  const index = db.instruments.find((row) => row.exchange_segment === "IDX_I" && row.symbol === nifty500Symbol);
+  const stored = index ? db.daily_prices.filter((row) => row.security_id === index.security_id).sort((a, b) => a.trade_date.localeCompare(b.trade_date)).slice(-6) : [];
+  let live: { date: string; open: number; high: number; low: number; close: number; previousClose: number } | null = null;
+  const india = getIndiaNow();
+  const sessionMinutes = india.hour * 60 + india.minute;
+  if (index && hasDhanCredentials() && isNseBusinessDay(india.date) && sessionMinutes >= marketOpenMinutes && sessionMinutes < marketCloseMinutes) {
+    try {
+      const dhanSecurityId = index.security_id.replace(/^IDX_I:/, "");
+      const response = await postDhanJson("/marketfeed/ohlc", { IDX_I: [Number(dhanSecurityId)] });
+      const quote = response.body?.data?.IDX_I?.[dhanSecurityId];
+      const open = Number(quote?.ohlc?.open);
+      const high = Number(quote?.ohlc?.high);
+      const low = Number(quote?.ohlc?.low);
+      const close = Number(quote?.last_price);
+      const previousClose = Number(quote?.ohlc?.close);
+      if (response.ok && [open, high, low, close, previousClose].every((value) => Number.isFinite(value) && value > 0) && high >= Math.max(open, close) && low <= Math.min(open, close)) {
+        live = { date: getIndiaTradingDate(), open, high, low, close, previousClose };
+      }
+    } catch (error) {
+      console.warn("Nifty 500 live quote unavailable", error);
+    }
+  }
+  const candles = stored.map(({ trade_date, open, high, low, close }) => ({ date: trade_date, open, high, low, close }));
+  const last = candles.at(-1);
+  const previousClose = live?.previousClose ?? (candles.length > 1 ? candles.at(-2)?.close : undefined);
+  const current = live ?? last;
+  return {
+    candles: (live ? [...candles.filter((row) => row.date !== live.date), live] : candles).slice(-5),
+    changePct: current && previousClose ? (current.close / previousClose - 1) * 100 : null,
+    live: Boolean(live),
+    dataThrough: current?.date ?? null,
+  };
 }
 
 export async function getCurrentUniverse(universeName?: UniverseName, force = false): Promise<UniverseMemberRecord[]> {
@@ -944,6 +990,31 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
       if (forceUniverse || !hasUniverse) await refreshUniverseData(forceUniverse);
     }
 
+    if (!retryFailures) {
+      await updateJob(jobId, (job) => { job.current_status = "Refreshing Nifty 500 index"; });
+      try {
+        const index = await getNifty500Index();
+        const latest = await readDatabase();
+        const storedIndexId = `IDX_I:${index.securityId}`;
+        const latestDate = latestPriceDate(latest, storedIndexId);
+        const prepared = await fetchInstrumentRefresh(index, latestDate);
+        if (prepared.result.candles.length || prepared.provisionalAggregate?.candle) {
+          await mutateDataStore(async () => {
+            const db = await readDatabase();
+            applyInstrumentRefresh(db, {
+              ...prepared,
+              result: { ...prepared.result, security: { ...index, securityId: storedIndexId } },
+            });
+            await writeMarketDataBatch(db, [storedIndexId]);
+          });
+        }
+      } catch (error) {
+        await updateJob(jobId, (job) => {
+          job.errors.push(`Nifty 500 index: ${error instanceof Error ? error.message : String(error)}`);
+        });
+      }
+    }
+
     const db = await readDatabase();
     const members = retryFailures
       ? db.universe_members.filter((member) => db.download_failures.some((failure) => failure.status === "open" && failure.security_id === member.security_id))
@@ -1044,7 +1115,7 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
     }
 
     await updateJob(jobId, (job) => {
-      job.status = job.failed ? "completed_with_failures" : "completed";
+      job.status = job.failed || job.errors.length ? "completed_with_failures" : "completed";
       job.finished_at = new Date().toISOString();
       job.current_status = "Finished";
       job.progress = 100;

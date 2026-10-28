@@ -37,6 +37,7 @@ import QullamaggieView from "./QullamaggieView";
 import VolumeSellingView from "./VolumeSellingView";
 import USADataView from "./USADataView";
 import EntrySizingTile from "./EntrySizingTile";
+import Nifty500MiniChart from "./Nifty500MiniChart";
 import { latestDailyStop, swingLowBeforeLatest } from "@/lib/entrySizing";
 import { findVolumeSellingSignal, type VolumeSellingSignal } from "@/lib/volumeSellingLogic";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
@@ -2937,6 +2938,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <small>{combined ? "30 in 30, Qullamaggie, 10 EMA Catchup, StochRSI, Seasonal Stocks and SellingClimax. One tile per stock, with common chart, sizing, filters and sorting." : qMode ? "The stocks with confirmed Qullamaggie resistance, shown with 30 in 30 charts and sizing. Their inclusion does not mean they passed the 30 in 30 scan." : seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
       </div>
       <div className="thirty-hero-actions">
+        {combined && <Nifty500MiniChart />}
         <div className="refresh-status"><span className={freshPriceCount && isNseSessionOpen() ? "ready" : "pending"} /><b>{priceStatus}</b><small>{freshPriceCount} live · {intradayPriceCount} intraday · {visibleRows.length} shown</small></div>
         <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{combined ? loading ? "Scanning…" : "Refresh All" : qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button>}

@@ -99,6 +99,7 @@ To force reconciliation for testing, run refresh after a provisional candle exis
 1. Open **Data Status**.
 2. Use **Refresh Status** to inspect the local database.
 3. Use **Refresh All Data** to load the current Nifty 500 universe, backfill missing daily OHLCV data, reconcile provisional candles, and construct today's EOD candle from intraday data after market close when needed.
+   This also backfills the Nifty 500 index (`CNX500`) daily OHLC into the same price store. The Screener header shows its latest five daily candles and session change; during market hours it refreshes the current candle from Dhan's index OHLC quote every 30 seconds.
 4. Use the Nifty 500 **Refresh** button to refresh CNX500 constituents and prices.
 5. Use **Retry Failed** after transient API failures.
 6. Use **Export Universe** or **Export Failed** for CSV debugging.
