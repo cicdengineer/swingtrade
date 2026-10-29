@@ -41,7 +41,7 @@ import Nifty500MiniChart from "./Nifty500MiniChart";
 import { latestDailyStop, swingLowBeforeLatest } from "@/lib/entrySizing";
 import { findVolumeSellingSignal, type VolumeSellingSignal } from "@/lib/volumeSellingLogic";
 import { findStochHigh, type StochHighLine } from "@/lib/stochHigh";
-import { findSwingHigh, type SwingHighSignal } from "@/lib/swingHigh";
+import { findSwingHigh, isAboveSwingHighRed, type SwingHighSignal } from "@/lib/swingHigh";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
 
 type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings";
@@ -2723,6 +2723,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: seasonal ? "seasonal_avg" : "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [cleanTrendOnly, setCleanTrendOnly] = useState(false);
+  const [aboveRedOnly, setAboveRedOnly] = useState(false);
   const [stochHighOnly, setStochHighOnly] = useState(false);
   const [showTileEma10, setShowTileEma10] = useState(true);
   const [tileLimit, setTileLimit] = useState(9999);
@@ -2931,9 +2932,10 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     });
   }, [chartMonths, liveTicks, sellingSignals, sessionDate, sort]);
   const matchesSelectedTrend = useCallback((row: ThirtyInThirtyRow) => !cleanTrendOnly || matchesCleanTrend(row.recent, chartMonths === 6 ? 126 : 63), [chartMonths, cleanTrendOnly]);
+  const aboveRed = (row: ThirtyInThirtyRow) => isAboveSwingHighRed(row.recent, row.current_close);
   const requiresStochHigh = stochHighOnly || (combined && source === "StochHigh");
-  const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (seasonal || matchesSelectedTrend(row)))), [liveRows, liveTicks, filters, requiresStochHigh, sortRows, qMode, seasonal, matchesSelectedTrend]);
-  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, requiresStochHigh, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (seasonal || matchesSelectedTrend(row)))), [liveRows, liveTicks, filters, aboveRedOnly, requiresStochHigh, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, aboveRedOnly, requiresStochHigh, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
   const visibleRows = useMemo(() => {
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
@@ -2990,14 +2992,14 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <div>
         <p className="eyebrow">{combined ? "Screener" : qMode ? "Qullamaggie watchlist" : seasonal ? "Seasonal Stocks" : "30 in 30 Screener"}</p>
         <h2>{combined ? "All entry watchlists in one view" : qMode ? "Resistance setups in 30 in 30" : seasonal ? "3-month seasonal watchlist" : "30% moves in any 30 sessions"}</h2>
-        <small>{combined ? source === "SwingHigh" ? "The latest StochRSI %D below 20 zone must have a higher low than the previous zone. Candidates remain until %D exceeds 30 or price falls to the red line. Entry is above the 10 EMA." : "30 in 30, Qullamaggie, 10 EMA Catchup, StochRSI, StochHigh, SwingHigh, Seasonal Stocks, SellingClimax and MStochRSI80. One tile per stock, with common chart, sizing, filters and sorting." : qMode ? "The stocks with confirmed Qullamaggie resistance, shown with 30 in 30 charts and sizing. Their inclusion does not mean they passed the 30 in 30 scan." : seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
+        <small>{combined ? source === "SwingHigh" ? "The latest StochRSI %D below 20 zone must have a higher low than the previous zone. Candidates remain until %D exceeds 50 or price falls to the red line. Entry is above the 10 EMA." : "30 in 30, Qullamaggie, 10 EMA Catchup, StochRSI, StochHigh, SwingHigh, Seasonal Stocks, SellingClimax and MStochRSI80. One tile per stock, with common chart, sizing, filters and sorting." : qMode ? "The stocks with confirmed Qullamaggie resistance, shown with 30 in 30 charts and sizing. Their inclusion does not mean they passed the 30 in 30 scan." : seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
       </div>
       <div className="thirty-hero-actions">
         {combined && <Nifty500MiniChart />}
         <div className="refresh-status"><span className={freshPriceCount && isNseSessionOpen() ? "ready" : "pending"} /><b>{priceStatus}</b><small>{freshPriceCount} live · {intradayPriceCount} intraday · {visibleRows.length} shown</small></div>
         <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{combined ? loading ? "Scanning…" : "Refresh All" : qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button>}
-        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setStochHighOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
+        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setAboveRedOnly(false); setStochHighOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
       </div>
     </div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
@@ -3011,6 +3013,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     {!qMode && <div className="thirty-in-thirty-switches">
       {!seasonal && <label title={`Show clean up and down trends on the selected ${chartMonths}M chart`}><input type="checkbox" checked={cleanTrendOnly} onChange={(e) => setCleanTrendOnly(e.target.checked)}/><span>Clean {chartMonths}M Trend</span></label>}
       <label><input type="checkbox" checked={filters.upTodayOnly} onChange={(e) => setFilters({ ...filters, upTodayOnly: e.target.checked })}/><span>Up</span></label>
+      {combined && <label title="Show stocks whose latest price is above the red line from the latest StochRSI oversold zone"><input type="checkbox" checked={aboveRedOnly} onChange={(e) => setAboveRedOnly(e.target.checked)}/><span>AboveRed</span></label>}
       <label title="Daily StochRSI %D below 80"><input type="checkbox" checked={filters.stochBelow80Only} onChange={(e) => setFilters({ ...filters, stochBelow80Only: e.target.checked })}/><span>Stoch&lt;80</span></label>
       {combined && <label title="Daily %D below 80; price within 5% below or above the highest high of the latest %D > 80 run"><input type="checkbox" checked={stochHighOnly} onChange={(e) => { setStochHighOnly(e.target.checked); if (e.target.checked) setFilters({ ...filters, upTodayOnly: false, stochBelow80Only: true }); }}/><span>StochHigh</span></label>}
       <label title="Daily and monthly StochRSI %D are both rising versus their prior period"><input type="checkbox" checked={filters.stochRisingOnly} onChange={(e) => setFilters({ ...filters, stochRisingOnly: e.target.checked })}/><span>StochRising</span></label>
@@ -3073,7 +3076,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
               <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} showEma10={false} onOpen={() => setSelected(row)} abnormalSignal={!seasonal ? summarizeRecentVolume(row.recent, sessionDate).latestSpike ?? undefined : undefined} />
             </>}
           </div>;
-        }) : <p className="panel-empty">{qMode ? qWatchlistLoading ? "Loading Qullamaggie resistance stocks…" : "No Qullamaggie stocks with confirmed resistance were found." : seasonal ? "No stocks in this month's seasonal watchlist match the selected filters." : source === "SwingHigh" ? "No stocks have a higher StochRSI oversold zone with %D at or below 30 and price above the prior low." : "No stocks matched the selected 30 in 30 criteria."}</p>}
+        }) : <p className="panel-empty">{qMode ? qWatchlistLoading ? "Loading Qullamaggie resistance stocks…" : "No Qullamaggie stocks with confirmed resistance were found." : seasonal ? "No stocks in this month's seasonal watchlist match the selected filters." : source === "SwingHigh" ? "No stocks have a higher StochRSI oversold zone with %D at or below 50 and price above the prior low." : "No stocks matched the selected 30 in 30 criteria."}</p>}
       </section>
     </>}
     {selected && <div className="drawer" onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
