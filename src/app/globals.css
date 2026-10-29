@@ -130,6 +130,7 @@
 .thirty-reference-volume .volume-low{fill:#ffb13b;opacity:1}
 .chart-shell .signal-chart .outside-volume-bar.high{background:#22a7ff;box-shadow:0 -3px 10px #22a7ff55;opacity:1}
 .chart-shell .signal-chart .outside-volume-bar.low{background:#ffb13b;box-shadow:0 -3px 10px #ffb13b55;opacity:1}
+.strategy-stat-grid.stoch-top-row{grid-template-columns:repeat(2,minmax(0,1fr))}
 .nifty500-mini{display:flex;align-items:center;gap:10px;min-width:255px;padding:5px 9px;border:1px solid var(--line);background:var(--panel)}
 .nifty500-mini-copy{display:grid;gap:1px;white-space:nowrap}
 .nifty500-mini-copy b{font:700 10px "DM Mono",monospace;letter-spacing:.4px;color:var(--text)}
