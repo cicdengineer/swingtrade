@@ -2491,23 +2491,27 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
   </section>;
 }
 
-function ThirtyInThirtyTileChart({ row, chartMonths, showEma10, onOpen, abnormalSignal }: { row: ThirtyInThirtyRow; chartMonths: 3 | 6; showEma10: boolean; onOpen: () => void; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
+function ThirtyInThirtyTileChart({ row, chartMonths, showEma10, onOpen, abnormalSignal, stochHighLine, livePrice }: { row: ThirtyInThirtyRow; chartMonths: 3 | 6; showEma10: boolean; onOpen: () => void; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]>; stochHighLine?: StochHighLine | null; livePrice?: number }) {
   const chartRows = lastTradingMonths(row.recent, chartMonths === 6 ? 126 : 63);
   const closes = chartRows.map((point) => point.close);
   const ema10 = showEma10 ? emaValues(row.recent.map((point) => point.close), 10).slice(-chartRows.length) : [];
-  const visibleValues = [...closes, ...ema10.filter((value): value is number => value !== undefined), ...(abnormalSignal ? [abnormalSignal.high] : [])];
+  const visibleValues = [...closes, ...ema10.filter((value): value is number => value !== undefined), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(livePrice !== undefined ? [livePrice] : [])];
   const min = Math.min(...visibleValues);
   const max = Math.max(...visibleValues);
   const chartPath = (values: (number | undefined)[]) => values.map((value, index) => value === undefined ? "" : `${index === 0 || values[index - 1] === undefined ? "M" : "L"}${(index * 220 / Math.max(1, values.length - 1)).toFixed(2)} ${scaleValue(value, min, max, 82).toFixed(2)}`).join(" ");
   const pricePath = chartPath(closes);
   const trendUp = closes.length > 1 && closes.at(-1)! >= closes[0];
   const signalIndex = abnormalSignal ? chartRows.findIndex(point => point.trade_date === abnormalSignal.trade_date) : -1;
-  return <span className="thirty-in-thirty-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="img" aria-label={`${row.symbol} last ${chartMonths} months line chart${showEma10 ? " with 10 EMA" : ""}`}>
+  const stochHighIndex = stochHighLine ? chartRows.findIndex(point => point.trade_date === stochHighLine.date) : -1;
+  const stochHighY = stochHighLine ? scaleValue(stochHighLine.price, min, max, 82) : undefined;
+  return <span className="thirty-in-thirty-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="img" aria-label={`${row.symbol} last ${chartMonths} months line chart${showEma10 ? " with 10 EMA" : ""}${stochHighLine ? `, StochHigh line ${money(stochHighLine.price)}` : ""}`}>
     <svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true">
       <path className="spark-area" d={`${pricePath} L220 82 L0 82 Z`} />
       <path className={trendUp ? "spark-line up" : "spark-line down"} d={pricePath} />
       {showEma10 && <path className="tile-ema10-line" d={chartPath(ema10)} />}
       {abnormalSignal && <line className="abnormal-volume-line" x1={signalIndex < 0 ? 0 : signalIndex * 220 / Math.max(1, chartRows.length - 1)} x2="220" y1={scaleValue(abnormalSignal.high, min, max, 82)} y2={scaleValue(abnormalSignal.high, min, max, 82)} />}
+      {stochHighY !== undefined && <g><line className="tile-stoch-high-line" x1={stochHighIndex < 0 ? 0 : stochHighIndex * 220 / Math.max(1, chartRows.length - 1)} x2="220" y1={stochHighY} y2={stochHighY}><title>{`StochHigh ${money(stochHighLine!.price)} from ${stochHighLine!.date}`}</title></line><text className="tile-stoch-high-label" x="217" y={Math.max(10, stochHighY - 3)} textAnchor="end">{stochHighLine!.price.toFixed(2)}</text></g>}
+      {livePrice !== undefined && <circle className="tile-live-price-dot" cx="220" cy={scaleValue(livePrice, min, max, 82)} r="2.5"><title>{`LTP ${money(livePrice)}`}</title></circle>}
     </svg>
   </span>;
 }
@@ -3031,17 +3035,21 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         {visibleRows.length ? visibleRows.map((row) => {
           const tileTick = liveTicks[row.security_id];
           const tilePriceState = !isNseSessionOpen() ? "closed" : tileTick?.source === "websocket" && priceClock - tileTick.receivedAt < 45_000 ? "live" : tileTick?.source === "intraday" && priceClock - tileTick.receivedAt < 90_000 ? "intraday" : "stale";
+          const stochHighLine = combined ? findStochHigh(row.recent) : null;
+          const freshLtp = (tilePriceState === "live" || tilePriceState === "intraday") && tileTick && Number.isFinite(tileTick.ltp) && tileTick.ltp > 0 ? tileTick.ltp : undefined;
+          const stochHighDistance = stochHighLine && freshLtp !== undefined ? (freshLtp / stochHighLine.price - 1) * 100 : undefined;
+          const nearStochHigh = stochHighDistance !== undefined && Math.abs(stochHighDistance) <= 1;
           const todayReturn = todayReturnPct(row, tileTick);
           const pinned = pinnedIds.includes(row.security_id);
           const strongStart = isStrongStart(row, liveTicks[row.security_id]);
           const nearPdh = isBreakingPreviousDayHigh(row);
-          return <div key={row.security_id} className={`screenshot-tile ${!seasonal && !qMode ? "thirty-result-tile" : ""} ${combined ? "combined-result-tile" : ""} ${seasonal ? "seasonal-tile" : ""} ${pinned ? "pinned" : ""} ${strongStart ? "strong-start" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={combined ? membership[row.security_id]?.join(", ") : qMode ? `Qullamaggie resistance ${qResistance(row.security_id)}` : seasonal ? `${row.seasonal_window}: ${row.seasonal_avg_return?.toFixed(1)}% average over ${row.seasonal_observations} years` : `${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
+          return <div key={row.security_id} className={`screenshot-tile ${!seasonal && !qMode ? "thirty-result-tile" : ""} ${combined ? "combined-result-tile" : ""} ${seasonal ? "seasonal-tile" : ""} ${pinned ? "pinned" : ""} ${strongStart ? "strong-start" : ""} ${nearStochHigh ? "near-stoch-high" : ""}`} onClick={() => setSelected(row)} onKeyDown={(event) => { if (event.key === "Enter") setSelected(row); }} role="button" tabIndex={0} title={combined ? `${membership[row.security_id]?.join(", ") ?? ""}${stochHighLine ? ` · StochHigh ${money(stochHighLine.price)}${stochHighDistance === undefined ? "" : ` · LTP ${pct2(stochHighDistance)} from line`}` : ""}` : qMode ? `Qullamaggie resistance ${qResistance(row.security_id)}` : seasonal ? `${row.seasonal_window}: ${row.seasonal_avg_return?.toFixed(1)}% average over ${row.seasonal_observations} years` : `${row.best_return_pct.toFixed(1)}% from ${row.best_start_date} to ${row.best_end_date}`}>
             {!seasonal && !qMode ? <>
               <div className="thirty-result-top"><b style={combined ? { fontSize: `${Math.max(8, Math.min(14, 125 / Math.max(row.symbol.length, 1)))}px` } : undefined}>{row.symbol}</b><span className="tile-badges"><i className={`tile-price-state ${tilePriceState}`} title={tileTick ? `Last price received ${new Date(tileTick.receivedAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })} IST` : "No intraday price received"}>{tilePriceState === "live" ? "LIVE" : tilePriceState === "intraday" ? "1M" : tilePriceState === "closed" ? "CLOSED" : "STALE"}</i>{strongStart && <i>SS</i>}{nearPdh && <i className="pdh-badge">PDH</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span></div>
               {todayReturn !== undefined && <span className={`tile-today-return ${todayReturn >= 0 ? "positive" : "negative"}`}>{pct2(todayReturn)}</span>}
               {!combined && <div className="thirty-result-sub"><small>{row.company_name}</small></div>}
               {combined && <div className="screener-source-dots" role="img" aria-label={`Watchlists: ${membership[row.security_id]?.join(", ")}`}>{membership[row.security_id]?.map(name => <span key={name} title={name} aria-hidden="true" />)}</div>}
-              <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} showEma10={showTileEma10} onOpen={() => setSelected(row)} abnormalSignal={!seasonal ? summarizeRecentVolume(row.recent, sessionDate).latestSpike ?? undefined : undefined} />
+              <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} showEma10={showTileEma10} onOpen={() => setSelected(row)} abnormalSignal={!seasonal ? summarizeRecentVolume(row.recent, sessionDate).latestSpike ?? undefined : undefined} stochHighLine={stochHighLine} livePrice={combined ? freshLtp : undefined} />
             </> : <>
               <span className="tile-badges">{strongStart && <i>SS</i>}{nearPdh && <i className="pdh-badge">PDH</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span>
               <b>{row.symbol}</b><small>{row.company_name}</small>
