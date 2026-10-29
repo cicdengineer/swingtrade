@@ -2522,7 +2522,7 @@ function ThirtyInThirtyRiskTiles({ selected, activeRows, settings }: { selected:
   </div>;
 }
 
-function ThirtyInThirtyScoreTiles({ selected, chartMonths, liveDailyStochD, livePreviousDailyStochD, stochOnly = false }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; liveDailyStochD?: number; livePreviousDailyStochD?: number; stochOnly?: boolean }) {
+function ThirtyInThirtyScoreTiles({ selected, chartMonths, liveDailyStochD, livePreviousDailyStochD, stochOnly = false, stochHighLine }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; liveDailyStochD?: number; livePreviousDailyStochD?: number; stochOnly?: boolean; stochHighLine?: StochHighLine | null }) {
   const dailyStochD = liveDailyStochD ?? selected.daily_stoch_d;
   const previousDailyStochD = liveDailyStochD === undefined ? selected.previous_daily_stoch_d : livePreviousDailyStochD;
   const nearHigh = chartMonths === 6 ? selected.pullback_from_6m_high_pct : selected.pullback_from_3m_high_pct;
@@ -2534,7 +2534,8 @@ function ThirtyInThirtyScoreTiles({ selected, chartMonths, liveDailyStochD, live
   const dailyTrendLabel = dailyTrend === "good" ? "Rising" : dailyTrend === "bad" ? "Falling" : "Flat";
   const monthlyTrend = selected.monthly_stoch_d === undefined || selected.previous_monthly_stoch_d === undefined ? "neutral" : selected.monthly_stoch_d > selected.previous_monthly_stoch_d ? "good" : selected.monthly_stoch_d < selected.previous_monthly_stoch_d ? "bad" : "neutral";
   const monthlyTrendLabel = monthlyTrend === "good" ? "Rising" : monthlyTrend === "bad" ? "Falling" : "Flat";
-  if (stochOnly) return <div className="strategy-stat-grid stoch-top-row">
+  if (stochOnly) return <div className={`strategy-stat-grid stoch-metrics-row${stochHighLine ? " with-line" : ""}`}>
+    {stochHighLine && <StrategyStat label="StochHigh line" value={money(stochHighLine.price)} sub={`${stochHighLine.date} · ${pct2(stochHighLine.distancePct)} from line`} tone={stochHighLine.qualifies ? "good" : "neutral"}/>}
     <StrategyStat label="Daily StochRSI" value={dailyStochD === undefined ? "—" : dailyStochD.toFixed(1)} sub={previousDailyStochD === undefined ? undefined : `${liveDailyStochD === undefined ? "" : "Live · "}${dailyTrendLabel} vs prior day (${previousDailyStochD.toFixed(1)})`} tone={dailyTrend} />
     <StrategyStat label="Monthly StochRSI %D" value={selected.monthly_stoch_d === undefined ? "—" : selected.monthly_stoch_d.toFixed(1)} sub={selected.previous_monthly_stoch_d === undefined ? "Current month" : `${monthlyTrendLabel} vs prior month (${selected.previous_monthly_stoch_d.toFixed(1)})`} tone={monthlyTrend} />
   </div>;
@@ -2608,7 +2609,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
   const stochHighLine = showScreenerStoch ? findStochHigh(mergedDailyRows) : null;
   const dailyRows = lastTradingMonths(mergedDailyRows, chartMonths === 6 ? 126 : 63);
   const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
-  return <><ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} stochOnly /><div className="chart-shell">
+  return <><div className="chart-shell">
     <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} settings={settings} />
     <div className="chart-toolbar">
       <div>
@@ -2628,7 +2629,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
     <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} stochHighLine={timeframe === "daily" ? stochHighLine : null} abnormalSignal={abnormalSignal} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>
-    {stochHighLine && <div className="strategy-stat-grid"><StrategyStat label="StochHigh line" value={money(stochHighLine.price)} sub={`${stochHighLine.date} · ${pct2(stochHighLine.distancePct)} from line`} tone={stochHighLine.qualifies ? "good" : "neutral"}/></div>}
+    <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} stochOnly stochHighLine={stochHighLine} />
     {seasonal && <div className="strategy-stat-grid"><StrategyStat label="Next 3M Seasonal Average" value={pct(selected.seasonal_avg_return ?? 0)} sub={`${selected.seasonal_window} · ${selected.seasonal_observations} completed years`} tone="good" /></div>}
     <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} />
   </>;
