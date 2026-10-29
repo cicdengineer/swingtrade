@@ -40,6 +40,7 @@ import EntrySizingTile from "./EntrySizingTile";
 import Nifty500MiniChart from "./Nifty500MiniChart";
 import { latestDailyStop, swingLowBeforeLatest } from "@/lib/entrySizing";
 import { findVolumeSellingSignal, type VolumeSellingSignal } from "@/lib/volumeSellingLogic";
+import { findStochHigh, type StochHighLine } from "@/lib/stochHigh";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
 
 type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings";
@@ -88,10 +89,10 @@ type EmaNoTouchFilters = { universe: "ALL" | UniverseName; minAverageDailyTraded
 type EmaNoTouchRow = { security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; swing_low_date: string; stop_loss: number; risk_pct: number; prior_advance_pct: number; ema_slope_pct: number; catchup_pct: number; base_range_pct: number; averageDailyTradedValue: number; reason: string; recent: DailyChartPoint[] };
 type EmaNoTouchResponse = { filters: EmaNoTouchFilters; evaluated: number; qualified: number; results: EmaNoTouchRow[]; generatedAt: string };
 type SeasonalStocksResponse = { month: number; window: WindowDef; evaluated: number; qualified: number; results: ThirtyInThirtyRow[]; generatedAt: string; needsBuild?: boolean };
-type ScreenerSource = "30 in 30" | "Qullamaggie" | "10 EMA Catchup" | "StochRSI" | "Seasonal Stocks" | "SellingClimax" | "MStochRSI80";
+type ScreenerSource = "30 in 30" | "Qullamaggie" | "10 EMA Catchup" | "StochRSI" | "StochHigh" | "Seasonal Stocks" | "SellingClimax" | "MStochRSI80";
 type ScreenerMembership = Record<string, ScreenerSource[]>;
-const screenerSources: ScreenerSource[] = ["30 in 30", "Qullamaggie", "10 EMA Catchup", "StochRSI", "Seasonal Stocks", "SellingClimax", "MStochRSI80"];
-const screenerSourceClasses: Record<ScreenerSource, string> = { "30 in 30": "thirty", "Qullamaggie": "qullamaggie", "10 EMA Catchup": "ema", "StochRSI": "stoch", "Seasonal Stocks": "seasonal", "SellingClimax": "selling", "MStochRSI80": "monthly-stoch" };
+const screenerSources: ScreenerSource[] = ["30 in 30", "Qullamaggie", "10 EMA Catchup", "StochRSI", "StochHigh", "Seasonal Stocks", "SellingClimax", "MStochRSI80"];
+const screenerSourceClasses: Record<ScreenerSource, string> = { "30 in 30": "thirty", "Qullamaggie": "qullamaggie", "10 EMA Catchup": "ema", "StochRSI": "stoch", "StochHigh": "stoch-high", "Seasonal Stocks": "seasonal", "SellingClimax": "selling", "MStochRSI80": "monthly-stoch" };
 type StochRsiFilters = { universe: "ALL" | UniverseName; rsiLength: number; stochLength: number; smoothK: number; smoothD: number; upperThreshold: number; lowerThreshold: number; minWeeklyCandles: number; showAll: boolean };
 type StochRsiSortKey = "entry" | "symbol" | "setup" | "daily_d" | "weekly_d" | "signal_high" | "distance_signal" | "lowest" | "swing_low_pct" | "today_return" | "falling_trend";
 type StochRsiRecentPoint = DailyChartPoint & { daily_stoch_d?: number; weekly_stoch_d?: number; setup_type?: "GREEN_SETUP" | "BLUE_SETUP"; entry_signal?: "GREEN_ENTRY" | "BLUE_ENTRY" | "NONE"; new_lowest_candle?: boolean; lowest_price_in_zone?: number };
@@ -2602,6 +2603,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
   const liveDailyStochD = liveStochValues?.at(-1);
   const livePreviousDailyStochD = mergedDailyRows.at(-2)?.daily_stoch_d ?? liveStochValues?.at(-2);
   if (liveDailyStochD !== undefined) mergedDailyRows[mergedDailyRows.length - 1] = { ...latestDailyRow!, daily_stoch_d: liveDailyStochD };
+  const stochHighLine = showScreenerStoch ? findStochHigh(mergedDailyRows) : null;
   const dailyRows = lastTradingMonths(mergedDailyRows, chartMonths === 6 ? 126 : 63);
   const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
   return <><div className="chart-shell">
@@ -2621,9 +2623,10 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
         </div>
       </div>
     </div>
-    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} abnormalSignal={abnormalSignal} />
+    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} stochHighLine={timeframe === "daily" ? stochHighLine : null} abnormalSignal={abnormalSignal} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>
+    {stochHighLine && <div className="strategy-stat-grid"><StrategyStat label="StochHigh line" value={money(stochHighLine.price)} sub={`${stochHighLine.date} · ${pct2(stochHighLine.distancePct)} from line`} tone={stochHighLine.qualifies ? "good" : "neutral"}/><StrategyStat label="Daily StochRSI %D" value={stochHighLine.dailyD.toFixed(1)} sub={stochHighLine.qualifies ? "StochHigh match" : "Watching line"} tone={stochHighLine.qualifies ? "good" : "neutral"}/></div>}
     {seasonal && <div className="strategy-stat-grid"><StrategyStat label="Next 3M Seasonal Average" value={pct(selected.seasonal_avg_return ?? 0)} sub={`${selected.seasonal_window} · ${selected.seasonal_observations} completed years`} tone="good" /></div>}
     <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} />
   </>;
@@ -2660,7 +2663,8 @@ function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedS
         getSeasonal(),
         getSelling(),
       ] as const);
-      const issues = results.flatMap((result, index) => result.status === "rejected" ? [`${screenerSources[index]}: ${result.reason instanceof Error ? result.reason.message : "unavailable"}`] : []);
+      const scanNames = ["30 in 30", "Qullamaggie", "10 EMA Catchup", "StochRSI", "Seasonal Stocks", "SellingClimax"];
+      const issues = results.flatMap((result, index) => result.status === "rejected" ? [`${scanNames[index]}: ${result.reason instanceof Error ? result.reason.message : "unavailable"}`] : []);
       const thirty = results[0].status === "fulfilled" ? results[0].value : null;
       if (!thirty) throw new Error(issues[0] ?? "30 in 30 chart data unavailable");
       const seasonal = results[4].status === "fulfilled" ? results[4].value : null;
@@ -2668,6 +2672,7 @@ function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedS
       const members: ScreenerMembership = {};
       const add = (id: string, name: ScreenerSource) => { if (!members[id]) members[id] = []; if (!members[id].includes(name)) members[id].push(name); };
       thirty.results.filter(row => row.qualifies).forEach(row => add(row.security_id, "30 in 30"));
+      thirty.results.filter(row => findStochHigh(row.recent)?.qualifies).forEach(row => add(row.security_id, "StochHigh"));
       if (results[1].status === "fulfilled") results[1].value.results.filter(row => row.qualifies).forEach(row => add(row.security_id, "Qullamaggie"));
       if (results[2].status === "fulfilled") results[2].value.results.forEach(row => add(row.security_id, "10 EMA Catchup"));
       if (results[3].status === "fulfilled") results[3].value.results.filter(row => row.qualifies).forEach(row => add(row.security_id, "StochRSI"));
@@ -2704,6 +2709,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: seasonal ? "seasonal_avg" : "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [cleanTrendOnly, setCleanTrendOnly] = useState(false);
+  const [stochHighOnly, setStochHighOnly] = useState(false);
   const [showTileEma10, setShowTileEma10] = useState(true);
   const [tileLimit, setTileLimit] = useState(9999);
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
@@ -2901,8 +2907,9 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     });
   }, [chartMonths, liveTicks, sellingSignals, sessionDate, sort]);
   const matchesSelectedTrend = useCallback((row: ThirtyInThirtyRow) => !cleanTrendOnly || matchesCleanTrend(row.recent, chartMonths === 6 ? 126 : 63), [chartMonths, cleanTrendOnly]);
-  const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (seasonal || matchesSelectedTrend(row)))), [liveRows, liveTicks, filters, sortRows, qMode, seasonal, matchesSelectedTrend]);
-  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const requiresStochHigh = stochHighOnly || (combined && source === "StochHigh");
+  const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (seasonal || matchesSelectedTrend(row)))), [liveRows, liveTicks, filters, requiresStochHigh, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, requiresStochHigh, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
   const visibleRows = useMemo(() => {
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
@@ -2959,18 +2966,18 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <div>
         <p className="eyebrow">{combined ? "Screener" : qMode ? "Qullamaggie watchlist" : seasonal ? "Seasonal Stocks" : "30 in 30 Screener"}</p>
         <h2>{combined ? "All entry watchlists in one view" : qMode ? "Resistance setups in 30 in 30" : seasonal ? "3-month seasonal watchlist" : "30% moves in any 30 sessions"}</h2>
-        <small>{combined ? "30 in 30, Qullamaggie, 10 EMA Catchup, StochRSI, Seasonal Stocks, SellingClimax and MStochRSI80. One tile per stock, with common chart, sizing, filters and sorting." : qMode ? "The stocks with confirmed Qullamaggie resistance, shown with 30 in 30 charts and sizing. Their inclusion does not mean they passed the 30 in 30 scan." : seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
+        <small>{combined ? "30 in 30, Qullamaggie, 10 EMA Catchup, StochRSI, StochHigh, Seasonal Stocks, SellingClimax and MStochRSI80. One tile per stock, with common chart, sizing, filters and sorting." : qMode ? "The stocks with confirmed Qullamaggie resistance, shown with 30 in 30 charts and sizing. Their inclusion does not mean they passed the 30 in 30 scan." : seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>
       </div>
       <div className="thirty-hero-actions">
         {combined && <Nifty500MiniChart />}
         <div className="refresh-status"><span className={freshPriceCount && isNseSessionOpen() ? "ready" : "pending"} /><b>{priceStatus}</b><small>{freshPriceCount} live · {intradayPriceCount} intraday · {visibleRows.length} shown</small></div>
         <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{combined ? loading ? "Scanning…" : "Refresh All" : qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button>}
-        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
+        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setStochHighOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
       </div>
     </div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
-      {combined ? <><label>Watchlist<select value={source} onChange={event => { setSelected(null); const nextSource = event.target.value as ScreenerSource | "All watchlists"; setSource?.(nextSource); if (nextSource === "MStochRSI80") setFilters({ ...filters, upTodayOnly: false, stochBelow80Only: false }); }}><option value="All watchlists">All watchlists</option>{screenerSources.map(name => <option key={name} value={name}>{name}</option>)}</select></label><label>Seasonal Month<select value={month} onChange={event => setMonth?.(Number(event.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name}</option>)}</select></label></> : !seasonal && <label>Watchlist<select value={watchlistMode} onChange={event => { setSelected(null); setWatchlistMode(event.target.value as "thirty" | "qullamaggie"); }}><option value="thirty">30 in 30 results</option><option value="qullamaggie">Qullamaggie resistance</option></select></label>}
+      {combined ? <><label>Watchlist<select value={source} onChange={event => { setSelected(null); const nextSource = event.target.value as ScreenerSource | "All watchlists"; setSource?.(nextSource); if (nextSource === "MStochRSI80") setFilters({ ...filters, upTodayOnly: false, stochBelow80Only: false }); else if (nextSource === "StochHigh") setFilters({ ...filters, upTodayOnly: false, stochBelow80Only: true }); }}><option value="All watchlists">All watchlists</option>{screenerSources.map(name => <option key={name} value={name}>{name}</option>)}</select></label><label>Seasonal Month<select value={month} onChange={event => setMonth?.(Number(event.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name}</option>)}</select></label></> : !seasonal && <label>Watchlist<select value={watchlistMode} onChange={event => { setSelected(null); setWatchlistMode(event.target.value as "thirty" | "qullamaggie"); }}><option value="thirty">30 in 30 results</option><option value="qullamaggie">Qullamaggie resistance</option></select></label>}
       {seasonal ? <label>Universe · Month<select value={month} disabled={loading} onChange={(e) => setMonth?.(Number(e.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name} → {["Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb"][index]}</option>)}</select></label> : <><label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as ThirtyInThirtyFilters["universe"] })}><option value="ALL">Nifty 500</option></select></label><label>Lookback<input className="plain-input" type="number" value={filters.lookbackDays} onChange={(e) => setNumber("lookbackDays", Number(e.target.value))}/></label><label>Window<input className="plain-input" type="number" value={filters.windowDays} onChange={(e) => setNumber("windowDays", Number(e.target.value))}/></label><label>Return %<input className="plain-input" type="number" value={filters.minReturnPct} onChange={(e) => setNumber("minReturnPct", Number(e.target.value))}/></label></>}
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
@@ -2981,6 +2988,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       {!seasonal && <label title={`Show clean up and down trends on the selected ${chartMonths}M chart`}><input type="checkbox" checked={cleanTrendOnly} onChange={(e) => setCleanTrendOnly(e.target.checked)}/><span>Clean {chartMonths}M Trend</span></label>}
       <label><input type="checkbox" checked={filters.upTodayOnly} onChange={(e) => setFilters({ ...filters, upTodayOnly: e.target.checked })}/><span>Up</span></label>
       <label title="Daily StochRSI %D below 80"><input type="checkbox" checked={filters.stochBelow80Only} onChange={(e) => setFilters({ ...filters, stochBelow80Only: e.target.checked })}/><span>Stoch&lt;80</span></label>
+      {combined && <label title="Daily %D below 80; price within 5% below or above the highest high of the latest %D > 80 run"><input type="checkbox" checked={stochHighOnly} onChange={(e) => { setStochHighOnly(e.target.checked); if (e.target.checked) setFilters({ ...filters, upTodayOnly: false, stochBelow80Only: true }); }}/><span>StochHigh</span></label>}
       <label title="Daily and monthly StochRSI %D are both rising versus their prior period"><input type="checkbox" checked={filters.stochRisingOnly} onChange={(e) => setFilters({ ...filters, stochRisingOnly: e.target.checked })}/><span>StochRising</span></label>
       <label><input type="checkbox" checked={filters.earlyVolumeOnly} onChange={(e) => setFilters({ ...filters, earlyVolumeOnly: e.target.checked })}/><span>Early Vol</span></label>
       <label><input type="checkbox" checked={filters.highVolumeOnly} onChange={(e) => setFilters({ ...filters, highVolumeOnly: e.target.checked })}/><span>High Volume</span></label>
@@ -3565,7 +3573,7 @@ function StochDPanel({ values, width, label }: { values: Array<number | undefine
   </svg></div>;
 }
 
-function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, abnormalSignal }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
+function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, abnormalSignal }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -3579,8 +3587,8 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   const calculatedEma = emaValues(closes, emaPeriod);
   const chartEmaValues = chartRows.map((row, index) => row[emaKey] ?? calculatedEma[index]);
   const visibleEmaValues = chartEmaValues.filter((value): value is number => value !== undefined);
-  const priceMin = Math.min(...lows, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []));
-  const priceMax = Math.max(...highs, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []));
+  const priceMin = Math.min(...lows, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []));
+  const priceMax = Math.max(...highs, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []));
   const candleSlot = width / chartRows.length;
   const bodyWidth = Math.max(3, Math.min(8, candleSlot * 0.48));
   const maxVolume = Math.max(...chartRows.map((row) => row.volume));
@@ -3595,6 +3603,8 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
   const highCandleY = highCandle && highCandleIndex >= 0 ? scaleValue(highCandle.high, priceMin, priceMax, priceHeight, 8) : undefined;
   const abnormalIndex = abnormalSignal && timeframe === "daily" ? chartRows.findIndex(row => row.trade_date === abnormalSignal.trade_date) : -1;
   const abnormalY = abnormalSignal && timeframe === "daily" ? scaleValue(abnormalSignal.high, priceMin, priceMax, priceHeight, 8) : undefined;
+  const stochHighY = stochHighLine && timeframe === "daily" ? scaleValue(stochHighLine.price, priceMin, priceMax, priceHeight, 8) : undefined;
+  const stochHighIndex = stochHighLine ? chartRows.findIndex(row => row.trade_date === stochHighLine.date) : -1;
   const stopY = stopLevel !== undefined && highCandleIndex >= 0 ? scaleValue(stopLevel, priceMin, priceMax, priceHeight, 8) : undefined;
   const latestIndex = chartRows.length - 1;
   const latestReclaimMarker = showLatestEmaReclaimMarker && latestIndex > 0 && chartEmaValues[latestIndex] !== undefined && chartEmaValues[latestIndex - 1] !== undefined && chartRows[latestIndex - 1].close < chartEmaValues[latestIndex - 1]! && chartRows[latestIndex].close > chartEmaValues[latestIndex]!
@@ -3606,11 +3616,12 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
     }
     : null;
   return <div className={`clean-chart ${referenceStyle ? "thirty-reference-chart" : ""}`}>
-    {!referenceStyle && <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}{highCandleY !== undefined && <span><i className="legend-high-candle" />Entry above {money(highCandle!.high)}</span>}{stopY !== undefined && <span><i className="legend-stop-level" />Signal EMA SL {money(stopLevel!)}</span>}<span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>}
+    {!referenceStyle && <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}{highCandleY !== undefined && <span><i className="legend-high-candle" />Entry above {money(highCandle!.high)}</span>}{stopY !== undefined && <span><i className="legend-stop-level" />Signal EMA SL {money(stopLevel!)}</span>}{stochHighLine && <span><i className="legend-stoch-high" />StochHigh {money(stochHighLine.price)}</span>}<span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>}
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart`}>
       {swingLowY !== undefined && <line className="swing-low-line" x1={swingLowIndex * candleSlot + candleSlot / 2} x2={width} y1={swingLowY} y2={swingLowY}><title>{`Swing low ${money(swingLowPoint!.low)} on ${swingLowPoint!.trade_date}`}</title></line>}
       {highCandleY !== undefined && <line className="high-candle-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={highCandleY} y2={highCandleY}><title>{`High candle ${money(highCandle!.high)} on ${highCandle!.date}`}</title></line>}
       {abnormalY !== undefined && <g><line className="abnormal-volume-line" x1={abnormalIndex < 0 ? 0 : abnormalIndex * candleSlot + candleSlot / 2} x2={width} y1={abnormalY} y2={abnormalY}><title>{`Latest abnormal-volume candle ${abnormalSignal!.trade_date} high ${money(abnormalSignal!.high)}`}</title></line><text className="abnormal-volume-label" x={width - 4} y={Math.max(12, abnormalY - 4)} textAnchor="end">{abnormalSignal!.high.toFixed(2)}</text></g>}
+      {stochHighY !== undefined && <g><line className="stoch-high-line" x1={stochHighIndex < 0 ? 0 : stochHighIndex * candleSlot + candleSlot / 2} x2={width} y1={stochHighY} y2={stochHighY}><title>{`StochHigh ${money(stochHighLine!.price)} from ${stochHighLine!.date}`}</title></line><text className="stoch-high-label" x={width - 4} y={Math.max(12, stochHighY - 4)} textAnchor="end">{stochHighLine!.price.toFixed(2)}</text></g>}
       {stopY !== undefined && <line className="signal-stop-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={stopY} y2={stopY}><title>{`Signal candle 10 EMA stop loss ${money(stopLevel!)}`}</title></line>}
       {chartRows.map((row, index) => {
         const x = index * candleSlot + candleSlot / 2;
