@@ -115,9 +115,7 @@
 .combined-screener-page .tile-stoch-high-line{stroke:#0a9a60;stroke-width:2;stroke-dasharray:5 3;vector-effect:non-scaling-stroke}
 .combined-screener-page .tile-stoch-high-label{fill:#087f4d;stroke:var(--panel);stroke-width:2px;paint-order:stroke;font:800 8px "DM Mono";pointer-events:none}
 .combined-screener-page .tile-live-price-dot{fill:#087f4d;stroke:var(--panel);stroke-width:1.5;vector-effect:non-scaling-stroke}
-.combined-screener-page .screenshot-tile.near-stoch-high{animation:stochHighTileFlash 1.25s ease-in-out infinite}
-@keyframes stochHighTileFlash{0%,100%{border-color:#0a9a60;box-shadow:0 0 0 1px #0a9a6033}50%{border-color:#00b873;box-shadow:0 0 0 3px #00b87377,0 0 18px #00b87366}}
-@media(prefers-reduced-motion:reduce){.combined-screener-page .screenshot-tile.near-stoch-high{animation:none;border-color:#0a9a60;box-shadow:0 0 0 2px #0a9a6066}}
+.combined-screener-page .screenshot-tile.near-stoch-high{border-color:#075b3e;box-shadow:0 0 0 2px #075b3e}
 .thirty-in-thirty-screener-page .abnormal-volume-label{fill:#265ee8;font:700 10px "DM Mono"}
 .screener-tag-selling{background:#e1e8ff;border-color:#9fb3f7!important;color:#2145af}
 .screener-tag-monthly-stoch{background:#f0e4f2;border-color:#c9a8d1!important;color:#6b3976}
