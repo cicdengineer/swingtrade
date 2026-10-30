@@ -33,7 +33,7 @@ export function findSwingHigh(rows: SwingHighPoint[], ltp?: number): SwingHighSi
   const zone = zones.at(-1);
   if (!latest || !zone || !Number.isFinite(latest.daily_stoch_d)) return null;
   const previous = zones.at(-2);
-  const activeComparison = Boolean(previous && latest.daily_stoch_d! <= 50 && zones.length > 1);
+  const activeComparison = Boolean(previous && latest.daily_stoch_d! <= 80 && zones.length > 1);
   const reference = activeComparison ? previous! : zone;
   const price = ltp ?? latest.close;
   return {

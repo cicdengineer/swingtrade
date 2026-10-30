@@ -20,10 +20,10 @@ assert.equal(findSwingHigh(next)?.price, 96, "the prior zone line remains fixed 
 assert.equal(findSwingHigh(next)?.zoneLow, 101, "the new zone tracks its lowest candle low");
 assert.equal(findSwingHigh(next)?.qualifies, true, "a higher oversold zone qualifies");
 assert.equal(findSwingHigh(next, 96)?.qualifies, false, "price must stay strictly above the line");
-assert.equal(findSwingHigh([...next, point("6", 105, 50)])?.qualifies, true, "%D at 50 remains visible");
-assert.equal(findSwingHigh([...next, point("6", 105, 31)])?.qualifies, true, "the setup stays visible above the old 30 cutoff");
-assert.equal(findSwingHigh([...next, point("6", 105, 50.01)])?.qualifies, false, "%D above 50 ends the setup");
-assert.equal(findSwingHigh([...next, point("6", 105, 51)])?.price, 101, "the most recent zone becomes the new red line");
+assert.equal(findSwingHigh([...next, point("6", 105, 80)])?.qualifies, true, "%D at 80 remains visible");
+assert.equal(findSwingHigh([...next, point("6", 105, 51)])?.qualifies, true, "the setup stays visible above the old 50 cutoff");
+assert.equal(findSwingHigh([...next, point("6", 105, 80.01)])?.qualifies, false, "%D above 80 ends the setup");
+assert.equal(findSwingHigh([...next, point("6", 105, 81)])?.price, 101, "the most recent zone becomes the new red line");
 assert.equal(findSwingHigh([...prior, point("4", 94, 19)])?.qualifies, false, "a lower next zone fails");
 assert.equal(findSwingHigh([...next, point("6", 106, 32), point("7", 105, 18)])?.price, 101, "a third zone compares against the immediately preceding zone");
 
