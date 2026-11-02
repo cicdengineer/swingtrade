@@ -267,6 +267,9 @@ const defaultCombinedScreenerFilters: ThirtyInThirtyFilters = {
   ...defaultThirtyInThirtyFilters,
   upTodayOnly: true,
   stochBelow80Only: true,
+  stochRisingOnly: true,
+  highVolumeOnly: true,
+  above10EmaOnly: true,
 };
 const defaultEmaNoTouchFilters: EmaNoTouchFilters = { universe: "ALL", minAverageDailyTradedValue: 0, baseDays: 5, minPriorAdvancePct: 8, maxBaseRangePct: 7, maxDistanceFromEmaPct: 4, minCatchupPct: 0.5 };
 const defaultStochRsiFilters: StochRsiFilters = {
@@ -2723,7 +2726,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: seasonal ? "seasonal_avg" : "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [cleanTrendOnly, setCleanTrendOnly] = useState(false);
-  const [aboveRedOnly, setAboveRedOnly] = useState(false);
+  const [aboveRedOnly, setAboveRedOnly] = useState(combined === true);
   const [stochHighOnly, setStochHighOnly] = useState(false);
   const [showTileEma10, setShowTileEma10] = useState(true);
   const [tileLimit, setTileLimit] = useState(9999);
@@ -2999,7 +3002,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <div className="refresh-status"><span className={freshPriceCount && isNseSessionOpen() ? "ready" : "pending"} /><b>{priceStatus}</b><small>{freshPriceCount} live · {intradayPriceCount} intraday · {visibleRows.length} shown</small></div>
         <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{combined ? loading ? "Scanning…" : "Refresh All" : qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button>}
-        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setAboveRedOnly(false); setStochHighOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
+        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setAboveRedOnly(combined === true); setStochHighOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
       </div>
     </div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
