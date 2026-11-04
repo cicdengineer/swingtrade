@@ -2527,9 +2527,11 @@ function ThirtyInThirtyRiskTiles({ selected, activeRows, settings }: { selected:
   const entry = selected.current_close;
   const dailyStop = latestDailyStop(activeRows.length ? activeRows : selected.recent);
   const swingStop = thirtyInThirtySwingLowPoint(activeRows.length ? activeRows : selected.recent)?.low;
-  return <div className="entry-sizing-grid">
+  const emaStop = activeRows.at(-1)?.ema10 ?? selected.ema10;
+  return <div className="entry-sizing-grid three-sizing-tiles">
     <EntrySizingTile title="Daily Low Entry" entry={entry} stop={dailyStop} settings={settings} />
     <EntrySizingTile title="Swing Low Sizing" entry={entry} stop={swingStop} settings={settings} />
+    <EntrySizingTile title="10EMA Sizing" entry={entry} stop={emaStop} settings={settings} />
   </div>;
 }
 
