@@ -108,9 +108,12 @@ Before running a full universe refresh, test a few known symbols from Stock Sear
 
 ## Universe sources
 
-This implementation intentionally uses the current constituent universe only:
+The stored universes use current constituents:
 
 - CNX500: Nifty 500 current constituents from `https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv`
+- NIFTYSC500: Nifty Smallcap 500 current constituents from `https://www.niftyindices.com/IndexConstituent/ind_NiftySmallcap500_list.csv`
+
+Data Status shows a separate refresh and download summary for each universe. Refreshing Nifty Smallcap 500 stores its constituents and Dhan OHLCV without replacing Nifty 500. The Screener universe selector offers Nifty 500, Nifty Smallcap 500, and ALL; ALL scans the union of the stored sets.
 - Dhan instrument master: `https://images.dhan.co/api-data/api-scrip-master-detailed.csv`
 
 Nifty 500 includes the Nifty 100, Nifty Midcap 150, and Nifty Smallcap 250 segments. On the first refresh after this change, the previous Midcap and Smallcap memberships are retired while existing price history remains available for matching Nifty 500 securities.

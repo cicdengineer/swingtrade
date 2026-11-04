@@ -8,7 +8,7 @@ export async function GET() {
   try {
     let db = await readDatabase();
     if (!db.universe_members.some((member) => member.universe_name === "CNX500")) {
-      await refreshUniverseData();
+      await refreshUniverseData(false, "CNX500");
       db = await readDatabase();
     }
     return NextResponse.json(db.universe_members.filter((member) => member.universe_name === "CNX500"));

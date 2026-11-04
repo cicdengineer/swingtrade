@@ -120,9 +120,9 @@ function normalizeDatabase(raw: Partial<SeasonalityDatabase> | null | undefined)
   }
   db.daily_prices = [...pricesBySession.values()];
   // Keep historical prices while retiring the old index memberships.
-  db.universe_members = db.universe_members.filter((member) => member.universe_name === "CNX500");
-  db.seasonal_observations = db.seasonal_observations.filter((row) => row.universe_name === "CNX500");
-  db.seasonal_statistics = db.seasonal_statistics.filter((row) => row.universe_name === "CNX500");
+  db.universe_members = db.universe_members.filter((member) => member.universe_name === "CNX500" || member.universe_name === "NIFTYSC500");
+  db.seasonal_observations = db.seasonal_observations.filter((row) => row.universe_name === "CNX500" || row.universe_name === "NIFTYSC500");
+  db.seasonal_statistics = db.seasonal_statistics.filter((row) => row.universe_name === "CNX500" || row.universe_name === "NIFTYSC500");
   return db;
 }
 

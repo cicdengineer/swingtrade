@@ -34,6 +34,10 @@ const universeSources: Record<UniverseName, { label: string; url: string }> = {
     label: "Nifty 500 current constituents (NSE:CNX500)",
     url: "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv",
   },
+  NIFTYSC500: {
+    label: "Nifty Smallcap 500 current constituents (NSE:NIFTYSC500)",
+    url: "https://www.niftyindices.com/IndexConstituent/ind_NiftySmallcap500_list.csv",
+  },
 };
 const cacheRoot = path.join(process.cwd(), ".data", "market-data-cache");
 function dateInTimeZone(date: Date, timeZone: string) {
@@ -216,13 +220,15 @@ export async function getSecurityMaster(force = false): Promise<InstrumentRecord
     .filter((row) => row.security_id && row.status === "ACTIVE");
 }
 
-async function getNifty500Index(): Promise<Security> {
+async function getIndexSecurity(universeName: UniverseName): Promise<Security> {
+  const symbol = universeName === "CNX500" ? nifty500Symbol : "NIFTY SMALLCAP 500";
+  const ticker = universeName === "CNX500" ? "NIFTY500" : "NIFTYSC500";
   const master = await getSecurityMaster();
   const index = master.find((row) => row.exchange_segment === "IDX_I" &&
     [row.symbol, row.trading_symbol, row.company_name].some((name) =>
-      name.toUpperCase().replace(/[^A-Z0-9]/g, "") === "NIFTY500"));
-  if (!index) throw new Error("Nifty 500 index is missing from the Dhan instrument master.");
-  return { securityId: index.security_id, symbol: nifty500Symbol, name: nifty500Symbol, exchange: "NSE", segment: "IDX_I", instrument: "INDEX" };
+      [symbol.replace(/[^A-Z0-9]/g, ""), ticker].includes(name.toUpperCase().replace(/[^A-Z0-9]/g, ""))));
+  if (!index) throw new Error(`${symbol} index is missing from the Dhan instrument master.`);
+  return { securityId: index.security_id, symbol, name: symbol, exchange: "NSE", segment: "IDX_I", instrument: "INDEX" };
 }
 
 export async function getNifty500Snapshot() {
@@ -262,7 +268,7 @@ export async function getNifty500Snapshot() {
 }
 
 export async function getCurrentUniverse(universeName?: UniverseName, force = false): Promise<UniverseMemberRecord[]> {
-  const names: UniverseName[] = universeName ? [universeName] : ["CNX500"];
+  const names: UniverseName[] = universeName ? [universeName] : ["CNX500", "NIFTYSC500"];
   const master = await getSecurityMaster(force);
   const bySymbol = new Map(master.map((item) => [item.symbol.toUpperCase(), item]));
   const verifiedAt = new Date().toISOString();
@@ -293,11 +299,15 @@ export async function getCurrentUniverse(universeName?: UniverseName, force = fa
   return members;
 }
 
-export async function refreshUniverseData(force = false) {
+export async function refreshUniverseData(force = false, universeName?: UniverseName) {
   const db = await readDatabase();
-  const members = await getCurrentUniverse(undefined, force);
-  if (members.length < 400) throw new Error(`Nifty 500 constituent download returned only ${members.length} stocks`);
-  db.universe_members = members;
+  const members = await getCurrentUniverse(universeName, force);
+  for (const name of universeName ? [universeName] : ["CNX500", "NIFTYSC500"] as UniverseName[]) {
+    const count = members.filter((member) => member.universe_name === name).length;
+    if (count < 400) throw new Error(`${universeSources[name].label} download returned only ${count} stocks`);
+  }
+  const refreshed = new Set(members.map((member) => member.universe_name));
+  db.universe_members = [...db.universe_members.filter((member) => !refreshed.has(member.universe_name)), ...members];
   const masterBySecurity = new Map((await getSecurityMaster(false)).map((instrument) => [instrument.security_id, instrument]));
   for (const member of members) {
     if (member.security_id) {
@@ -986,39 +996,44 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
 
     if (!retryFailures) {
       const currentDb = await readDatabase();
-      const hasUniverse = currentDb.universe_members.some((member) => !universeName || member.universe_name === universeName);
-      if (forceUniverse || !hasUniverse) await refreshUniverseData(forceUniverse);
+      const required = universeName ? [universeName] : ["CNX500", "NIFTYSC500"] as UniverseName[];
+      const missing = required.filter((name) => !currentDb.universe_members.some((member) => member.universe_name === name));
+      if (forceUniverse || missing.length) await refreshUniverseData(forceUniverse, forceUniverse ? universeName : missing.length === 1 ? missing[0] : undefined);
     }
 
     if (!retryFailures) {
-      await updateJob(jobId, (job) => { job.current_status = "Refreshing Nifty 500 index"; });
-      try {
-        const index = await getNifty500Index();
-        const latest = await readDatabase();
-        const storedIndexId = `IDX_I:${index.securityId}`;
-        const latestDate = latestPriceDate(latest, storedIndexId);
-        const prepared = await fetchInstrumentRefresh(index, latestDate);
-        if (prepared.result.candles.length || prepared.provisionalAggregate?.candle) {
-          await mutateDataStore(async () => {
-            const db = await readDatabase();
-            applyInstrumentRefresh(db, {
-              ...prepared,
-              result: { ...prepared.result, security: { ...index, securityId: storedIndexId } },
+      for (const indexName of universeName ? [universeName] : ["CNX500", "NIFTYSC500"] as UniverseName[]) {
+        const label = indexName === "CNX500" ? "Nifty 500" : "NIFTY SMALLCAP 500";
+        await updateJob(jobId, (job) => { job.current_status = `Refreshing ${label} index`; });
+        try {
+          const index = await getIndexSecurity(indexName);
+          const latest = await readDatabase();
+          const storedIndexId = `IDX_I:${index.securityId}`;
+          const latestDate = latestPriceDate(latest, storedIndexId);
+          const prepared = await fetchInstrumentRefresh(index, latestDate);
+          if (prepared.result.candles.length || prepared.provisionalAggregate?.candle) {
+            await mutateDataStore(async () => {
+              const db = await readDatabase();
+              applyInstrumentRefresh(db, {
+                ...prepared,
+                result: { ...prepared.result, security: { ...index, securityId: storedIndexId } },
+              });
+              await writeMarketDataBatch(db, [storedIndexId]);
             });
-            await writeMarketDataBatch(db, [storedIndexId]);
+          }
+        } catch (error) {
+          await updateJob(jobId, (job) => {
+            job.errors.push(`${label} index: ${error instanceof Error ? error.message : String(error)}`);
           });
         }
-      } catch (error) {
-        await updateJob(jobId, (job) => {
-          job.errors.push(`Nifty 500 index: ${error instanceof Error ? error.message : String(error)}`);
-        });
       }
     }
 
     const db = await readDatabase();
-    const members = retryFailures
+    const selectedMembers = retryFailures
       ? db.universe_members.filter((member) => db.download_failures.some((failure) => failure.status === "open" && failure.security_id === member.security_id))
       : db.universe_members.filter((member) => !universeName || member.universe_name === universeName);
+    const members = [...new Map(selectedMembers.map((member) => [member.security_id || `${member.universe_name}:${member.symbol}`, member])).values()];
     await updateJob(jobId, (job) => {
       job.total = members.length;
       job.remaining = members.length;
@@ -1165,9 +1180,10 @@ export async function startHistoricalDataRefresh(universeName?: UniverseName, re
 export async function updateHistoricalData(universeName?: UniverseName, retryFailures = false) {
   await assertDhanProfileReady();
   const db = await readDatabase();
-  const members = retryFailures
+  const selectedMembers = retryFailures
     ? db.universe_members.filter((member) => db.download_failures.some((failure) => failure.status === "open" && failure.security_id === member.security_id))
     : db.universe_members.filter((member) => !universeName || member.universe_name === universeName);
+  const members = [...new Map(selectedMembers.map((member) => [member.security_id || `${member.universe_name}:${member.symbol}`, member])).values()];
   const job = startJob(universeName, members.length);
   job.trading_date = getLatestTradingSessionDate();
   db.data_download_jobs.unshift(job);
@@ -1235,7 +1251,7 @@ export async function getDataStatus() {
   const db = await readDatabase();
   const dhanProfile = await getDhanProfileStatus();
   const currentSecurityIds = new Set(db.universe_members.map((member) => member.security_id).filter(Boolean));
-  const summaries = (["CNX500"] as UniverseName[]).map((universeName) => {
+  const summaries = (["CNX500", "NIFTYSC500"] as UniverseName[]).map((universeName) => {
     const members = db.universe_members.filter((member) => member.universe_name === universeName);
     const securityIds = new Set(members.map((member) => member.security_id).filter(Boolean));
     const prices = db.daily_prices.filter((row) => securityIds.has(row.security_id));

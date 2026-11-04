@@ -288,11 +288,14 @@ export function analyzeStock(input: {
 async function calculateThirtyInThirtyScreener(filters: Partial<ThirtyInThirtyFilters> = {}) {
   const merged = { ...defaultThirtyInThirtyFilters, ...filters };
   const db = await readDatabase();
-  const members = db.universe_members.filter((member) =>
+  const eligibleMembers = db.universe_members.filter((member) =>
     member.is_current_constituent &&
     member.security_id &&
     (merged.universe === "ALL" || member.universe_name === merged.universe)
   );
+  const membersBySecurity = new Map<string, (typeof eligibleMembers)[number]>();
+  for (const member of eligibleMembers) if (!membersBySecurity.has(member.security_id)) membersBySecurity.set(member.security_id, member);
+  const members = [...membersBySecurity.values()];
   const pricesBySecurity = new Map<string, DailyPriceRecord[]>();
   for (const price of db.daily_prices) {
     const list = pricesBySecurity.get(price.security_id);
