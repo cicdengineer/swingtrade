@@ -37,6 +37,7 @@ import QullamaggieView from "./QullamaggieView";
 import VolumeSellingView from "./VolumeSellingView";
 import USADataView from "./USADataView";
 import EntrySizingTile from "./EntrySizingTile";
+import { isCurrentDayLowAbove10Ema } from "@/lib/dailyEmaLow";
 import Nifty500MiniChart from "./Nifty500MiniChart";
 import { latestDailyStop, swingLowBeforeLatest } from "@/lib/entrySizing";
 import { findVolumeSellingSignal, type VolumeSellingSignal } from "@/lib/volumeSellingLogic";
@@ -2404,6 +2405,7 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
   const [sort, setSort] = useState<"ema" | "risk" | "tightness" | "trend" | "value" | "symbol">("ema");
   const [direction, setDirection] = useState<"asc" | "desc">("asc");
   const [nearEmaOnly, setNearEmaOnly] = useState(false);
+  const [lowAbove10EmaOnly, setLowAbove10EmaOnly] = useState(false);
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [tileLimit, setTileLimit] = useState(80);
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
@@ -2450,7 +2452,13 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
   };
   const distance = (row: EmaNoTouchRow) => (price(row) / liveEma(row) - 1) * 100;
   const risk = (row: EmaNoTouchRow) => (price(row) - row.stop_loss) / price(row) * 100;
-  const rows = [...(data?.results ?? [])].filter((row) => distance(row) > 0 && distance(row) <= filters.maxDistanceFromEmaPct && price(row) > row.stop_loss && (!nearEmaOnly || distance(row) <= 2)).sort((a, b) => {
+  const todayLowAboveEma = (row: EmaNoTouchRow) => {
+    const tick = liveTicks[row.security_id];
+    return tick?.dayLow !== undefined && isCurrentSessionTick(tick)
+      ? tick.dayLow > liveEma(row)
+      : isCurrentDayLowAbove10Ema(row, liveTradeDate());
+  };
+  const rows = [...(data?.results ?? [])].filter((row) => distance(row) > 0 && distance(row) <= filters.maxDistanceFromEmaPct && price(row) > row.stop_loss && (!nearEmaOnly || distance(row) <= 2) && (!lowAbove10EmaOnly || todayLowAboveEma(row))).sort((a, b) => {
     const valueFor = (row: EmaNoTouchRow): number | string => sort === "ema" ? distance(row) : sort === "risk" ? risk(row) : sort === "tightness" ? row.base_range_pct : sort === "trend" ? -row.prior_advance_pct : sort === "value" ? -row.averageDailyTradedValue : row.symbol;
     const av = valueFor(a), bv = valueFor(b);
     const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
@@ -2475,7 +2483,7 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
       <label>Sort<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="ema">Nearest 10 EMA</option><option value="risk">Lowest swing risk</option><option value="tightness">Tightest base</option><option value="trend">Strongest prior move</option><option value="value">Traded value</option><option value="symbol">Symbol</option></select></label>
       <button className="secondary compact" onClick={() => setDirection((value) => value === "asc" ? "desc" : "asc")}>{direction === "asc" ? "Asc" : "Desc"}</button>
     </div>
-    <div className="thirty-in-thirty-switches"><label><input type="checkbox" checked={nearEmaOnly} onChange={(event) => setNearEmaOnly(event.target.checked)}/><span>Within 2% of 10 EMA</span></label></div>
+    <div className="thirty-in-thirty-switches"><label><input type="checkbox" checked={nearEmaOnly} onChange={(event) => setNearEmaOnly(event.target.checked)}/><span>Within 2% of 10 EMA</span></label><label title="Today's candle low must be strictly above today's 10 EMA; a touch does not qualify"><input type="checkbox" checked={lowAbove10EmaOnly} onChange={(event) => setLowAbove10EmaOnly(event.target.checked)}/><span>Low &gt; 10EMA Today</span></label></div>
     {data && <><div className="thirty-scoreboard"><div><span>Evaluated</span><b>{data.evaluated}</b></div><div><span>EMA catchups</span><b>{data.qualified}</b></div><div><span>Near 10 EMA</span><b>{data.results.filter((row) => distance(row) > 0 && distance(row) <= 2).length}</b></div><div><span>Shown</span><b>{shown.length} / {rows.length}</b></div></div>
       <section className="screenshot-tile-grid">{shown.length ? shown.map((row) => {
         const tick = liveTicks[row.security_id];
@@ -2728,6 +2736,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: seasonal ? "seasonal_avg" : "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const [cleanTrendOnly, setCleanTrendOnly] = useState(false);
+  const [lowAbove10EmaOnly, setLowAbove10EmaOnly] = useState(false);
   const [aboveRedOnly, setAboveRedOnly] = useState(combined === true);
   const [stochHighOnly, setStochHighOnly] = useState(false);
   const [showTileEma10, setShowTileEma10] = useState(true);
@@ -2944,8 +2953,8 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const matchesSelectedTrend = useCallback((row: ThirtyInThirtyRow) => !cleanTrendOnly || matchesCleanTrend(row.recent, chartMonths === 6 ? 126 : 63), [chartMonths, cleanTrendOnly]);
   const aboveRed = (row: ThirtyInThirtyRow) => isAboveSwingHighRed(row.recent, row.current_close);
   const requiresStochHigh = stochHighOnly || (combined && source === "StochHigh");
-  const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (seasonal || matchesSelectedTrend(row)))), [liveRows, liveTicks, filters, aboveRedOnly, requiresStochHigh, sortRows, qMode, seasonal, matchesSelectedTrend]);
-  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, aboveRedOnly, requiresStochHigh, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (!lowAbove10EmaOnly || isCurrentDayLowAbove10Ema(row, sessionDate)) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (seasonal || matchesSelectedTrend(row)))), [liveRows, liveTicks, filters, lowAbove10EmaOnly, sessionDate, aboveRedOnly, requiresStochHigh, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!lowAbove10EmaOnly || isCurrentDayLowAbove10Ema(row, sessionDate)) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, lowAbove10EmaOnly, sessionDate, aboveRedOnly, requiresStochHigh, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
   const visibleRows = useMemo(() => {
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
@@ -3009,7 +3018,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <div className="refresh-status"><span className={freshPriceCount && isNseSessionOpen() ? "ready" : "pending"} /><b>{priceStatus}</b><small>{freshPriceCount} live · {intradayPriceCount} intraday · {visibleRows.length} shown</small></div>
         <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{combined ? loading ? "Scanning…" : "Refresh All" : qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button>}
-        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setAboveRedOnly(combined === true); setStochHighOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
+        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setLowAbove10EmaOnly(false); setAboveRedOnly(combined === true); setStochHighOnly(false); setShowTileEma10(true); onReset(); }}>Reset</button>
       </div>
     </div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
@@ -3031,6 +3040,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label><input type="checkbox" checked={filters.highVolumeOnly} onChange={(e) => setFilters({ ...filters, highVolumeOnly: e.target.checked })}/><span>High Volume</span></label>
       {!seasonal && <label title={`At least one of the last ${RECENT_VOLUME_SESSIONS} completed sessions had volume ≥${ABNORMAL_VOLUME_RATIO}× its preceding ${VOLUME_BASELINE_SESSIONS}-session average`}><input type="checkbox" checked={filters.abnormalVolume10dOnly} onChange={(e) => setFilters({ ...filters, abnormalVolume10dOnly: e.target.checked })}/><span>Abnormal Vol 10D</span></label>}
       <label><input type="checkbox" checked={filters.above10EmaOnly} onChange={(e) => setFilters({ ...filters, above10EmaOnly: e.target.checked })}/><span>Above 10EMA</span></label>
+      <label title="Today's candle low must be strictly above today's 10 EMA; a touch does not qualify"><input type="checkbox" checked={lowAbove10EmaOnly} onChange={(e) => setLowAbove10EmaOnly(e.target.checked)}/><span>Low &gt; 10EMA Today</span></label>
       <label><input type="checkbox" checked={filters.above50EmaOnly} onChange={(e) => setFilters({ ...filters, above50EmaOnly: e.target.checked })}/><span>Above 50EMA</span></label>
       <label title="Strong Start: live day open is above previous close and below previous high"><input type="checkbox" checked={filters.strongStartOnly} onChange={(e) => setFilters({ ...filters, strongStartOnly: e.target.checked })}/><span>SS</span></label>
       <label title="Three consecutive red daily candles anywhere in the last six completed sessions"><input type="checkbox" checked={filters.threeRedCandleOnly} onChange={(e) => setFilters({ ...filters, threeRedCandleOnly: e.target.checked })}/><span>3Red Candle</span></label>
