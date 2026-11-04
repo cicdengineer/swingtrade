@@ -153,3 +153,7 @@
 .nifty500-mini-copy small{font:9px "DM Mono",monospace;color:var(--muted)}
 .nifty500-mini svg{width:120px;height:52px;overflow:visible}
 @media(max-width:900px){.combined-screener-page .thirty-hero-actions{flex-wrap:wrap}.nifty500-mini{min-width:220px}}
+.combined-screener-page .thirty-hero{flex-wrap:wrap}
+.combined-screener-page .thirty-hero-actions{flex-wrap:wrap;justify-content:flex-end}
+.index-mini-charts{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:700px){.index-mini-charts{width:100%}.index-mini-charts .nifty500-mini{flex:1 1 220px}}

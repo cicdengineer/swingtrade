@@ -63,6 +63,7 @@ const marketCloseMinutes = 15 * 60 + 30;
 const provisionalDataSource = "DHAN_INTRADAY_AGGREGATED" as const;
 const officialDataSource = "DHAN_DAILY" as const;
 const nifty500Symbol = "NIFTY 500";
+const niftySmallcap500Symbol = "NIFTY SMALLCAP 500";
 const fixedNseHolidayMonthDays = new Set(["01-26", "08-15", "10-02", "12-25"]);
 // NSE equity trading holidays published for 2026 (in addition to weekends).
 const nse2026Holidays = new Set([
@@ -221,7 +222,7 @@ export async function getSecurityMaster(force = false): Promise<InstrumentRecord
 }
 
 async function getIndexSecurity(universeName: UniverseName): Promise<Security> {
-  const symbol = universeName === "CNX500" ? nifty500Symbol : "NIFTY SMALLCAP 500";
+  const symbol = universeName === "CNX500" ? nifty500Symbol : niftySmallcap500Symbol;
   const ticker = universeName === "CNX500" ? "NIFTY500" : "NIFTYSC500";
   const master = await getSecurityMaster();
   const index = master.find((row) => row.exchange_segment === "IDX_I" &&
@@ -231,9 +232,10 @@ async function getIndexSecurity(universeName: UniverseName): Promise<Security> {
   return { securityId: index.security_id, symbol, name: symbol, exchange: "NSE", segment: "IDX_I", instrument: "INDEX" };
 }
 
-export async function getNifty500Snapshot() {
+export async function getIndexSnapshot(universeName: UniverseName) {
   const db = await readDatabase();
-  const index = db.instruments.find((row) => row.exchange_segment === "IDX_I" && row.symbol === nifty500Symbol);
+  const symbol = universeName === "CNX500" ? nifty500Symbol : niftySmallcap500Symbol;
+  const index = db.instruments.find((row) => row.exchange_segment === "IDX_I" && row.symbol === symbol);
   const stored = index ? db.daily_prices.filter((row) => row.security_id === index.security_id).sort((a, b) => a.trade_date.localeCompare(b.trade_date)).slice(-6) : [];
   let live: { date: string; open: number; high: number; low: number; close: number; previousClose: number } | null = null;
   const india = getIndiaNow();
@@ -252,7 +254,7 @@ export async function getNifty500Snapshot() {
         live = { date: getIndiaTradingDate(), open, high, low, close, previousClose };
       }
     } catch (error) {
-      console.warn("Nifty 500 live quote unavailable", error);
+      console.warn(`${symbol} live quote unavailable`, error);
     }
   }
   const candles = stored.map(({ trade_date, open, high, low, close }) => ({ date: trade_date, open, high, low, close }));
@@ -265,6 +267,10 @@ export async function getNifty500Snapshot() {
     live: Boolean(live),
     dataThrough: current?.date ?? null,
   };
+}
+
+export async function getNifty500Snapshot() {
+  return getIndexSnapshot("CNX500");
 }
 
 export async function getCurrentUniverse(universeName?: UniverseName, force = false): Promise<UniverseMemberRecord[]> {
@@ -1262,6 +1268,9 @@ export async function getDataStatus() {
     const latestRows = latestDate ? prices.filter((row) => row.trade_date === latestDate) : [];
     const provisionalRows = latestRows.filter((row) => row.is_provisional);
     const lastRefresh = members.map((member) => db.instruments.find((instrument) => instrument.security_id === member.security_id)?.last_updated_at).filter(Boolean).sort().at(-1);
+    const indexSymbol = universeName === "CNX500" ? nifty500Symbol : niftySmallcap500Symbol;
+    const index = db.instruments.find((instrument) => instrument.exchange_segment === "IDX_I" && instrument.symbol === indexSymbol);
+    const indexLatestDate = index?.data_end_date;
     return {
       universe_name: universeName,
       total_constituents: members.length,
@@ -1271,6 +1280,7 @@ export async function getDataStatus() {
       stocks_failed: failed.size,
       earliest_data_date: dates.at(0) ?? null,
       latest_data_date: latestDate,
+      index_latest_date: indexLatestDate ?? null,
       total_ohlcv_rows: prices.length,
       last_refresh: lastRefresh ?? null,
       historical_sessions: prices.length,

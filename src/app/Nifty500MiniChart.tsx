@@ -5,14 +5,16 @@ import { useEffect, useState } from "react";
 type Candle = { date: string; open: number; high: number; low: number; close: number };
 type Snapshot = { candles: Candle[]; changePct: number | null; live: boolean; dataThrough: string | null };
 
-export default function Nifty500MiniChart() {
+export default function Nifty500MiniChart({ universe = "CNX500" }: { universe?: "CNX500" | "NIFTYSC500" }) {
+  const smallcap = universe === "NIFTYSC500";
+  const label = smallcap ? "NIFTY SCP500" : "NIFTY 500";
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   useEffect(() => {
     let active = true;
     const load = async () => {
       if (document.visibilityState !== "visible") return;
       try {
-        const response = await fetch("/api/index/cnx500", { cache: "no-store" });
+        const response = await fetch(smallcap ? "/api/index/niftysc500" : "/api/index/cnx500", { cache: "no-store" });
         if (!response.ok) return;
         const next = await response.json() as Snapshot;
         if (active) setSnapshot(next);
@@ -21,7 +23,7 @@ export default function Nifty500MiniChart() {
     void load();
     const timer = window.setInterval(() => void load(), 30_000);
     return () => { active = false; window.clearInterval(timer); };
-  }, []);
+  }, [smallcap]);
 
   const candles = snapshot?.candles ?? [];
   const values = candles.flatMap((candle) => [candle.high, candle.low]);
@@ -30,8 +32,8 @@ export default function Nifty500MiniChart() {
   const y = (price: number) => 46 - ((price - min) / span) * 40;
   const change = snapshot?.changePct;
   const tone = change === null || change === undefined ? "" : change >= 0 ? "positive" : "negative";
-  return <div className="nifty500-mini" aria-label="Nifty 500 five-day candlestick chart">
-    <div className="nifty500-mini-copy"><b>NIFTY 500</b><strong className={tone}>{change === null || change === undefined ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</strong><small>{snapshot?.live ? "Live today" : snapshot?.dataThrough ? `Through ${snapshot.dataThrough}` : "Refresh All Data to load"}</small></div>
+  return <div className="nifty500-mini" aria-label={`${smallcap ? "Nifty Smallcap 500" : "Nifty 500"} five-day candlestick chart`}>
+    <div className="nifty500-mini-copy"><b>{label}</b><strong className={tone}>{change === null || change === undefined ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</strong><small>{snapshot?.live ? "Live today" : snapshot?.dataThrough ? `Through ${snapshot.dataThrough}` : "Refresh in Data Status"}</small></div>
     <svg viewBox="0 0 120 52" role="img" aria-label="Last five trading sessions">
       {candles.map((candle, index) => {
         const x = 12 + index * 24;
