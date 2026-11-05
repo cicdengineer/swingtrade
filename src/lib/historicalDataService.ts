@@ -173,7 +173,8 @@ async function cachedText(name: string, url: string, force = false) {
       return await fs.readFile(file, "utf8");
     } catch {}
   }
-  const response = await fetch(url, { cache: "no-store" });
+  const timeoutMs = name.endsWith("-constituents.csv") ? 30_000 : 120_000;
+  const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) throw new Error(`Could not download ${url} (${response.status})`);
   const text = await response.text();
   await fs.mkdir(cacheRoot, { recursive: true });
@@ -1004,7 +1005,20 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
       const currentDb = await readDatabase();
       const required = universeName ? [universeName] : ["CNX500", "NIFTYSC500"] as UniverseName[];
       const missing = required.filter((name) => !currentDb.universe_members.some((member) => member.universe_name === name));
-      if (forceUniverse || missing.length) await refreshUniverseData(forceUniverse, forceUniverse ? universeName : missing.length === 1 ? missing[0] : undefined);
+      if (forceUniverse || missing.length) {
+        try {
+          await refreshUniverseData(forceUniverse, forceUniverse ? universeName : missing.length === 1 ? missing[0] : undefined);
+        } catch (error) {
+          const available = required.every((name) =>
+            currentDb.universe_members.filter((member) => member.universe_name === name && member.is_current_constituent && member.security_id).length >= 400);
+          if (!available) throw error;
+          const reason = error instanceof Error ? error.message : String(error);
+          await updateJob(jobId, (job) => {
+            job.errors.push(`Constituent refresh unavailable (${reason}). Continuing price downloads with the last saved universe.`);
+            job.current_status = "Using saved universe; downloading prices";
+          });
+        }
+      }
     }
 
     if (!retryFailures) {
