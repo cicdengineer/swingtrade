@@ -38,6 +38,8 @@ import VolumeSellingView from "./VolumeSellingView";
 import USADataView from "./USADataView";
 import EntrySizingTile from "./EntrySizingTile";
 import { isCurrentDayLowAbove10Ema } from "@/lib/dailyEmaLow";
+import { EarningsMarkers, useEarnings } from "./EarningsMarkers";
+import type { EarningsEvent } from "@/lib/earnings";
 import Nifty500MiniChart from "./Nifty500MiniChart";
 import { latestDailyStop, swingLowBeforeLatest } from "@/lib/entrySizing";
 import { findVolumeSellingSignal, type VolumeSellingSignal } from "@/lib/volumeSellingLogic";
@@ -2501,7 +2503,7 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
   </section>;
 }
 
-function ThirtyInThirtyTileChart({ row, chartMonths, showEma10, onOpen, abnormalSignal, stochHighLine, swingHighLine, livePrice }: { row: ThirtyInThirtyRow; chartMonths: 3 | 6; showEma10: boolean; onOpen: () => void; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]>; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; livePrice?: number }) {
+function ThirtyInThirtyTileChart({ earnings, row, chartMonths, showEma10, onOpen, abnormalSignal, stochHighLine, swingHighLine, livePrice }: { row: ThirtyInThirtyRow; chartMonths: 3 | 6; showEma10: boolean; onOpen: () => void; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]>; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; livePrice?: number; earnings?: EarningsEvent[] }) {
   const chartRows = lastTradingMonths(row.recent, chartMonths === 6 ? 126 : 63);
   const closes = chartRows.map((point) => point.close);
   const ema10 = showEma10 ? emaValues(row.recent.map((point) => point.close), 10).slice(-chartRows.length) : [];
@@ -2516,16 +2518,17 @@ function ThirtyInThirtyTileChart({ row, chartMonths, showEma10, onOpen, abnormal
   const stochHighY = stochHighLine ? scaleValue(stochHighLine.price, min, max, 82) : undefined;
   const swingHighIndex = swingHighLine ? chartRows.findIndex(point => point.trade_date === swingHighLine.date) : -1;
   const swingHighY = swingHighLine ? scaleValue(swingHighLine.price, min, max, 82) : undefined;
-  return <span className="thirty-in-thirty-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="img" aria-label={`${row.symbol} last ${chartMonths} months line chart${showEma10 ? " with 10 EMA" : ""}${stochHighLine ? `, StochHigh line ${money(stochHighLine.price)}` : ""}`}>
+  return <span className="thirty-in-thirty-chart" onClick={(event) => { event.stopPropagation(); onOpen(); }} role="group" aria-label={`${row.symbol} last ${chartMonths} months line chart${showEma10 ? " with 10 EMA" : ""}${stochHighLine ? `, StochHigh line ${money(stochHighLine.price)}` : ""}`}>
     <svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true">
       <path className="spark-area" d={`${pricePath} L220 82 L0 82 Z`} />
       <path className={trendUp ? "spark-line up" : "spark-line down"} d={pricePath} />
       {showEma10 && <path className="tile-ema10-line" d={chartPath(ema10)} />}
       {abnormalSignal && <line className="abnormal-volume-line" x1={signalIndex < 0 ? 0 : signalIndex * 220 / Math.max(1, chartRows.length - 1)} x2="220" y1={scaleValue(abnormalSignal.high, min, max, 82)} y2={scaleValue(abnormalSignal.high, min, max, 82)} />}
-      {stochHighY !== undefined && <g><line className="tile-stoch-high-line" x1={stochHighIndex < 0 ? 0 : stochHighIndex * 220 / Math.max(1, chartRows.length - 1)} x2="220" y1={stochHighY} y2={stochHighY}><title>{`StochHigh ${money(stochHighLine!.price)} from ${stochHighLine!.date}`}</title></line><text className="tile-stoch-high-label" x="217" y={Math.max(10, stochHighY - 3)} textAnchor="end">{stochHighLine!.price.toFixed(2)}</text></g>}
-      {swingHighY !== undefined && <g><line className="tile-swing-high-line" x1={swingHighIndex < 0 ? 0 : swingHighIndex * 220 / Math.max(1, chartRows.length - 1)} x2="220" y1={swingHighY} y2={swingHighY}><title>{`SwingHigh prior oversold low ${money(swingHighLine!.price)} from ${swingHighLine!.date}`}</title></line><text className="tile-swing-high-label" x="217" y={Math.max(10, swingHighY - 3)} textAnchor="end">{swingHighLine!.price.toFixed(2)}</text></g>}
+      {stochHighY !== undefined && <line className="tile-stoch-high-line" x1={stochHighIndex < 0 ? 0 : stochHighIndex * 220 / Math.max(1, chartRows.length - 1)} x2="220" y1={stochHighY} y2={stochHighY}><title>{`StochHigh ${money(stochHighLine!.price)} from ${stochHighLine!.date}`}</title></line>}
+      {swingHighY !== undefined && <line className="tile-swing-high-line" x1={swingHighIndex < 0 ? 0 : swingHighIndex * 220 / Math.max(1, chartRows.length - 1)} x2="220" y1={swingHighY} y2={swingHighY}><title>{`SwingHigh prior oversold low ${money(swingHighLine!.price)} from ${swingHighLine!.date}`}</title></line>}
       {livePrice !== undefined && <circle className="tile-live-price-dot" cx="220" cy={scaleValue(livePrice, min, max, 82)} r="2.5"><title>{`LTP ${money(livePrice)}`}</title></circle>}
     </svg>
+    <EarningsMarkers events={earnings} history={row.recent} visible={chartRows} />
   </span>;
 }
 
@@ -2573,7 +2576,7 @@ function ThirtyInThirtyScoreTiles({ selected, chartMonths, liveDailyStochD, live
   </div>;
 }
 
-function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceStyle = false, sources, showScreenerStoch = false, abnormalSignal, seasonal = false }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[]; showScreenerStoch?: boolean; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]>; seasonal?: boolean }) {
+function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, referenceStyle = false, sources, showScreenerStoch = false, abnormalSignal, seasonal = false }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[]; showScreenerStoch?: boolean; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]>; seasonal?: boolean; earnings?: EarningsEvent[] }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
   const [hourlyLoading, setHourlyLoading] = useState(false);
@@ -2646,7 +2649,7 @@ function ThirtyInThirtyChartPanel({ selected, chartMonths, settings, referenceSt
         </div>
       </div>
     </div>
-    <CleanCandleChart rows={activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} stochHighLine={timeframe === "daily" ? stochHighLine : null} swingHighLine={timeframe === "daily" ? swingHighLine : null} abnormalSignal={abnormalSignal} />
+    <CleanCandleChart earnings={earnings} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} stochHighLine={timeframe === "daily" ? stochHighLine : null} swingHighLine={timeframe === "daily" ? swingHighLine : null} abnormalSignal={abnormalSignal} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>
     <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} stochOnly stochHighLine={stochHighLine} />
@@ -2753,6 +2756,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const liveTicksRef = useRef(liveTicks);
   liveTicksRef.current = liveTicks;
   const [priceClock, setPriceClock] = useState(Date.now());
+  const earnings = useEarnings(!!combined);
   const sessionDate = liveTradeDate();
   const [streamState, setStreamState] = useState<LiveFeedStatus>("connecting");
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
@@ -3066,6 +3070,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     {seasonal && data && "needsBuild" in data && data.needsBuild && <div className="notice"><AlertTriangle size={18}/><span>No saved watchlists yet. If statistics are empty, open Seasonality and select Rebuild Seasonality Statistics, then return here and select Build Watchlists.</span><button className="secondary compact" onClick={onOpenSeasonality}>Open Seasonality</button></div>}
     {seasonal && data?.generatedAt && <div className="count">Watchlists built {new Date(data.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST · live prices update without rebuilding</div>}
     {qMode && <div className="count">Qullamaggie resistance watchlist · {qWatchlistLoading ? "Loading latest scan…" : `${qWatchlist?.stocks.length ?? 0} stocks`} · data through {qWatchlist?.dataDate ?? "—"}. This view uses the Qullamaggie list; 30 in 30 qualification and its rule switches do not remove these stocks.</div>}
+    {combined && earnings.unavailable && <small role="status">Earnings feed unavailable · retrying</small>}
     {qMode && qWatchlistError && <div className="error">{qWatchlistError}</div>}
     {activeData && <>
       <div className="thirty-scoreboard">
@@ -3094,7 +3099,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
               {source === "SwingHigh" && swingHighLine?.qualifies && <span className="swing-high-entry">{row.current_close > row.ema10 ? "Above 10 EMA · entry ready" : `Entry above 10 EMA ${money(row.ema10)}`}</span>}
               {!combined && <div className="thirty-result-sub"><small>{row.company_name}</small></div>}
               {combined && <div className="screener-source-dots" role="img" aria-label={`Watchlists: ${rowSources(row).join(", ")}`}>{rowSources(row).map(name => <span key={name} title={name} aria-hidden="true" />)}</div>}
-              <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} showEma10={showTileEma10} onOpen={() => setSelected(row)} abnormalSignal={!seasonal ? summarizeRecentVolume(row.recent, sessionDate).latestSpike ?? undefined : undefined} stochHighLine={stochHighLine} swingHighLine={swingHighLine} livePrice={combined ? freshLtp : undefined} />
+              <ThirtyInThirtyTileChart earnings={combined ? earnings.results[row.symbol] : undefined} row={row} chartMonths={chartMonths} showEma10={showTileEma10} onOpen={() => setSelected(row)} abnormalSignal={!seasonal ? summarizeRecentVolume(row.recent, sessionDate).latestSpike ?? undefined : undefined} stochHighLine={stochHighLine} swingHighLine={swingHighLine} livePrice={combined ? freshLtp : undefined} />
             </> : <>
               <span className="tile-badges">{strongStart && <i>SS</i>}{nearPdh && <i className="pdh-badge">PDH</i>}<span className="pin-toggle" role="button" tabIndex={0} aria-label={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} title={`${pinned ? "Unpin" : "Pin"} ${row.symbol}`} onClick={(event) => { event.stopPropagation(); togglePinned(row.security_id); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); togglePinned(row.security_id); } }}><Pin size={12} fill={pinned ? "currentColor" : "none"} /></span></span>
               <b>{row.symbol}</b><small>{row.company_name}</small>
@@ -3113,7 +3118,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <p className="eyebrow">{combined ? `Screener · ${rowSources(selected).join(" · ")}` : qMode ? `Qullamaggie watchlist · resistance ${qResistance(selected.security_id)}` : seasonal ? `Seasonal Stocks · ${selected.seasonal_window} · ${selected.seasonal_avg_return?.toFixed(1)}% average` : `30 in 30 · ${selected.best_return_pct.toFixed(1)}%`}</p>
         <h2>{selected.symbol} · {selected.company_name}</h2>
         <p className="muted">{selected.reason}</p>
-        <ThirtyInThirtyChartPanel selected={selected} chartMonths={chartMonths} settings={settings} referenceStyle={!seasonal} sources={combined ? rowSources(selected) : undefined} showScreenerStoch={combined} abnormalSignal={!seasonal ? summarizeRecentVolume(selected.recent, sessionDate).latestSpike ?? undefined : undefined} seasonal={seasonal} />
+        <ThirtyInThirtyChartPanel earnings={combined ? earnings.results[selected.symbol] : undefined} selected={selected} chartMonths={chartMonths} settings={settings} referenceStyle={!seasonal} sources={combined ? rowSources(selected) : undefined} showScreenerStoch={combined} abnormalSignal={!seasonal ? summarizeRecentVolume(selected.recent, sessionDate).latestSpike ?? undefined : undefined} seasonal={seasonal} />
       </div>
     </div>}
   </section>;
@@ -3634,7 +3639,7 @@ function StochDPanel({ values, width, label }: { values: Array<number | undefine
   </svg></div>;
 }
 
-function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal }: { rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
+function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal }: { earnings?: EarningsEvent[]; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
   if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
@@ -3683,9 +3688,9 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart`}>
       {swingLowY !== undefined && <line className="swing-low-line" x1={swingLowIndex * candleSlot + candleSlot / 2} x2={width} y1={swingLowY} y2={swingLowY}><title>{`Swing low ${money(swingLowPoint!.low)} on ${swingLowPoint!.trade_date}`}</title></line>}
       {highCandleY !== undefined && <line className="high-candle-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={highCandleY} y2={highCandleY}><title>{`High candle ${money(highCandle!.high)} on ${highCandle!.date}`}</title></line>}
-      {abnormalY !== undefined && <g><line className="abnormal-volume-line" x1={abnormalIndex < 0 ? 0 : abnormalIndex * candleSlot + candleSlot / 2} x2={width} y1={abnormalY} y2={abnormalY}><title>{`Latest abnormal-volume candle ${abnormalSignal!.trade_date} high ${money(abnormalSignal!.high)}`}</title></line><text className="abnormal-volume-label" x={width - 4} y={Math.max(12, abnormalY - 4)} textAnchor="end">{abnormalSignal!.high.toFixed(2)}</text></g>}
-      {stochHighY !== undefined && <g><line className="stoch-high-line" x1={stochHighIndex < 0 ? 0 : stochHighIndex * candleSlot + candleSlot / 2} x2={width} y1={stochHighY} y2={stochHighY}><title>{`StochHigh ${money(stochHighLine!.price)} from ${stochHighLine!.date}`}</title></line><text className="stoch-high-label" x={width - 4} y={Math.max(12, stochHighY - 4)} textAnchor="end">{stochHighLine!.price.toFixed(2)}</text></g>}
-      {swingHighY !== undefined && <g><line className="swing-high-line" x1={swingHighIndex < 0 ? 0 : swingHighIndex * candleSlot + candleSlot / 2} x2={width} y1={swingHighY} y2={swingHighY}><title>{`SwingHigh prior oversold low ${money(swingHighLine!.price)} from ${swingHighLine!.date}`}</title></line><text className="swing-high-label" x={width - 4} y={Math.max(12, swingHighY - 4)} textAnchor="end">{swingHighLine!.price.toFixed(2)}</text></g>}
+      {abnormalY !== undefined && <line className="abnormal-volume-line" x1={abnormalIndex < 0 ? 0 : abnormalIndex * candleSlot + candleSlot / 2} x2={width} y1={abnormalY} y2={abnormalY}><title>{`Latest abnormal-volume candle ${abnormalSignal!.trade_date} high ${money(abnormalSignal!.high)}`}</title></line>}
+      {stochHighY !== undefined && <line className="stoch-high-line" x1={stochHighIndex < 0 ? 0 : stochHighIndex * candleSlot + candleSlot / 2} x2={width} y1={stochHighY} y2={stochHighY}><title>{`StochHigh ${money(stochHighLine!.price)} from ${stochHighLine!.date}`}</title></line>}
+      {swingHighY !== undefined && <line className="swing-high-line" x1={swingHighIndex < 0 ? 0 : swingHighIndex * candleSlot + candleSlot / 2} x2={width} y1={swingHighY} y2={swingHighY}><title>{`SwingHigh prior oversold low ${money(swingHighLine!.price)} from ${swingHighLine!.date}`}</title></line>}
       {stopY !== undefined && <line className="signal-stop-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={stopY} y2={stopY}><title>{`Signal candle 10 EMA stop loss ${money(stopLevel!)}`}</title></line>}
       {chartRows.map((row, index) => {
         const x = index * candleSlot + candleSlot / 2;
@@ -3707,6 +3712,7 @@ function CleanCandleChart({ rows, timeframe, loading, error, highVolumeRatio = 1
         <title>{`${chartDateLabel(latestReclaimMarker.row.trade_date, timeframe)} reclaimed ${emaLabel}: previous close below, latest close ${latestReclaimMarker.row.close.toFixed(2)} above ${latestReclaimMarker.ema.toFixed(2)}`}</title>
       </polygon>}
     </svg>
+    {timeframe === "daily" && <EarningsMarkers events={earnings} history={rows} visible={chartRows} candles />}
     {timeframe === "daily" && <div className="chart-session-dates">Latest sessions, left to right: {chartRows.slice(-3).map((row) => row.trade_date.slice(0, 10)).join(" · ")}</div>}
     {referenceStyle ? <div className="thirty-reference-volume" aria-label="Volume">
       {highlightVolume && <div className="screener-volume-legend"><span><i className="screener-volume-high" />Blue ≥1.5× 20-bar average</span><span><i className="screener-volume-low" />Orange ≤0.3× 20-bar average</span></div>}
