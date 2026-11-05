@@ -242,6 +242,13 @@ export async function getIndexSnapshot(universeName: UniverseName) {
   let live: { date: string; open: number; high: number; low: number; close: number; previousClose: number } | null = null;
   const india = getIndiaNow();
   const sessionMinutes = india.hour * 60 + india.minute;
+  if (isNseBusinessDay(india.date) && sessionMinutes >= marketOpenMinutes && sessionMinutes < marketCloseMinutes && universeName === "NIFTYSC500") {
+    try {
+      live = await getNseSmallcap500Quote(india.date);
+    } catch (error) {
+      console.warn(`${symbol} live quote unavailable`, error);
+    }
+  }
   if (universeName === "CNX500" && index && hasDhanCredentials() && isNseBusinessDay(india.date) && sessionMinutes >= marketOpenMinutes && sessionMinutes < marketCloseMinutes) {
     try {
       const dhanSecurityId = index.security_id.replace(/^IDX_I:/, "");
@@ -273,6 +280,39 @@ export async function getIndexSnapshot(universeName: UniverseName) {
 
 export async function getNifty500Snapshot() {
   return getIndexSnapshot("CNX500");
+}
+
+export function parseNseSmallcap500Quote(body: any, expectedDate: string) {
+  const timestamp = String(body?.timestamp ?? "");
+  const match = /^(\d{2})-([A-Za-z]{3}|\d{2})-(\d{4})/.exec(timestamp);
+  const months: Record<string, string> = { Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06", Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12" };
+  const date = match ? `${match[3]}-${months[match[2]] ?? match[2]}-${match[1]}` : "";
+  if (date !== expectedDate) return null;
+  const row = body?.data?.find?.((item: any) => item?.index?.toUpperCase?.() === niftySmallcap500Symbol);
+  const value = (field: string) => Number(String(row?.[field] ?? "").replace(/,/g, ""));
+  const open = value("open");
+  const high = value("high");
+  const low = value("low");
+  const close = value("last");
+  const previousClose = value("previousClose");
+  if (![open, high, low, close, previousClose].every((number) => Number.isFinite(number) && number > 0) ||
+      high < Math.max(open, close) || low > Math.min(open, close)) return null;
+  return { date, open, high, low, close, previousClose };
+}
+
+async function getNseSmallcap500Quote(expectedDate: string) {
+  const headers = { "User-Agent": "Mozilla/5.0", Accept: "application/json", Referer: "https://www.nseindia.com/market-data/live-market-indices" };
+  const url = "https://www.nseindia.com/api/allIndices";
+  let response = await fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(10_000) });
+  if (response.status === 401 || response.status === 403) {
+    const home = await fetch("https://www.nseindia.com/market-data/live-market-indices", {
+      headers: { "User-Agent": headers["User-Agent"] }, cache: "no-store", signal: AbortSignal.timeout(10_000),
+    });
+    const cookie = home.headers.get("set-cookie")?.split(/,(?=\s*[^;,=]+\s*=)/).map((part) => part.split(";")[0]).join("; ");
+    response = await fetch(url, { headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) }, cache: "no-store", signal: AbortSignal.timeout(10_000) });
+  }
+  if (!response.ok) throw new Error(`NSE index quote request failed (${response.status}).`);
+  return parseNseSmallcap500Quote(await response.json(), expectedDate);
 }
 
 export function parseNseIndexDailyReport(text: string, expectedDate: string): Candle | null {

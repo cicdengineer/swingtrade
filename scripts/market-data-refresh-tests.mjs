@@ -45,6 +45,7 @@ const {
   isIndianMarketClosed,
   missingDateRangesFromLatest,
   parseNseIndexDailyReport,
+  parseNseSmallcap500Quote,
   safeDailyHistoricalFallbackToDate,
   validateConstructedDailyCandle,
   withRetry,
@@ -64,6 +65,15 @@ const atUtc = (iso) => new Date(iso);
   });
   assert.throws(() => parseNseIndexDailyReport(report, "2026-11-03"), /date mismatch/);
   assert.equal(parseNseIndexDailyReport(report.replace("Nifty Smallcap 500", "Another Index"), "2026-11-04"), null);
+}
+
+{
+  const quote = { timestamp: "05-Nov-2026 10:30:00", data: [{ index: "NIFTY SMALLCAP 500", open: 19451.15, high: 19854.25, low: 19353.7, last: 19843.4, previousClose: 19453.15 }] };
+  assert.deepEqual(parseNseSmallcap500Quote(quote, "2026-11-05"), {
+    date: "2026-11-05", open: 19451.15, high: 19854.25, low: 19353.7, close: 19843.4, previousClose: 19453.15,
+  });
+  assert.equal(parseNseSmallcap500Quote(quote, "2026-11-06"), null, "yesterday's quote must not be shown as live");
+  assert.equal(parseNseSmallcap500Quote({ ...quote, data: [{ ...quote.data[0], high: 19000 }] }, "2026-11-05"), null);
 }
 
 {

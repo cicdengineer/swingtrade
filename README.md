@@ -99,7 +99,7 @@ To force reconciliation for testing, run refresh after a provisional candle exis
 1. Open **Data Status**.
 2. Use **Refresh Status** to inspect the local database.
 3. Use **Refresh All Data** to load the current Nifty 500 universe, backfill missing daily OHLCV data, reconcile provisional candles, and construct today's EOD candle from intraday data after market close when needed.
-   This also stores daily OHLC for both the Nifty 500 (`CNX500`) and Nifty Smallcap 500 (`NIFTYSC500`) indices. The Screener header shows their latest five daily candles and session changes. Nifty 500 also refreshes its current candle from Dhan's index OHLC quote during market hours.
+   This also stores daily OHLC for both the Nifty 500 (`CNX500`) and Nifty Smallcap 500 (`NIFTYSC500`) indices. The Screener header shows their latest five daily candles and session changes. During market hours, Nifty 500 refreshes its current candle from Dhan's index OHLC quote and Nifty Smallcap 500 refreshes from NSE's live indices quote.
 4. Use the Nifty 500 **Refresh** button to refresh CNX500 constituents and prices.
 5. Use **Retry Failed** after transient API failures.
 6. Use **Export Universe** or **Export Failed** for CSV debugging.
@@ -113,6 +113,7 @@ The stored universes use current constituents:
 - CNX500: Nifty 500 current constituents from `https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv`
 - NIFTYSC500: Nifty Smallcap 500 current constituents from `https://www.niftyindices.com/IndexConstituent/ind_NiftySmallcap500_list.csv`
 - Nifty Smallcap 500 index OHLC: NSE daily index snapshots at `https://archives.nseindia.com/content/indices/ind_close_all_DDMMYYYY.csv` (Dhan's instrument master does not list this index)
+- Nifty Smallcap 500 live quote: NSE index watch at `https://www.nseindia.com/api/allIndices`
 
 Data Status shows a separate refresh and download summary for each universe. Refreshing Nifty Smallcap 500 stores its constituents and Dhan OHLCV without replacing Nifty 500. The Screener universe selector offers Nifty 500, Nifty Smallcap 500, and ALL; ALL scans the union of the stored sets.
 - Dhan instrument master: `https://images.dhan.co/api-data/api-scrip-master-detailed.csv`
