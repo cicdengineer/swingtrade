@@ -64,6 +64,7 @@ const provisionalDataSource = "DHAN_INTRADAY_AGGREGATED" as const;
 const officialDataSource = "DHAN_DAILY" as const;
 const nifty500Symbol = "NIFTY 500";
 const niftySmallcap500Symbol = "NIFTY SMALLCAP 500";
+const niftySmallcap500IndexId = "IDX_I:NIFTYSC500";
 const fixedNseHolidayMonthDays = new Set(["01-26", "08-15", "10-02", "12-25"]);
 // NSE equity trading holidays published for 2026 (in addition to weekends).
 const nse2026Holidays = new Set([
@@ -241,7 +242,7 @@ export async function getIndexSnapshot(universeName: UniverseName) {
   let live: { date: string; open: number; high: number; low: number; close: number; previousClose: number } | null = null;
   const india = getIndiaNow();
   const sessionMinutes = india.hour * 60 + india.minute;
-  if (index && hasDhanCredentials() && isNseBusinessDay(india.date) && sessionMinutes >= marketOpenMinutes && sessionMinutes < marketCloseMinutes) {
+  if (universeName === "CNX500" && index && hasDhanCredentials() && isNseBusinessDay(india.date) && sessionMinutes >= marketOpenMinutes && sessionMinutes < marketCloseMinutes) {
     try {
       const dhanSecurityId = index.security_id.replace(/^IDX_I:/, "");
       const response = await postDhanJson("/marketfeed/ohlc", { IDX_I: [Number(dhanSecurityId)] });
@@ -272,6 +273,64 @@ export async function getIndexSnapshot(universeName: UniverseName) {
 
 export async function getNifty500Snapshot() {
   return getIndexSnapshot("CNX500");
+}
+
+export function parseNseIndexDailyReport(text: string, expectedDate: string): Candle | null {
+  const row = parseCsv(text).find((item) => first(item, ["Index Name"]).toUpperCase() === niftySmallcap500Symbol);
+  if (!row) return null;
+  const rawDate = first(row, ["Index Date"]);
+  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(rawDate);
+  const date = match ? `${match[3]}-${match[2]}-${match[1]}` : "";
+  if (date !== expectedDate) throw new Error(`NSE index report date mismatch: expected ${expectedDate}, received ${rawDate || "none"}.`);
+  const value = (name: string) => Number(first(row, [name]).replace(/,/g, ""));
+  const candle: Candle = {
+    date,
+    open: value("Open Index Value"),
+    high: value("High Index Value"),
+    low: value("Low Index Value"),
+    close: value("Closing Index Value"),
+    volume: value("Volume"),
+  };
+  if (![candle.open, candle.high, candle.low, candle.close, candle.volume].every(Number.isFinite) ||
+      [candle.open, candle.high, candle.low, candle.close].some((price) => price <= 0) ||
+      candle.high < Math.max(candle.open, candle.close) || candle.low > Math.min(candle.open, candle.close) || candle.volume < 0) {
+    throw new Error(`NSE index report contains invalid OHLCV for ${expectedDate}.`);
+  }
+  return candle;
+}
+
+async function refreshNseSmallcap500Index() {
+  const db = await readDatabase();
+  const latest = latestPriceDate(db, niftySmallcap500IndexId);
+  const tradingDate = getLatestTradingSessionDate();
+  const dates = dateRange(addDays(tradingDate, -18), tradingDate).filter(isNseBusinessDay).slice(-8)
+    .filter((date) => !latest || date >= latest);
+  const candles: Candle[] = [];
+  for (const date of dates) {
+    const [year, month, day] = date.split("-");
+    const url = `https://archives.nseindia.com/content/indices/ind_close_all_${day}${month}${year}.csv`;
+    const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    if (response.status === 404) continue;
+    if (!response.ok) throw new Error(`Could not download NSE index report for ${date} (${response.status}).`);
+    const candle = parseNseIndexDailyReport(await response.text(), date);
+    if (candle) candles.push(candle);
+  }
+  if (!candles.length) {
+    if (latest) return;
+    throw new Error("Nifty Smallcap 500 is missing from recent NSE index reports.");
+  }
+  await mutateDataStore(async () => {
+    const current = await readDatabase();
+    applyHistoricalData(current, {
+      securityId: niftySmallcap500IndexId,
+      symbol: niftySmallcap500Symbol,
+      name: niftySmallcap500Symbol,
+      exchange: "NSE",
+      segment: "IDX_I",
+      instrument: "INDEX",
+    }, candles, "NSE_INDEX_DAILY");
+    await writeMarketDataBatch(current, [niftySmallcap500IndexId]);
+  });
 }
 
 export async function getCurrentUniverse(universeName?: UniverseName, force = false): Promise<UniverseMemberRecord[]> {
@@ -1026,6 +1085,10 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
         const label = indexName === "CNX500" ? "Nifty 500" : "NIFTY SMALLCAP 500";
         await updateJob(jobId, (job) => { job.current_status = `Refreshing ${label} index`; });
         try {
+          if (indexName === "NIFTYSC500") {
+            await refreshNseSmallcap500Index();
+            continue;
+          }
           const index = await getIndexSecurity(indexName);
           const latest = await readDatabase();
           const storedIndexId = `IDX_I:${index.securityId}`;

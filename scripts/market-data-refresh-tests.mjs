@@ -44,6 +44,7 @@ const {
   getLatestTradingSessionDate,
   isIndianMarketClosed,
   missingDateRangesFromLatest,
+  parseNseIndexDailyReport,
   safeDailyHistoricalFallbackToDate,
   validateConstructedDailyCandle,
   withRetry,
@@ -51,6 +52,19 @@ const {
 
 const candle = (date, open, high, low, close, volume) => ({ date, open, high, low, close, volume });
 const atUtc = (iso) => new Date(iso);
+
+{
+  const report = [
+    "Index Name,Index Date,Open Index Value,High Index Value,Low Index Value,Closing Index Value,Points Change,Change(%),Volume",
+    "Nifty 500,04-11-2026,22476.25,22771.5,22426.6,22769.2,248.85,1.11,2516045640",
+    "Nifty Smallcap 500,04-11-2026,19451.15,19854.25,19353.7,19843.4,390.25,2.01,2019998109",
+  ].join("\n");
+  assert.deepEqual(parseNseIndexDailyReport(report, "2026-11-04"), {
+    date: "2026-11-04", open: 19451.15, high: 19854.25, low: 19353.7, close: 19843.4, volume: 2019998109,
+  });
+  assert.throws(() => parseNseIndexDailyReport(report, "2026-11-03"), /date mismatch/);
+  assert.equal(parseNseIndexDailyReport(report.replace("Nifty Smallcap 500", "Another Index"), "2026-11-04"), null);
+}
 
 {
   const candles = Array.from({ length: 20 }, (_, index) => {

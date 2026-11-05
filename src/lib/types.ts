@@ -40,7 +40,7 @@ export type UniverseMemberRecord = {
   last_verified_at: string;
 };
 
-export type DailyPriceDataSource = "DHAN" | "DHAN_DAILY" | "DHAN_INTRADAY_AGGREGATED";
+export type DailyPriceDataSource = "DHAN" | "DHAN_DAILY" | "DHAN_INTRADAY_AGGREGATED" | "NSE_INDEX_DAILY";
 
 export type DailyPriceRecord = {
   id: string;
