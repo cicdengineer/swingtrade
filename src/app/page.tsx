@@ -1,5 +1,6 @@
 "use client";
 
+import { anchoredLowVwap, applyMinuteTick, todayMinuteRows } from "@/lib/minuteChart";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import {
@@ -63,7 +64,7 @@ type SwingRow = { status: "NEAR 50 EMA" | "PULLBACK" | "EXTENDED" | "BROKEN BELO
 type SwingResponse = { filters: SwingFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: SwingRow[] };
 type ThirtyUpFilters = { universe: "ALL" | UniverseName; lookbackDays: number; minMovePct: number; minImpulseVolumeRatio: number; minDistanceFromEmaPct: number; maxDistanceFromEmaPct: number; higherHighLookbackDays: number; minHigherHighCount: number; consolidationLookbackDays: number; minConsolidationDays: number; maxBasePullbackPct: number; maxBreakoutProximityPct: number; maxBreakoutOvershootPct: number; maxCurrentVolumeRatio: number; requireRisingEma: boolean; showAll: boolean; minCooloffDays?: number; maxRetracementPct?: number; requireCurrentBelowHigh?: boolean };
 type DailyChartPoint = { trade_date: string; open: number; high: number; low: number; close: number; ema10?: number; ema50?: number; volume: number; volume_ratio?: number; is_provisional?: boolean };
-type ChartTimeframe = "daily" | "hourly";
+type ChartTimeframe = "daily" | "hourly" | "1min";
 type HourlySignalState = "loading" | "green" | "yellow" | "red" | "error";
 type HourlySignal = { state: HourlySignalState; ltp?: number; ema50?: number; distancePct?: number; belowTwoDays?: boolean; label: string };
 type LiveTick = { securityId: string; ltp: number; prevClose?: number; dayOpen?: number; dayHigh?: number; dayLow?: number; volume?: number; lastTradeTime?: number; receivedAt: number; source?: "websocket" | "intraday" };
@@ -521,7 +522,7 @@ const chartDateLabel = (value: string, timeframe: ChartTimeframe) => {
   if (timeframe === "daily") return value;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+  return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 };
 const isWeekendDate = (date: string) => {
   const parsed = new Date(`${date}T00:00:00+05:30`);
@@ -2595,28 +2596,51 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
 
   useEffect(() => {
     let cancelled = false;
+    let loaded = false;
+    let pendingTicks: LiveTick[] = [];
+    let latestTradeTime = 0;
+    let latestTick: LiveTick | undefined;
+    let fetching = false;
+    const source = new EventSource(`/api/thirty-in-thirty-screener/live?ids=${encodeURIComponent(selected.security_id)}`);
+    const acceptTick = (tick: LiveTick) => {
+      if (tick.securityId !== selected.security_id || !tick.lastTradeTime || tick.lastTradeTime < latestTradeTime) return;
+      latestTradeTime = tick.lastTradeTime;
+      latestTick = tick;
+      pendingTicks.push(tick);
+      if (loaded) setHourlyRows(current => applyMinuteTick(current, tick));
+    };
+    source.addEventListener("tick", event => acceptTick(JSON.parse((event as MessageEvent).data)));
+    source.addEventListener("snapshot", event => (JSON.parse((event as MessageEvent).data) as LiveTick[]).forEach(acceptTick));
     const loadIntraday = async (showLoading: boolean) => {
+      if (fetching) return;
+      fetching = true;
       if (showLoading) setHourlyLoading(true);
       setHourlyError("");
       setDailyError("");
       try {
-        const rows = await fetchThirtyUpIntraday(selected.security_id, !showLoading, "thirty-in-thirty-screener");
+        pendingTicks = latestTick ? [latestTick] : [];
+        const rows = await fetchThirtyUpIntraday(selected.security_id, true, "thirty-in-thirty-screener", 1, 1);
         if (cancelled) return;
-        setHourlyRows(rows);
+        let minuteRows = todayMinuteRows(rows);
+        for (const tick of pendingTicks) minuteRows = applyMinuteTick(minuteRows, tick);
+        loaded = true;
+        setHourlyRows(minuteRows);
         setLiveDailyRow(aggregateIntradayDaily(rows));
       } catch (error) {
         if (cancelled) return;
         const message = error instanceof Error ? error.message : "Intraday data unavailable";
-        if (timeframe === "hourly") setHourlyError(message);
+        if (timeframe === "1min") setHourlyError(message);
         else setDailyError(message);
       } finally {
+        fetching = false;
         if (!cancelled && showLoading) setHourlyLoading(false);
       }
     };
-    void loadIntraday(timeframe === "hourly" && !hourlyRows.length);
+    void loadIntraday(timeframe === "1min" && !hourlyRows.length);
     const timer = window.setInterval(() => void loadIntraday(false), 60_000);
     return () => {
       cancelled = true;
+      source.close();
       window.clearInterval(timer);
     };
   }, [selected.security_id, timeframe]);
@@ -2631,13 +2655,13 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
   const stochHighLine = showScreenerStoch ? findStochHigh(mergedDailyRows) : null;
   const swingHighLine = showScreenerStoch ? findSwingHigh(mergedDailyRows) : null;
   const dailyRows = lastTradingMonths(mergedDailyRows, chartMonths === 6 ? 126 : 63);
-  const activeRows = timeframe === "daily" ? dailyRows : hourlyRows;
+  const activeRows = timeframe === "daily" ? dailyRows : todayMinuteRows(hourlyRows);
   return <><div className="chart-shell">
     <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} settings={settings} />
     <div className="chart-toolbar">
       <div>
         <div className="chart-timeframe-heading"><p className="eyebrow">Chart timeframe</p>{sources?.length ? <div className="chart-source-tags" aria-label="Watchlists">{sources.map(name => <span className={`screener-tag-${screenerSourceClasses[name]}`} key={name}>{name}</span>)}</div> : null}</div>
-        <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${showLiveDailyCandle(selected.recent, liveDailyRow) ? " + live intraday candle" : ""}` : "Latest 60-minute candles"}</span>
+        <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${showLiveDailyCandle(selected.recent, liveDailyRow) ? " + live intraday candle" : ""}` : "Today’s 1-minute candles (IST) · Anchored VWAP (Low)"}</span>
       </div>
       <div className="chart-toolbar-actions">
         <a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer" title={`Open ${selected.symbol} in TradingView`}>
@@ -2645,11 +2669,11 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
         </a>
         <div className="segmented-control" role="group" aria-label="Chart timeframe">
           <button className={timeframe === "daily" ? "active" : ""} onClick={() => setTimeframe("daily")}>Daily</button>
-          <button className={timeframe === "hourly" ? "active" : ""} onClick={() => setTimeframe("hourly")}>Hourly</button>
+          <button className={timeframe === "1min" ? "active" : ""} onClick={() => setTimeframe("1min")}>1Min</button>
         </div>
       </div>
     </div>
-    <CleanCandleChart earnings={earnings} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "hourly" && hourlyLoading} error={timeframe === "hourly" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} stochHighLine={timeframe === "daily" ? stochHighLine : null} swingHighLine={timeframe === "daily" ? swingHighLine : null} abnormalSignal={abnormalSignal} />
+    <CleanCandleChart earnings={earnings} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "1min" && hourlyLoading} error={timeframe === "1min" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} stochHighLine={timeframe === "daily" ? stochHighLine : null} swingHighLine={timeframe === "daily" ? swingHighLine : null} abnormalSignal={timeframe === "daily" ? abnormalSignal : undefined} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>
     <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} stochOnly stochHighLine={stochHighLine} />
@@ -3640,13 +3664,14 @@ function StochDPanel({ values, width, label }: { values: Array<number | undefine
 }
 
 function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal }: { earnings?: EarningsEvent[]; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
-  if (loading) return <div className="chart-empty">Loading hourly candles...</div>;
+  if (loading) return <div className="chart-empty">Loading {timeframe === "1min" ? "1-minute" : "hourly"} candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
-  const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : rows.slice(-120);
-  if (chartRows.length < 5) return <div className="chart-empty">Not enough {timeframe} rows for charting.</div>;
+  const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : timeframe === "1min" ? todayMinuteRows(rows) : rows.slice(-120);
+  if (chartRows.length < (timeframe === "1min" ? 1 : 5)) return <div className="chart-empty">{timeframe === "1min" ? "No candles for today (IST) yet." : `Not enough ${timeframe} rows for charting.`}</div>;
   const width = 780;
   const priceHeight = 250;
   const volumeHeight = 76;
+  const vwap = timeframe === "1min" ? anchoredLowVwap(chartRows) : [];
   const lows = chartRows.map((row) => row.low);
   const highs = chartRows.map((row) => row.high);
   const closes = chartRows.map((row) => row.close);
@@ -3656,13 +3681,14 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
   const priceMin = Math.min(...lows, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(swingHighLine ? [swingHighLine.price] : []));
   const priceMax = Math.max(...highs, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(swingHighLine ? [swingHighLine.price] : []));
   const candleSlot = width / chartRows.length;
-  const bodyWidth = Math.max(3, Math.min(8, candleSlot * 0.48));
+  const bodyWidth = Math.max(timeframe === "1min" ? 0.6 : 3, Math.min(8, candleSlot * 0.48));
   const maxVolume = Math.max(...chartRows.map((row) => row.volume));
   const screenerD = showScreenerStoch ? timeframe === "daily"
     ? chartRows.map((row) => (row as DailyChartPoint & { daily_stoch_d?: number }).daily_stoch_d)
     : chartStochDValues(chartRows.map((row) => row.close)) : [];
   const volumeSma = smaValues(chartRows.map((row) => row.volume), 20);
   const emaPath = chartEmaValues.map((value, index) => ({ value, x: index * candleSlot + candleSlot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
+  const vwapPath = vwap.map((value, index) => `${index ? "L" : "M"}${(index * candleSlot + candleSlot / 2).toFixed(2)} ${scaleValue(value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
   const swingLowIndex = swingLowPoint ? chartRows.findIndex((row) => row.trade_date === swingLowPoint.trade_date) : -1;
   const swingLowY = swingLowPoint && swingLowIndex >= 0 ? scaleValue(swingLowPoint.low, priceMin, priceMax, priceHeight, 8) : undefined;
   const highCandleIndex = highCandle ? chartRows.findIndex((row) => row.trade_date === highCandle.date) : -1;
@@ -3684,7 +3710,7 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
     }
     : null;
   return <div className={`clean-chart ${referenceStyle ? "thirty-reference-chart" : ""}`}>
-    {!referenceStyle && <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}{highCandleY !== undefined && <span><i className="legend-high-candle" />Entry above {money(highCandle!.high)}</span>}{stopY !== undefined && <span><i className="legend-stop-level" />Signal EMA SL {money(stopLevel!)}</span>}{stochHighLine && <span><i className="legend-stoch-high" />StochHigh {money(stochHighLine.price)}</span>}{swingHighLine && <span><i className="legend-swing-high" />SwingHigh {money(swingHighLine.price)}</span>}<span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>}
+    {!referenceStyle && <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : timeframe === "1min" ? "1Min" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}{highCandleY !== undefined && <span><i className="legend-high-candle" />Entry above {money(highCandle!.high)}</span>}{stopY !== undefined && <span><i className="legend-stop-level" />Signal EMA SL {money(stopLevel!)}</span>}{stochHighLine && <span><i className="legend-stoch-high" />StochHigh {money(stochHighLine.price)}</span>}{swingHighLine && <span><i className="legend-swing-high" />SwingHigh {money(swingHighLine.price)}</span>}<span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>}
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart`}>
       {swingLowY !== undefined && <line className="swing-low-line" x1={swingLowIndex * candleSlot + candleSlot / 2} x2={width} y1={swingLowY} y2={swingLowY}><title>{`Swing low ${money(swingLowPoint!.low)} on ${swingLowPoint!.trade_date}`}</title></line>}
       {highCandleY !== undefined && <line className="high-candle-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={highCandleY} y2={highCandleY}><title>{`High candle ${money(highCandle!.high)} on ${highCandle!.date}`}</title></line>}
@@ -3708,6 +3734,7 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
         </g>;
       })}
       <path className="ema-line" d={emaPath} />
+      {vwap.length > 0 && <><path d={vwapPath} fill="none" stroke="#8b5cf6" strokeWidth="1.8"><title>Anchored VWAP (Low) from today’s first candle</title></path><circle cx={candleSlot / 2} cy={scaleValue(chartRows[0].low, priceMin, priceMax, priceHeight, 8)} r="3" fill="#8b5cf6" /></>}
       {latestReclaimMarker && <polygon className="ema-reclaim-triangle" points={`${latestReclaimMarker.x.toFixed(2)},${(latestReclaimMarker.y - 6).toFixed(2)} ${(latestReclaimMarker.x - 5).toFixed(2)},${(latestReclaimMarker.y + 4).toFixed(2)} ${(latestReclaimMarker.x + 5).toFixed(2)},${(latestReclaimMarker.y + 4).toFixed(2)}`}>
         <title>{`${chartDateLabel(latestReclaimMarker.row.trade_date, timeframe)} reclaimed ${emaLabel}: previous close below, latest close ${latestReclaimMarker.row.close.toFixed(2)} above ${latestReclaimMarker.ema.toFixed(2)}`}</title>
       </polygon>}
@@ -3733,6 +3760,7 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
       })}
     </div>}
     {showScreenerStoch && <StochDPanel values={screenerD} width={width} label={`${timeframe} StochRSI percent D`} />}
+    {timeframe === "1min" && <div className="thirty-reference-legend" style={{ color: "#8b5cf6" }}>Anchored VWAP (Low) · {chartDateLabel(chartRows[0].trade_date, timeframe)} to {chartDateLabel(chartRows.at(-1)!.trade_date, timeframe)} IST</div>}
     {referenceStyle && <div className="thirty-reference-legend">{timeframe} candles · <span>10 EMA</span> · Volume below</div>}
   </div>;
 }
