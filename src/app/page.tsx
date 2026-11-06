@@ -1,6 +1,6 @@
 "use client";
 
-import { anchoredLowVwap, applyMinuteTick, todayMinuteRows } from "@/lib/minuteChart";
+import { anchoredVwap, applyMinuteTick, todayMinuteRows } from "@/lib/minuteChart";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import {
@@ -2603,7 +2603,7 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
     let fetching = false;
     const source = new EventSource(`/api/thirty-in-thirty-screener/live?ids=${encodeURIComponent(selected.security_id)}`);
     const acceptTick = (tick: LiveTick) => {
-      if (tick.securityId !== selected.security_id || !tick.lastTradeTime || tick.lastTradeTime < latestTradeTime) return;
+      if (cancelled || tick.securityId !== selected.security_id || !tick.lastTradeTime || tick.lastTradeTime * 1000 > Math.min(Date.now(), tick.receivedAt) + 60_000 || tick.lastTradeTime < latestTradeTime) return;
       latestTradeTime = tick.lastTradeTime;
       latestTick = tick;
       pendingTicks.push(tick);
@@ -2661,7 +2661,7 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
     <div className="chart-toolbar">
       <div>
         <div className="chart-timeframe-heading"><p className="eyebrow">Chart timeframe</p>{sources?.length ? <div className="chart-source-tags" aria-label="Watchlists">{sources.map(name => <span className={`screener-tag-${screenerSourceClasses[name]}`} key={name}>{name}</span>)}</div> : null}</div>
-        <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${showLiveDailyCandle(selected.recent, liveDailyRow) ? " + live intraday candle" : ""}` : "Today’s 1-minute candles (IST) · Anchored VWAP (Low)"}</span>
+        <span>{timeframe === "daily" ? `Last ${chartMonths} months daily${showLiveDailyCandle(selected.recent, liveDailyRow) ? " + live intraday candle" : ""}` : "Today’s 1-minute candles (IST) · Anchored VWAP (HLC3)"}</span>
       </div>
       <div className="chart-toolbar-actions">
         <a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer" title={`Open ${selected.symbol} in TradingView`}>
@@ -3671,12 +3671,12 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
   const width = 780;
   const priceHeight = 250;
   const volumeHeight = 76;
-  const vwap = timeframe === "1min" ? anchoredLowVwap(chartRows) : [];
+  const vwap = timeframe === "1min" ? anchoredVwap(chartRows) : [];
   const lows = chartRows.map((row) => row.low);
   const highs = chartRows.map((row) => row.high);
   const closes = chartRows.map((row) => row.close);
-  const calculatedEma = emaValues(closes, emaPeriod);
-  const chartEmaValues = chartRows.map((row, index) => row[emaKey] ?? calculatedEma[index]);
+  const calculatedEma = timeframe === "1min" ? [] : emaValues(closes, emaPeriod);
+  const chartEmaValues = timeframe === "1min" ? [] : chartRows.map((row, index) => row[emaKey] ?? calculatedEma[index]);
   const visibleEmaValues = chartEmaValues.filter((value): value is number => value !== undefined);
   const priceMin = Math.min(...lows, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(swingHighLine ? [swingHighLine.price] : []));
   const priceMax = Math.max(...highs, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(swingHighLine ? [swingHighLine.price] : []));
@@ -3688,7 +3688,7 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
     : chartStochDValues(chartRows.map((row) => row.close)) : [];
   const volumeSma = smaValues(chartRows.map((row) => row.volume), 20);
   const emaPath = chartEmaValues.map((value, index) => ({ value, x: index * candleSlot + candleSlot / 2 })).filter((point): point is { value: number; x: number } => point.value !== undefined).map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
-  const vwapPath = vwap.map((value, index) => `${index ? "L" : "M"}${(index * candleSlot + candleSlot / 2).toFixed(2)} ${scaleValue(value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
+  const vwapPath = vwap.map((value, index) => ({ value, index })).filter(point => Number.isFinite(point.value)).map((point, position) => `${position ? "L" : "M"}${(point.index * candleSlot + candleSlot / 2).toFixed(2)} ${scaleValue(point.value, priceMin, priceMax, priceHeight, 8).toFixed(2)}`).join(" ");
   const swingLowIndex = swingLowPoint ? chartRows.findIndex((row) => row.trade_date === swingLowPoint.trade_date) : -1;
   const swingLowY = swingLowPoint && swingLowIndex >= 0 ? scaleValue(swingLowPoint.low, priceMin, priceMax, priceHeight, 8) : undefined;
   const highCandleIndex = highCandle ? chartRows.findIndex((row) => row.trade_date === highCandle.date) : -1;
@@ -3710,7 +3710,7 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
     }
     : null;
   return <div className={`clean-chart ${referenceStyle ? "thirty-reference-chart" : ""}`}>
-    {!referenceStyle && <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : timeframe === "1min" ? "1Min" : "Hourly"} candles</span><span><i className="legend-ema" />{emaLabel}</span>{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}{highCandleY !== undefined && <span><i className="legend-high-candle" />Entry above {money(highCandle!.high)}</span>}{stopY !== undefined && <span><i className="legend-stop-level" />Signal EMA SL {money(stopLevel!)}</span>}{stochHighLine && <span><i className="legend-stoch-high" />StochHigh {money(stochHighLine.price)}</span>}{swingHighLine && <span><i className="legend-swing-high" />SwingHigh {money(swingHighLine.price)}</span>}<span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>}
+    {!referenceStyle && <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : timeframe === "1min" ? "1Min" : "Hourly"} candles</span>{timeframe !== "1min" && <span><i className="legend-ema" />{emaLabel}</span>}{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}{highCandleY !== undefined && <span><i className="legend-high-candle" />Entry above {money(highCandle!.high)}</span>}{stopY !== undefined && <span><i className="legend-stop-level" />Signal EMA SL {money(stopLevel!)}</span>}{stochHighLine && <span><i className="legend-stoch-high" />StochHigh {money(stochHighLine.price)}</span>}{swingHighLine && <span><i className="legend-swing-high" />SwingHigh {money(swingHighLine.price)}</span>}<span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>}
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart`}>
       {swingLowY !== undefined && <line className="swing-low-line" x1={swingLowIndex * candleSlot + candleSlot / 2} x2={width} y1={swingLowY} y2={swingLowY}><title>{`Swing low ${money(swingLowPoint!.low)} on ${swingLowPoint!.trade_date}`}</title></line>}
       {highCandleY !== undefined && <line className="high-candle-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={highCandleY} y2={highCandleY}><title>{`High candle ${money(highCandle!.high)} on ${highCandle!.date}`}</title></line>}
@@ -3733,8 +3733,8 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
           <rect x={x - bodyWidth / 2} y={bodyY} width={bodyWidth} height={bodyHeight} rx="1" />
         </g>;
       })}
-      <path className="ema-line" d={emaPath} />
-      {vwap.length > 0 && <><path d={vwapPath} fill="none" stroke="#8b5cf6" strokeWidth="1.8"><title>Anchored VWAP (Low) from today’s first candle</title></path><circle cx={candleSlot / 2} cy={scaleValue(chartRows[0].low, priceMin, priceMax, priceHeight, 8)} r="3" fill="#8b5cf6" /></>}
+      {timeframe !== "1min" && <path className="ema-line" d={emaPath} />}
+      {vwap.length > 0 && <><path d={vwapPath} fill="none" stroke="#8b5cf6" strokeWidth="1.8"><title>Anchored VWAP (HLC3) from today’s first candle</title></path>{Number.isFinite(vwap[0]) && <circle cx={candleSlot / 2} cy={scaleValue(vwap[0], priceMin, priceMax, priceHeight, 8)} r="3" fill="#8b5cf6" />}</>}
       {latestReclaimMarker && <polygon className="ema-reclaim-triangle" points={`${latestReclaimMarker.x.toFixed(2)},${(latestReclaimMarker.y - 6).toFixed(2)} ${(latestReclaimMarker.x - 5).toFixed(2)},${(latestReclaimMarker.y + 4).toFixed(2)} ${(latestReclaimMarker.x + 5).toFixed(2)},${(latestReclaimMarker.y + 4).toFixed(2)}`}>
         <title>{`${chartDateLabel(latestReclaimMarker.row.trade_date, timeframe)} reclaimed ${emaLabel}: previous close below, latest close ${latestReclaimMarker.row.close.toFixed(2)} above ${latestReclaimMarker.ema.toFixed(2)}`}</title>
       </polygon>}
@@ -3760,8 +3760,8 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
       })}
     </div>}
     {showScreenerStoch && <StochDPanel values={screenerD} width={width} label={`${timeframe} StochRSI percent D`} />}
-    {timeframe === "1min" && <div className="thirty-reference-legend" style={{ color: "#8b5cf6" }}>Anchored VWAP (Low) · {chartDateLabel(chartRows[0].trade_date, timeframe)} to {chartDateLabel(chartRows.at(-1)!.trade_date, timeframe)} IST</div>}
-    {referenceStyle && <div className="thirty-reference-legend">{timeframe} candles · <span>10 EMA</span> · Volume below</div>}
+    {timeframe === "1min" && <div className="thirty-reference-legend" style={{ color: "#8b5cf6" }}>Anchored VWAP (HLC3) · {chartDateLabel(chartRows[0].trade_date, timeframe)} to {chartDateLabel(chartRows.at(-1)!.trade_date, timeframe)} IST · {Number.isFinite(vwap.at(-1)) ? money(vwap.at(-1)!) : "Waiting for volume"}</div>}
+    {referenceStyle && <div className="thirty-reference-legend">{timeframe} candles{timeframe !== "1min" && <> · <span>10 EMA</span></>} · Volume below</div>}
   </div>;
 }
 
