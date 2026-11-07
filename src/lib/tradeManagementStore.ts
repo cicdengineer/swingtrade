@@ -76,12 +76,6 @@ type HoldingForManagement = DhanHolding & { brokerEntryDate?: string; brokerCale
 
 export async function getTradingSettings() {
   const db = await readDatabase();
-  if (!db.trading_settings.length) {
-    const settings = defaultTradingSettings();
-    db.trading_settings = [settings];
-    await writeDatabase(db);
-    return settings;
-  }
   return { ...defaultTradingSettings(), ...db.trading_settings[0], id: "default" as const };
 }
 

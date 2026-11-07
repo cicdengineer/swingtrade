@@ -1,3 +1,5 @@
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { readDatabase } from "@/lib/localDatabase";
 import { refreshUniverseData } from "@/lib/historicalDataService";
@@ -7,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     let db = await readDatabase();
-    if (!db.universe_members.some((member) => member.universe_name === "CNX500")) {
+    if (!db.universe_members.some((member) => member.universe_name === "CNX500") && (await getServerSession(authOptions))?.isAdmin) {
       await refreshUniverseData(false, "CNX500");
       db = await readDatabase();
     }

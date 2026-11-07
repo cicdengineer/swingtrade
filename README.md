@@ -28,6 +28,17 @@ Local, rules-based Indian equity seasonality research. It contains no technical 
 
 The browser only calls local `/api/*` routes. The historical request is made by the Next.js server to Dhan with the access token held in the server environment.
 
+## Google sign-in
+
+Create a Google OAuth web application client with an External audience. Publish it for general access after testing. Register these exact authorized redirect URIs:
+
+- Local development uses `http://localhost:3000/api/auth/callback/google`.
+- Production uses `https://trade.jobpothe.com/api/auth/callback/google`.
+
+Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NEXTAUTH_URL` (the origin of the deployment), and `NEXTAUTH_SECRET` in the runtime environment, then restart the app. Generate a separate persistent random secret per environment with `openssl rand -base64 32`. Keep secrets out of Git.
+
+The first Google sign-in grants viewer access, including holdings and trade history. Only the verified Google account `projectwealthpro@gmail.com` can change shared records, settings, or refresh stored datasets. Screeners and filters calculate results for the current view.
+
 ## Seasonal Stocks watchlists
 
 The Seasonal Stocks screen reads prebuilt snapshots for the selected month. A month change reads only that month's saved watchlist; live Dhan ticks continue to update its tiles. To prepare data, check **Data Status** for downloaded OHLCV rows and use **Refresh All Data** there if needed; then open **Seasonality** and click **Rebuild Seasonality Statistics**; finally return to **Seasonal Stocks** and click **Build Watchlists**. Repeat the statistics and watchlist builds after refreshing historical market data. The build uses completed stored seasonal observations, requires an average three-month return strictly above 30%, and saves all 12 monthly watchlists in MySQL (or `.data/seasonal-watchlists.json` locally). **Load Saved** rereads the current month without recalculating historical returns.
@@ -54,15 +65,7 @@ Recommended refresh schedule:
 
 If Hostinger cron is configured in UTC, use 10:10 UTC, 10:30 UTC, and 00:30 UTC respectively. If the account/server cron timezone is Asia/Kolkata, use the IST times directly.
 
-Manual refresh uses the same path:
-
-```bash
-curl -X POST https://trade.jobpothe.com/api/data/refresh-universe \
-  -H "content-type: application/json" \
-  -d '{"forceUniverse":true}'
-```
-
-For cron-compatible authenticated refresh:
+The signed-in owner can start a manual refresh from Data Status. For scheduled runs:
 
 ```bash
 curl "https://trade.jobpothe.com/api/cron/daily-refresh?secret=YOUR_DATA_REFRESH_SECRET"

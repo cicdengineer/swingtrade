@@ -1,3 +1,5 @@
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { calculateMonthlySeasonality, calculateQuarterlySeasonality, calculateRollingSeasonality } from "@/lib/analytics";
 import { getPrices, refreshInstrumentData } from "@/lib/historicalDataService";
@@ -5,9 +7,11 @@ import { getPrices, refreshInstrumentData } from "@/lib/historicalDataService";
 export async function POST(req: NextRequest) {
   try {
     const { security, refresh } = await req.json();
+    const session = await getServerSession(authOptions);
+    if (refresh && !session?.isAdmin) return NextResponse.json({ error: "Only the owner can refresh prices." }, { status: 403 });
     if (refresh) await refreshInstrumentData(security);
     let stored = await getPrices(security.securityId);
-    if (!stored.length) {
+    if (!stored.length && session?.isAdmin) {
       await refreshInstrumentData(security);
       stored = await getPrices(security.securityId);
     }
