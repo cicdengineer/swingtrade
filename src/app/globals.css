@@ -174,3 +174,18 @@
 .locked-value { display: inline-flex; align-items: center; gap: .45em; color: var(--muted); white-space: nowrap; }
 .locked-value .locked-value-mask { font: inherit; filter: blur(3px); user-select: none; }
 .portfolio-refresh-access { display: grid; justify-items: start; gap: 4px; }
+
+.screener-scan-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--green);
+}
+.screener-scan-status svg { color: var(--green); }
+@media (prefers-reduced-motion: reduce) {
+  .screener-scan-status .spin { animation: none; }
+}
