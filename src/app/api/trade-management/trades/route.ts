@@ -1,3 +1,5 @@
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { getHoldings, hasDhanCredentials } from "@/lib/dhan";
 import { createManagedTrade, getTradeManagementSnapshot } from "@/lib/tradeManagementStore";
@@ -5,6 +7,7 @@ import { createManagedTrade, getTradeManagementSnapshot } from "@/lib/tradeManag
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  if (!(await getServerSession(authOptions))?.fullAccess) return NextResponse.json({ error: "Full access required." }, { status: 403 });
   const holdings = hasDhanCredentials() ? await getHoldings().catch(() => []) : [];
   return NextResponse.json({ tradeManagement: await getTradeManagementSnapshot(holdings) });
 }

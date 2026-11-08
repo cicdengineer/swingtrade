@@ -165,7 +165,7 @@ async function withMysqlRetry<T>(task: () => Promise<T>) {
   throw lastError instanceof Error ? lastError : new Error(mysqlErrorMessage(lastError));
 }
 
-function getMysqlPool() {
+export function getMysqlPool() {
   if (!databaseUrl) throw new Error("DATABASE_URL is not configured.");
   if (!mysqlPool) {
     const url = new URL(databaseUrl);

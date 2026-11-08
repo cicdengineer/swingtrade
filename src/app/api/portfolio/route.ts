@@ -1,3 +1,5 @@
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { getHoldings, getPositions, getTradeHistory, hasDhanCredentials, type DhanHolding, type DhanPosition, type DhanTrade } from "@/lib/dhan";
 import { getTradeManagementSnapshot } from "@/lib/tradeManagementStore";
@@ -313,118 +315,145 @@ function monthlyPnl(closedTrades: ClosedTrade[], trades: DhanTrade[]) {
   return [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, pnl]) => ({ month, pnl }));
 }
 
-export async function GET() {
+async function buildPortfolio(fullAccess: boolean) {
+  const period = portfolioPeriod();
+  const [holdings, positions, inventoryTrades] = await Promise.all([getHoldings(), getPositions(), getTradeHistory(period.inventoryFrom, period.to)]);
+  const trades = inventoryTrades.filter((trade) => {
+    const date = tradeDate(trade);
+    return date >= period.from && date <= period.to;
+  });
+  const positionBySecurity = new Map(positions.map((position) => [position.securityId, position]));
+  const openLotsBySecurity = calculateOpenLotsBySecurity(inventoryTrades);
+  const tradeInstruments = new Map(inventoryTrades.map((trade) => [trade.securityId, trade.instrument]));
+  const db = await readDatabase();
+  const stopLossBySecurity = new Map(db.portfolio_stop_losses.map((row) => [row.security_id, row.stop_loss]));
+  const today = period.to;
+  const holdingsBySecurity = new Set(holdings.map((holding) => holding.securityId));
+  const adjustedHoldings = holdings.map((holding) => {
+    const position = positionBySecurity.get(holding.securityId);
+    const openLots = openLotsBySecurity.get(holding.securityId) ?? [];
+    if (isEtfLike(holding.securityId, holding.tradingSymbol, tradeInstruments)) return null;
+    const sellFromHoldingQty = todaySellFromHoldingQty(position);
+    const effectiveQty = sellFromHoldingQty > 0 ? Math.max(0, holding.availableQty || holding.totalQty - sellFromHoldingQty) : holding.totalQty;
+    if (effectiveQty <= 0) return null;
+    return enrichHolding({ ...holding, totalQty: effectiveQty, availableQty: Math.min(holding.availableQty || effectiveQty, effectiveQty) }, position, openLots, today, db.daily_prices, stopLossBySecurity.get(holding.securityId));
+  }).filter((holding): holding is NonNullable<typeof holding> => Boolean(holding));
+  const boughtPositions = positions
+    .filter((position) => !holdingsBySecurity.has(position.securityId) && isDeliveryPosition(position) && openBuyQty(position) > 0 && !isEtfLike(position.securityId, position.tradingSymbol, tradeInstruments))
+    .map((position) => {
+      const quantity = openBuyQty(position);
+      const avgCostPrice = position.buyAvg || position.costPrice;
+      const holding: DhanHolding & { totalQty: number; availableQty: number } = {
+        exchange: position.exchangeSegment,
+        tradingSymbol: position.tradingSymbol,
+        securityId: position.securityId,
+        isin: "",
+        totalQty: quantity,
+        dpQty: 0,
+        t1Qty: quantity,
+        availableQty: quantity,
+        collateralQty: 0,
+        avgCostPrice,
+      };
+      return enrichHolding(holding, position, [{ date: today, quantity, price: avgCostPrice }], today, db.daily_prices, stopLossBySecurity.get(position.securityId));
+    });
+  const enrichedHoldings = [...adjustedHoldings, ...boughtPositions];
+
+  const closedTrades = calculateClosedTrades(inventoryTrades).filter((trade) => trade.date >= period.from && trade.date <= period.to);
+  const wins = closedTrades.filter((trade) => trade.netPnl > 0);
+  const losses = closedTrades.filter((trade) => trade.netPnl < 0);
+  const grossPnl = closedTrades.reduce((sum, trade) => sum + trade.grossPnl, 0);
+  const charges = trades.reduce((sum, trade) => sum + tradeCharges(trade), 0);
+  const netPnl = grossPnl - charges;
+  const chargesByDate = new Map<string, number>();
+  for (const trade of trades) {
+    const date = tradeDate(trade);
+    chargesByDate.set(date, (chargesByDate.get(date) ?? 0) + tradeCharges(trade));
+  }
+  const grossByDate = new Map<string, number>();
+  for (const trade of closedTrades) grossByDate.set(trade.date, (grossByDate.get(trade.date) ?? 0) + trade.grossPnl);
+  let cumulative = 0;
+  const equityDates = [...new Set([...grossByDate.keys(), ...chargesByDate.keys()])].sort();
+  const equityCurve = equityDates.map((date) => {
+    const pnl = (grossByDate.get(date) ?? 0) - (chargesByDate.get(date) ?? 0);
+    cumulative += pnl;
+    return { date, pnl, cumulative };
+  });
+
+  const totalInvested = enrichedHoldings.reduce((sum, holding) => sum + holding.invested, 0);
+  const unrealizedPnl = enrichedHoldings.reduce((sum, holding) => sum + holding.unrealizedPnl, 0);
+  const stats = {
+    financialYear: period.label,
+    from: period.from,
+    to: period.to,
+    totalTrades: trades.length,
+    closedTrades: closedTrades.length,
+    realizedPnl: netPnl,
+    grossPnl,
+    charges,
+    unrealizedPnl,
+    totalInvested,
+    portfolioPnl: netPnl + unrealizedPnl,
+    winners: wins.length,
+    losers: losses.length,
+    winRate: closedTrades.length ? (wins.length / closedTrades.length) * 100 : 0,
+    averageWin: wins.reduce((sum, trade) => sum + trade.netPnl, 0) / (wins.length || 1),
+    averageLoss: losses.reduce((sum, trade) => sum + trade.netPnl, 0) / (losses.length || 1),
+    maxProfit: Math.max(...closedTrades.map((trade) => trade.netPnl), 0),
+    maxLoss: Math.min(...closedTrades.map((trade) => trade.netPnl), 0),
+    drawdown: maxDrawdown(equityCurve.map((point) => point.cumulative)),
+    winLossRatio: Math.abs((wins.reduce((sum, trade) => sum + trade.netPnl, 0) / (wins.length || 1)) / (losses.reduce((sum, trade) => sum + trade.netPnl, 0) / (losses.length || 1) || -1)),
+  };
+
+  const tradeManagement = fullAccess ? await getTradeManagementSnapshot(enrichedHoldings) : undefined;
+
+  return {
+    holdings: fullAccess ? enrichedHoldings : enrichedHoldings.map(holding => ({
+      securityId: holding.securityId, tradingSymbol: holding.tradingSymbol, totalQty: holding.totalQty,
+      brokerEntryDate: holding.brokerEntryDate, brokerTradingDaysHeld: holding.brokerTradingDaysHeld,
+      invested: holding.invested, currentPrice: holding.currentPrice, unrealizedPnl: holding.unrealizedPnl,
+      ema10: holding.ema10, ema50: holding.ema50, distanceFrom50EmaPct: holding.distanceFrom50EmaPct, distanceFrom10EmaPct: holding.distanceFrom10EmaPct,
+      recent: holding.recent,
+    })),
+    positions: fullAccess ? positions : [],
+    trades: fullAccess ? trades : [],
+    closedTrades: fullAccess ? closedTrades : closedTrades.map(({ date, symbol, securityId, quantity, netPnl }) => ({ date, symbol, securityId, quantity, netPnl })),
+    equityCurve,
+    monthlyPnl: monthlyPnl(closedTrades, trades),
+    stats,
+    tradeManagement,
+    source: {
+      tradeHistoryFrom: period.from,
+      tradeHistoryTo: period.to,
+      inventoryHistoryFrom: period.inventoryFrom,
+      rawTrades: trades.length,
+      closedLots: closedTrades.length,
+    },
+  };
+}
+
+type Snapshot = Awaited<ReturnType<typeof buildPortfolio>>;
+let viewerSnapshot: { expires: number; value: Promise<Snapshot> } | undefined;
+
+export async function GET(request: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Sign-in required." }, { status: 401 });
+  if (new URL(request.url).searchParams.has("refresh") && !session.fullAccess)
+    return NextResponse.json({ error: "Full access required to refresh." }, { status: 403 });
   if (!hasDhanCredentials()) return NextResponse.json({ error: "Dhan credentials are not configured." }, { status: 401 });
 
   try {
-    const period = portfolioPeriod();
-    const [holdings, positions, inventoryTrades] = await Promise.all([getHoldings(), getPositions(), getTradeHistory(period.inventoryFrom, period.to)]);
-    const trades = inventoryTrades.filter((trade) => {
-      const date = tradeDate(trade);
-      return date >= period.from && date <= period.to;
-    });
-    const positionBySecurity = new Map(positions.map((position) => [position.securityId, position]));
-    const openLotsBySecurity = calculateOpenLotsBySecurity(inventoryTrades);
-    const tradeInstruments = new Map(inventoryTrades.map((trade) => [trade.securityId, trade.instrument]));
-    const db = await readDatabase();
-    const stopLossBySecurity = new Map(db.portfolio_stop_losses.map((row) => [row.security_id, row.stop_loss]));
-    const today = period.to;
-    const holdingsBySecurity = new Set(holdings.map((holding) => holding.securityId));
-    const adjustedHoldings = holdings.map((holding) => {
-      const position = positionBySecurity.get(holding.securityId);
-      const openLots = openLotsBySecurity.get(holding.securityId) ?? [];
-      if (isEtfLike(holding.securityId, holding.tradingSymbol, tradeInstruments)) return null;
-      const sellFromHoldingQty = todaySellFromHoldingQty(position);
-      const effectiveQty = sellFromHoldingQty > 0 ? Math.max(0, holding.availableQty || holding.totalQty - sellFromHoldingQty) : holding.totalQty;
-      if (effectiveQty <= 0) return null;
-      return enrichHolding({ ...holding, totalQty: effectiveQty, availableQty: Math.min(holding.availableQty || effectiveQty, effectiveQty) }, position, openLots, today, db.daily_prices, stopLossBySecurity.get(holding.securityId));
-    }).filter((holding): holding is NonNullable<typeof holding> => Boolean(holding));
-    const boughtPositions = positions
-      .filter((position) => !holdingsBySecurity.has(position.securityId) && isDeliveryPosition(position) && openBuyQty(position) > 0 && !isEtfLike(position.securityId, position.tradingSymbol, tradeInstruments))
-      .map((position) => {
-        const quantity = openBuyQty(position);
-        const avgCostPrice = position.buyAvg || position.costPrice;
-        const holding: DhanHolding & { totalQty: number; availableQty: number } = {
-          exchange: position.exchangeSegment,
-          tradingSymbol: position.tradingSymbol,
-          securityId: position.securityId,
-          isin: "",
-          totalQty: quantity,
-          dpQty: 0,
-          t1Qty: quantity,
-          availableQty: quantity,
-          collateralQty: 0,
-          avgCostPrice,
-        };
-        return enrichHolding(holding, position, [{ date: today, quantity, price: avgCostPrice }], today, db.daily_prices, stopLossBySecurity.get(position.securityId));
-      });
-    const enrichedHoldings = [...adjustedHoldings, ...boughtPositions];
-
-    const closedTrades = calculateClosedTrades(inventoryTrades).filter((trade) => trade.date >= period.from && trade.date <= period.to);
-    const wins = closedTrades.filter((trade) => trade.netPnl > 0);
-    const losses = closedTrades.filter((trade) => trade.netPnl < 0);
-    const grossPnl = closedTrades.reduce((sum, trade) => sum + trade.grossPnl, 0);
-    const charges = trades.reduce((sum, trade) => sum + tradeCharges(trade), 0);
-    const netPnl = grossPnl - charges;
-    const chargesByDate = new Map<string, number>();
-    for (const trade of trades) {
-      const date = tradeDate(trade);
-      chargesByDate.set(date, (chargesByDate.get(date) ?? 0) + tradeCharges(trade));
+    if (session.fullAccess) {
+      if (new URL(request.url).searchParams.has("refresh")) viewerSnapshot = undefined;
+      return NextResponse.json(await buildPortfolio(true));
     }
-    const grossByDate = new Map<string, number>();
-    for (const trade of closedTrades) grossByDate.set(trade.date, (grossByDate.get(trade.date) ?? 0) + trade.grossPnl);
-    let cumulative = 0;
-    const equityDates = [...new Set([...grossByDate.keys(), ...chargesByDate.keys()])].sort();
-    const equityCurve = equityDates.map((date) => {
-      const pnl = (grossByDate.get(date) ?? 0) - (chargesByDate.get(date) ?? 0);
-      cumulative += pnl;
-      return { date, pnl, cumulative };
-    });
-
-    const totalInvested = enrichedHoldings.reduce((sum, holding) => sum + holding.invested, 0);
-    const unrealizedPnl = enrichedHoldings.reduce((sum, holding) => sum + holding.unrealizedPnl, 0);
-    const stats = {
-      financialYear: period.label,
-      from: period.from,
-      to: period.to,
-      totalTrades: trades.length,
-      closedTrades: closedTrades.length,
-      realizedPnl: netPnl,
-      grossPnl,
-      charges,
-      unrealizedPnl,
-      totalInvested,
-      portfolioPnl: netPnl + unrealizedPnl,
-      winners: wins.length,
-      losers: losses.length,
-      winRate: closedTrades.length ? (wins.length / closedTrades.length) * 100 : 0,
-      averageWin: wins.reduce((sum, trade) => sum + trade.netPnl, 0) / (wins.length || 1),
-      averageLoss: losses.reduce((sum, trade) => sum + trade.netPnl, 0) / (losses.length || 1),
-      maxProfit: Math.max(...closedTrades.map((trade) => trade.netPnl), 0),
-      maxLoss: Math.min(...closedTrades.map((trade) => trade.netPnl), 0),
-      drawdown: maxDrawdown(equityCurve.map((point) => point.cumulative)),
-      winLossRatio: Math.abs((wins.reduce((sum, trade) => sum + trade.netPnl, 0) / (wins.length || 1)) / (losses.reduce((sum, trade) => sum + trade.netPnl, 0) / (losses.length || 1) || -1)),
-    };
-
-    const tradeManagement = await getTradeManagementSnapshot(enrichedHoldings);
-
-    return NextResponse.json({
-      holdings: enrichedHoldings,
-      positions,
-      trades,
-      closedTrades,
-      equityCurve,
-      monthlyPnl: monthlyPnl(closedTrades, trades),
-      stats,
-      tradeManagement,
-      source: {
-        tradeHistoryFrom: period.from,
-        tradeHistoryTo: period.to,
-        inventoryHistoryFrom: period.inventoryFrom,
-        rawTrades: trades.length,
-        closedLots: closedTrades.length,
-      },
-    });
+    // Repeated viewer reads share the same redacted snapshot, including in-flight reads.
+    if (!viewerSnapshot || viewerSnapshot.expires <= Date.now()) {
+      const value = buildPortfolio(false);
+      viewerSnapshot = { value, expires: Date.now() + 60_000 };
+      void value.catch(() => { if (viewerSnapshot?.value === value) viewerSnapshot = undefined; });
+    }
+    return NextResponse.json(await viewerSnapshot.value);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Portfolio unavailable" }, { status: 502 });
   }

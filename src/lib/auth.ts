@@ -1,7 +1,7 @@
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 
-const ownerEmail = "projectwealthpro@gmail.com";
+import { hasGrant, ownerEmail, recordLogin } from "./userDirectory";
 
 export const authOptions: NextAuthOptions = {
   providers: [GoogleProvider({
@@ -11,8 +11,11 @@ export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
   callbacks: {
     async signIn({ account, profile }) {
-      return Boolean(process.env.NEXTAUTH_SECRET && account?.provider === "google" &&
+      const verified = Boolean(process.env.NEXTAUTH_SECRET && account?.provider === "google" &&
         profile && "email_verified" in profile && profile.email_verified === true && profile.email);
+      if (!verified || !profile?.email || !account?.providerAccountId) return false;
+      await recordLogin(account.providerAccountId, profile.email.toLowerCase(), profile.name ?? "");
+      return true;
     },
     async jwt({ token, account, profile }) {
       if (account) {
@@ -23,6 +26,7 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       session.isAdmin = token.isAdmin === true;
+      session.fullAccess = session.isAdmin || Boolean(token.sub && await hasGrant(token.sub));
       return session;
     },
   },

@@ -1,5 +1,7 @@
 "use client";
 
+import { UsersView } from "./UsersView";
+import { LockKeyhole, Users } from "lucide-react";
 import { SessionProvider, signIn, signOut, useSession } from "next-auth/react";
 import { anchoredVwap, applyMinuteTick, todayMinuteRows } from "@/lib/minuteChart";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -49,7 +51,7 @@ import { findStochHigh, type StochHighLine } from "@/lib/stochHigh";
 import { findSwingHigh, isAboveSwingHighRed, type SwingHighSignal } from "@/lib/swingHigh";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
 
-type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings";
+type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings" | "Users";
 type DataSummary = { universe_name: UniverseName; total_constituents: number; mapped: number; stocks_downloaded: number; stocks_pending: number; stocks_failed: number; earliest_data_date: string | null; latest_data_date: string | null; index_latest_date: string | null; total_ohlcv_rows: number; last_refresh: string | null; historical_sessions: number; latest_official?: number; latest_provisional?: number };
 type DataDownloadJob = { id?: string; status: string; total: number; completed: number; remaining: number; successful: number; failed: number; current_stock?: string; current_status?: string; progress: number; started_at?: string; finished_at?: string; last_successful_update?: string; data_through_date?: string; notice?: string; pending_eod_count?: number; trading_date?: string; historical_candles_backfilled?: number; official_candles_updated?: number; provisional_candles_created?: number; provisional_candles_reconciled?: number; already_up_to_date?: number; errors: string[] };
 type DataStatus = { dhan_connected: boolean; dhan_profile?: { ok: boolean; dhanClientId?: string; tokenValidity?: string; activeSegment?: string; dataPlan?: string; dataValidity?: string; error?: string }; database_size_bytes: number; price_adjustment_status: string; latest_market_data: null | { trading_date: string; official: number; provisional: number; data_status: string }; latest_job: null | DataDownloadJob; summaries: DataSummary[]; failures: { symbol: string; security_id: string; error_message: string; attempt_count: number; last_attempt: string }[]; quality_issues: unknown[]; universe_sources: Record<string, { label: string; url: string }> };
@@ -970,7 +972,7 @@ function liveAdjustedPortfolio(portfolio: PortfolioResponse | null, liveTicks: R
         const previousClose = tick.prevClose ?? holding.recent?.filter((row) => row.trade_date < liveTradeDate()).at(-1)?.close;
         return previousClose && previousClose > 0 ? ((tick.ltp / previousClose) - 1) * 100 : adjustedHolding.todayChangePct;
       })(),
-      unrealizedPnl: (tick.ltp - holding.avgCostPrice) * holding.totalQty,
+      unrealizedPnl: tick.ltp * holding.totalQty - holding.invested,
       distanceFrom10EmaPct: adjustedHolding.ema10 ? ((tick.ltp - adjustedHolding.ema10) / adjustedHolding.ema10) * 100 : adjustedHolding.distanceFrom10EmaPct,
       distanceFrom50EmaPct: adjustedHolding.ema50 ? ((tick.ltp - adjustedHolding.ema50) / adjustedHolding.ema50) * 100 : adjustedHolding.distanceFrom50EmaPct,
     };
@@ -1039,7 +1041,7 @@ const liveAdjustedPortfolioHolding = (holding: PortfolioHolding, liveDaily: Dail
     ...holding,
     currentPrice,
     todayChangePct,
-    unrealizedPnl: currentPrice === undefined ? holding.unrealizedPnl : (currentPrice - holding.avgCostPrice) * holding.totalQty,
+    unrealizedPnl: currentPrice === undefined ? holding.unrealizedPnl : currentPrice * holding.totalQty - holding.invested,
     ema10,
     ema50,
     distanceFrom10EmaPct: ema10 && currentPrice ? ((currentPrice - ema10) / ema10) * 100 : holding.distanceFrom10EmaPct,
@@ -1376,16 +1378,17 @@ function HoldingDecisionTiles({ holding }: { holding: PortfolioHolding }) {
   const extremeMove = Boolean(previous?.close && last && Math.abs(((last.close / previous.close) - 1) * 100) >= 5);
   const swingBreak = isBreakingSwingHigh(holding);
   const moveSl = needsMoveSlToCost(holding);
+  const fullAccess = useSession().data?.fullAccess === true;
   const tiles = [
     { label: "3 Green", value: last3Green ? "Yes" : "No", good: last3Green },
     { label: "High Vol", value: highVol ? `${last?.volume_ratio?.toFixed(1)}x` : "No", good: highVol },
     { label: "Contraction", value: contraction ? "Yes" : "No", good: contraction },
     { label: "Above 10/50", value: above10 && above50 ? "Yes" : "No", good: above10 && above50 },
     { label: "Swing High", value: swingBreak ? "Breaking" : "Below", good: swingBreak },
-    { label: "10 EMA Cost Cue", value: moveSl ? "Move SL" : "No cue", good: moveSl || holding.riskFree },
+    ...(fullAccess ? [{ label: "10 EMA Cost Cue", value: moveSl ? "Move SL" : "No cue", good: moveSl || holding.riskFree }] : []),
     { label: "Extreme Move", value: extremeMove ? "Yes" : "No", good: !extremeMove },
     { label: "StochRSI %D", value: latestStochD === undefined ? "—" : latestStochD > 80 ? `Trim · ${latestStochD.toFixed(1)}` : latestStochD.toFixed(1), good: latestStochD !== undefined && latestStochD <= 80 },
-    { label: "Open Risk", value: holding.riskFree ? "Risk-free" : rupees(holdingRisk(holding)), good: holdingRisk(holding) === 0 },
+    ...(fullAccess ? [{ label: "Open Risk", value: holding.riskFree ? "Risk-free" : rupees(holdingRisk(holding)), good: holdingRisk(holding) === 0 }] : []),
   ];
   return <div className="portfolio-decision-grid">{tiles.map((tile) => <div key={tile.label} className={tile.good ? "good" : "watch"}><span>{tile.label}</span><b>{tile.value}</b></div>)}</div>;
 }
@@ -1412,6 +1415,7 @@ function HoldingDecisionMeter({ holding }: { holding: PortfolioHolding }) {
 }
 
 function PortfolioHoldingChart({ holding, live, dailyError }: { holding: PortfolioHolding; live: boolean; dailyError?: string }) {
+  const fullAccess = useSession().data?.fullAccess === true;
   const allRows = holding.recent ?? [];
   const rows = lastTradingMonths(allRows, 90);
   if (rows.length < 5) return <div className="chart-empty">Not enough rows for charting.</div>;
@@ -1422,7 +1426,7 @@ function PortfolioHoldingChart({ holding, live, dailyError }: { holding: Portfol
   const totalHeight = priceHeight + volumeHeight + gap;
   const ema10Values = rows.map((row) => row.ema10).filter((value): value is number => value !== undefined);
   const ema50Values = rows.map((row) => row.ema50).filter((value): value is number => value !== undefined);
-  const values = [...rows.flatMap((row) => [row.high, row.low]), ...ema10Values, ...ema50Values, holding.avgCostPrice, holding.stopLoss ?? holding.avgCostPrice];
+  const values = [...rows.flatMap((row) => [row.high, row.low]), ...ema10Values, ...ema50Values, ...(fullAccess ? [holding.avgCostPrice, holding.stopLoss ?? holding.avgCostPrice] : [])];
   const priceMin = Math.min(...values);
   const priceMax = Math.max(...values);
   const slot = width / rows.length;
@@ -1433,7 +1437,7 @@ function PortfolioHoldingChart({ holding, live, dailyError }: { holding: Portfol
   const slY = holding.stopLoss ? scaleValue(holding.stopLoss, priceMin, priceMax, priceHeight, 8) : undefined;
   const stochD = chartStochDValues(allRows.map((row) => row.close)).slice(-rows.length);
   return <div className="candle-chart portfolio-popup-chart">
-    <div className="chart-legend"><span><i className="legend-candle" />Daily candles{live ? " + live" : ""}</span><span><i className="legend-ema10" />10 EMA</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume</span><span><i className="legend-entry" />Entry</span><span><i className="legend-stop" />SL</span><span>StochRSI %D</span></div>
+    <div className="chart-legend"><span><i className="legend-candle" />Daily candles{live ? " + live" : ""}</span><span><i className="legend-ema10" />10 EMA</span><span><i className="legend-ema" />50 EMA</span><span><i className="legend-volume" />Volume</span>{fullAccess && <><span><i className="legend-entry" />Entry</span><span><i className="legend-stop" />SL</span></>}<span>StochRSI %D</span></div>
     <svg viewBox={`0 0 ${width} ${totalHeight}`} role="img" aria-label={`${holding.tradingSymbol} chart with 10 EMA, 50 EMA, volume, entry and stop loss`}>
       {rows.map((row, index) => {
         const x = index * slot + slot / 2;
@@ -1452,9 +1456,9 @@ function PortfolioHoldingChart({ holding, live, dailyError }: { holding: Portfol
       })}
       <path className="ema10-line" d={emaPath("ema10")} />
       <path className="ema-line" d={emaPath("ema50")} />
-      <line className="entry-line" x1="0" x2={width} y1={entryY} y2={entryY} />
+      {fullAccess && <><line className="entry-line" x1="0" x2={width} y1={entryY} y2={entryY} /></>}
       {slY !== undefined && <line className="stop-line" x1="0" x2={width} y1={slY} y2={slY} />}
-      <text className="chart-label" x="0" y={Math.max(12, entryY - 4)}>Entry {money(holding.avgCostPrice)}</text>
+      {fullAccess && <><text className="chart-label" x="0" y={Math.max(12, entryY - 4)}>Entry {money(holding.avgCostPrice)}</text></>}
       {slY !== undefined && <text className="chart-label stop-label" x="0" y={Math.max(12, slY - 4)}>SL {money(holding.stopLoss!)}</text>}
     </svg>
     <StochDPanel values={stochD} width={width} label={`${holding.tradingSymbol} daily StochRSI percent D`} />
@@ -1463,6 +1467,7 @@ function PortfolioHoldingChart({ holding, live, dailyError }: { holding: Portfol
 }
 
 function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHolding; onClose: () => void }) {
+  const fullAccess = useSession().data?.fullAccess === true;
   const [liveDailyRow, setLiveDailyRow] = useState<DailyChartPoint | null>(null);
   const [dailyError, setDailyError] = useState("");
 
@@ -1492,10 +1497,11 @@ function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHoldin
 
   const adjustedHolding = useMemo(() => liveAdjustedPortfolioHolding(holding, liveDailyRow), [holding, liveDailyRow]);
   const ema10FromAvgCost = ema10DistanceFromAvgCostPct(adjustedHolding);
-  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume, StochRSI %D, entry and stored SL.</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={ema10FromAvgCost === undefined ? undefined : pct2(ema10FromAvgCost)} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
+  return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume and StochRSI %D{fullAccess ? ", with entry and stored SL." : "."}</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} />{fullAccess && <><Stat label="Avg Cost" value={money(adjustedHolding.avgCostPrice)} sub={`Qty ${adjustedHolding.totalQty}`} /></>}<Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={ema10FromAvgCost === undefined ? undefined : pct2(ema10FromAvgCost)} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} />{fullAccess && <><Stat label="SL" value={adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)} sub={adjustedHolding.riskFree ? "Risk-free" : undefined} /></>}</div></div></div>;
 }
 
 function PortfolioTable({ holdings, ticks, intradayUpdatedAt, priceClock, onStopLossSaved }: { holdings: PortfolioHolding[]; ticks: Record<string, LiveTick>; intradayUpdatedAt: Record<string, number>; priceClock: number; onStopLossSaved: () => Promise<void> | void }) {
+  const fullAccess = useSession().data?.fullAccess === true;
   const [selected, setSelected] = useState<PortfolioHolding | null>(null);
   return <section className="panel portfolio-holdings-panel">
     <div className="panel-head">
@@ -1505,7 +1511,7 @@ function PortfolioTable({ holdings, ticks, intradayUpdatedAt, priceClock, onStop
     {holdings.length ? <div className="table-wrap">
       <table className="portfolio-holdings-table">
         <thead>
-          <tr><th>Symbol</th><th>Chart</th><th>Qty</th><th>Days</th><th>Avg Cost</th><th>SL</th><th>Risk</th><th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>10 EMA</th><th>50 EMA</th><th>Swing High</th></tr>
+          <tr><th>Symbol</th><th>Chart</th><th>Qty</th><th>Days</th>{fullAccess && <><th>Avg Cost</th><th>SL</th><th>Risk</th></>}<th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>10 EMA</th><th>50 EMA</th><th>Swing High</th></tr>
         </thead>
         <tbody>
           {holdings.map((holding) => {
@@ -1519,14 +1525,14 @@ function PortfolioTable({ holdings, ticks, intradayUpdatedAt, priceClock, onStop
               <td><HoldingMiniChart holding={holding} onOpen={() => setSelected(holding)} /></td>
               <td>{holding.totalQty}</td>
               <td>{days === undefined ? "—" : days}<small className="sample-warning">trading days</small></td>
-              <td>{money(holding.avgCostPrice)}</td>
+              {fullAccess && <><td>{money(holding.avgCostPrice)}</td>
               <td><PortfolioStopInput holding={holding} onSaved={onStopLossSaved} /></td>
-              <td><RiskCell holding={holding} /></td>
+              <td><RiskCell holding={holding} /></td></>}
               <td>{rupees(holding.invested)}</td>
               <td className={`portfolio-live-price ${todayTone}`}>{holding.currentPrice === undefined ? "—" : money(holding.currentPrice)}<small>{priceLabel}</small></td>
               <td className={`portfolio-live-change ${todayTone}`}>{holding.todayChangePct === undefined ? "—" : pct2(holding.todayChangePct)}</td>
               <td className={`portfolio-pnl ${holding.unrealizedPnl >= 0 ? "positive" : "negative"}`}>{rupees(holding.unrealizedPnl)}</td>
-              <td><TenEmaCell holding={holding} /></td>
+              <td>{fullAccess ? <TenEmaCell holding={holding} /> : holding.ema10 === undefined ? "—" : money(holding.ema10)}</td>
               <td>{holding.ema50 === undefined || holding.distanceFrom50EmaPct === undefined ? "—" : <span className={`portfolio-ema-pill ${above50Ema ? "above" : "below"}`}><b>{above50Ema ? "Above" : "Below"}</b><small>{money(holding.ema50)}</small></span>}</td>
               <td><SwingHighPill holding={holding} /></td>
             </tr>;
@@ -1549,6 +1555,7 @@ function TradeConfidenceCard({ trades }: { trades: ClosedTrade[] }) {
 }
 
 function DashboardView({ portfolio, loading, onRefresh }: { portfolio: PortfolioResponse | null; loading: boolean; onRefresh: () => void }) {
+  const fullAccess = useSession().data?.fullAccess === true;
   const stats = portfolio?.stats;
   const lastTrades = portfolio?.closedTrades.slice(-3).reverse() ?? [];
   const settings = portfolio?.tradeManagement?.settings;
@@ -1558,7 +1565,7 @@ function DashboardView({ portfolio, loading, onRefresh }: { portfolio: Portfolio
   const accountRiskPct = totalCapital > 0 ? (accountRisk / totalCapital) * 100 : 0;
   const avgTrade = stats?.closedTrades ? stats.realizedPnl / stats.closedTrades : 0;
   const riskTone = accountRiskPct > 0.7 ? "danger" : accountRiskPct > 0.5 ? "warn" : "good";
-  return <section className="portfolio-page dashboard-snapshot"><div className="data-toolbar dashboard-hero"><div><p className="eyebrow">Dashboard</p><h2>{stats ? `Trading snapshot · ${stats.from} onward` : "Dhan portfolio snapshot"}</h2><small>{stats ? `${stats.from} to ${stats.to} · data locked to trades from 15 Apr 2026 onward` : "Fetch holdings and trades from Dhan."}</small></div><button className="primary" onClick={onRefresh} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""} />Refresh</button></div>{!portfolio ? <section className="empty compact-empty"><div className="empty-art"><LayoutDashboard size={30} /></div><p className="eyebrow">Dashboard</p><h2>Ready to fetch Dhan data</h2><p>Use Refresh to load holdings, realized P&amp;L from 15 Apr 2026, and risk statistics.</p></section> : <><div className="dashboard-kpi-grid"><div className={`dashboard-kpi hero-kpi ${stats!.portfolioPnl >= 0 ? "good" : "bad"}`}><span>Total P&amp;L</span><b>{rupees(stats!.portfolioPnl)}</b><small>Realized {rupees(stats!.realizedPnl)} · Open {rupees(stats!.unrealizedPnl)}</small></div><div className="dashboard-kpi"><span>Invested</span><b>{rupees(stats!.totalInvested)}</b><small>{portfolio.holdings.length} live holdings</small></div><div className={`dashboard-kpi ${stats!.unrealizedPnl >= 0 ? "good" : "bad"}`}><span>Open P&amp;L</span><b>{rupees(stats!.unrealizedPnl)}</b><small>Current broker holdings</small></div><div className={`dashboard-kpi account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div></div><div className="dashboard-glance-grid"><section className="panel dashboard-panel compact-dashboard-panel"><div className="panel-head"><div><p className="eyebrow">Trade Quality</p><h2>{stats!.winRate.toFixed(1)}% win rate</h2></div><span className="count">{stats!.closedTrades} closed</span></div><div className="dashboard-metrics"><span>Wins / Losses <b>{stats!.winners}:{stats!.losers}</b></span><span>Avg trade <b className={avgTrade >= 0 ? "positive" : "negative"}>{rupees(avgTrade)}</b></span><span>Avg win <b className="positive">{rupees(stats!.averageWin)}</b></span><span>Avg loss <b className="negative">{rupees(stats!.averageLoss)}</b></span><span>Best <b className="positive">{rupees(stats!.maxProfit)}</b></span><span>Worst <b className="negative">{rupees(stats!.maxLoss)}</b></span></div></section><section className="panel dashboard-panel compact-dashboard-panel recent-trades-panel"><div className="panel-head"><div><p className="eyebrow">Recent Realized Trades</p><h2>Last 3 closed lots</h2></div></div>{lastTrades.length ? <div className="recent-trade-list">{lastTrades.map((trade, index) => <div key={`${trade.securityId}-${trade.date}-${index}`}><span><b>{trade.symbol}</b><small>{trade.date} · Qty {trade.quantity}</small></span><strong className={trade.netPnl >= 0 ? "positive" : "negative"}>{rupees(trade.netPnl)}</strong></div>)}</div> : <p className="panel-empty">No realized closed lots from 15 Apr 2026 onward.</p>}</section><TradeConfidenceCard trades={lastTrades} /><section className="panel dashboard-panel compact-dashboard-panel dashboard-chart-panel wide-chart"><div className="panel-head"><div><p className="eyebrow">Overall P&amp;L</p><h2>Equity line</h2></div></div><MiniLineChart points={portfolio.equityCurve} /></section><section className="panel dashboard-panel compact-dashboard-panel dashboard-chart-panel wide-chart"><div className="panel-head"><div><p className="eyebrow">Month-on-Month</p><h2>Realized bars</h2></div></div><MonthlyBars rows={portfolio.monthlyPnl} /></section></div></>}</section>;
+  return <section className="portfolio-page dashboard-snapshot"><div className="data-toolbar dashboard-hero"><div><p className="eyebrow">Dashboard</p><h2>{stats ? `Trading snapshot · ${stats.from} onward` : "Dhan portfolio snapshot"}</h2><small>{stats ? `${stats.from} to ${stats.to} · data locked to trades from 15 Apr 2026 onward` : "Fetch holdings and trades from Dhan."}</small></div><button className="primary" onClick={onRefresh} disabled={loading || !fullAccess}><RefreshCw size={15} className={loading ? "spin" : ""} />Refresh</button></div>{!portfolio ? <section className="empty compact-empty"><div className="empty-art"><LayoutDashboard size={30} /></div><p className="eyebrow">Dashboard</p><h2>Ready to fetch Dhan data</h2><p>Use Refresh to load holdings, realized P&amp;L from 15 Apr 2026, and risk statistics.</p></section> : <><div className="dashboard-kpi-grid"><div className={`dashboard-kpi hero-kpi ${stats!.portfolioPnl >= 0 ? "good" : "bad"}`}><span>Total P&amp;L</span><b>{rupees(stats!.portfolioPnl)}</b><small>Realized {rupees(stats!.realizedPnl)} · Open {rupees(stats!.unrealizedPnl)}</small></div><div className="dashboard-kpi"><span>Invested</span><b>{rupees(stats!.totalInvested)}</b><small>{portfolio.holdings.length} live holdings</small></div><div className={`dashboard-kpi ${stats!.unrealizedPnl >= 0 ? "good" : "bad"}`}><span>Open P&amp;L</span><b>{rupees(stats!.unrealizedPnl)}</b><small>Current broker holdings</small></div>{fullAccess && <div className={`dashboard-kpi account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div>}</div><div className="dashboard-glance-grid"><section className="panel dashboard-panel compact-dashboard-panel"><div className="panel-head"><div><p className="eyebrow">Trade Quality</p><h2>{stats!.winRate.toFixed(1)}% win rate</h2></div><span className="count">{stats!.closedTrades} closed</span></div><div className="dashboard-metrics"><span>Wins / Losses <b>{stats!.winners}:{stats!.losers}</b></span><span>Avg trade <b className={avgTrade >= 0 ? "positive" : "negative"}>{rupees(avgTrade)}</b></span><span>Avg win <b className="positive">{rupees(stats!.averageWin)}</b></span><span>Avg loss <b className="negative">{rupees(stats!.averageLoss)}</b></span><span>Best <b className="positive">{rupees(stats!.maxProfit)}</b></span><span>Worst <b className="negative">{rupees(stats!.maxLoss)}</b></span></div></section><section className="panel dashboard-panel compact-dashboard-panel recent-trades-panel"><div className="panel-head"><div><p className="eyebrow">Recent Realized Trades</p><h2>Last 3 closed lots</h2></div></div>{lastTrades.length ? <div className="recent-trade-list">{lastTrades.map((trade, index) => <div key={`${trade.securityId}-${trade.date}-${index}`}><span><b>{trade.symbol}</b><small>{trade.date} · Qty {trade.quantity}</small></span><strong className={trade.netPnl >= 0 ? "positive" : "negative"}>{rupees(trade.netPnl)}</strong></div>)}</div> : <p className="panel-empty">No realized closed lots from 15 Apr 2026 onward.</p>}</section><TradeConfidenceCard trades={lastTrades} /><section className="panel dashboard-panel compact-dashboard-panel dashboard-chart-panel wide-chart"><div className="panel-head"><div><p className="eyebrow">Overall P&amp;L</p><h2>Equity line</h2></div></div><MiniLineChart points={portfolio.equityCurve} /></section><section className="panel dashboard-panel compact-dashboard-panel dashboard-chart-panel wide-chart"><div className="panel-head"><div><p className="eyebrow">Month-on-Month</p><h2>Realized bars</h2></div></div><MonthlyBars rows={portfolio.monthlyPnl} /></section></div></>}</section>;
 }
 
 function BasketBacktestView({ filters, setFilters, data, loading, onRun }: { filters: BasketBacktestFilters; setFilters: (filters: BasketBacktestFilters) => void; data: BasketBacktestResult | null; loading: boolean; onRun: () => void }) {
@@ -1779,6 +1786,7 @@ function BasketBacktestView({ filters, setFilters, data, loading, onRun }: { fil
 }
 
 function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { portfolio: PortfolioResponse | null; loading: boolean; onRefresh: () => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void }) {
+  const fullAccess = useSession().data?.fullAccess === true;
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
   const [liveDailyRows, setLiveDailyRows] = useState<Record<string, DailyChartPoint>>({});
   const [intradayUpdatedAt, setIntradayUpdatedAt] = useState<Record<string, number>>({});
@@ -1880,7 +1888,7 @@ function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { p
   const riskTone = accountRiskPct > 0.7 ? "danger" : accountRiskPct > 0.5 ? "warn" : "good";
   const liveTickCount = Object.values(liveTicks).filter((tick) => isCurrentSessionTick(tick) && priceClock - tick.receivedAt < 45_000).length;
   const intradayCount = Object.entries(intradayUpdatedAt).filter(([securityId, updatedAt]) => !liveTicks[securityId] || priceClock - liveTicks[securityId].receivedAt >= 45_000 ? priceClock - updatedAt < 90_000 : false).length;
-  return <section className="portfolio-page"><div className="data-toolbar portfolio-hero"><div><p className="eyebrow">Connected portfolio</p><h2>Dhan holdings</h2><small>{livePortfolio ? `${liveTickCount} live · ${intradayCount} intraday · ${liveHoldings} holdings · trading-day age and SL-based account risk.` : "Live holdings, trading-day age, and account risk."}</small></div><button className="primary" onClick={onRefresh} disabled={loading}><WalletCards size={15} />Refresh Portfolio</button></div>{!livePortfolio ? <section className="empty"><div className="empty-art"><WalletCards size={30} /></div><p className="eyebrow">Portfolio</p><h2>Fetch your Dhan holdings</h2><p>Your Dhan access token remains server-side. This view will populate with live holdings and account risk.</p></section> : <><div className="portfolio-risk-strip"><div><span>Invested</span><b>{rupees(livePortfolio.stats.totalInvested)}</b><small>{liveHoldings} holdings</small></div><div><span>Risk Unit</span><b>{rupees(riskUnit)}</b><small>{settings ? `${settings.riskPercent.toFixed(2)}% per holding` : "Settings unavailable"}</small></div><div><span>Open P&amp;L</span><b className={livePortfolio.stats.unrealizedPnl >= 0 ? "positive" : "negative"}>{rupees(livePortfolio.stats.unrealizedPnl)}</b><small>{liveTickCount ? "Live broker ticks" : intradayCount ? "1m intraday fallback" : "Last available prices"}</small></div><div className={`account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div></div><PortfolioTable holdings={livePortfolio.holdings} ticks={liveTicks} intradayUpdatedAt={intradayUpdatedAt} priceClock={priceClock} onStopLossSaved={onRefresh} /></>}</section>;
+  return <section className="portfolio-page"><div className="data-toolbar portfolio-hero"><div><p className="eyebrow">Connected portfolio</p><h2>Dhan holdings</h2><small>{livePortfolio ? `${liveTickCount} live · ${intradayCount} intraday · ${liveHoldings} holdings · trading-day age and SL-based account risk.` : "Live holdings, trading-day age, and account risk."}</small></div><button className="primary" onClick={onRefresh} disabled={loading || !fullAccess}><WalletCards size={15} />Refresh Portfolio</button></div>{!livePortfolio ? <section className="empty"><div className="empty-art"><WalletCards size={30} /></div><p className="eyebrow">Portfolio</p><h2>Fetch your Dhan holdings</h2><p>Your Dhan access token remains server-side. This view will populate with live holdings and account risk.</p></section> : <><div className="portfolio-risk-strip"><div><span>Invested</span><b>{rupees(livePortfolio.stats.totalInvested)}</b><small>{liveHoldings} holdings</small></div>{fullAccess && <div><span>Risk Unit</span><b>{rupees(riskUnit)}</b><small>{settings ? `${settings.riskPercent.toFixed(2)}% per holding` : "Settings unavailable"}</small></div>}<div><span>Open P&amp;L</span><b className={livePortfolio.stats.unrealizedPnl >= 0 ? "positive" : "negative"}>{rupees(livePortfolio.stats.unrealizedPnl)}</b><small>{liveTickCount ? "Live broker ticks" : intradayCount ? "1m intraday fallback" : "Last available prices"}</small></div>{fullAccess && <div className={`account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div>}</div><PortfolioTable holdings={livePortfolio.holdings} ticks={liveTicks} intradayUpdatedAt={intradayUpdatedAt} priceClock={priceClock} onStopLossSaved={onRefresh} /></>}</section>;
 }
 
 function DataStatusView({ status, loading, onRefresh, onRefreshUniverse, onRetryFailures }: { status: DataStatus | null; loading: boolean; onRefresh: () => void; onRefreshUniverse: (universe?: UniverseName) => void; onRetryFailures: () => void }) {
@@ -2687,6 +2695,8 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
 }
 
 function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedStatus }: { settings?: TradingSettings | null; emaFilters: EmaNoTouchFilters; stochFilters: StochRsiFilters; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void }) {
+  const fullAccess = useSession().data?.fullAccess === true;
+  const [lockedCount, setLockedCount] = useState(0);
   const [filters, setFilters] = useState<ThirtyInThirtyFilters>(defaultCombinedScreenerFilters);
   const [source, setSource] = useState<ScreenerSource | "All watchlists">("All watchlists");
   const [month, setMonth] = useState(new Date().getMonth());
@@ -2711,6 +2721,15 @@ function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedS
     let savedQFilters: Record<string, unknown> = {};
     try { savedQFilters = JSON.parse(localStorage.getItem("qullamaggie-filters") ?? "{}"); } catch {}
     try {
+      if (!fullAccess) {
+        const preview = await readJsonResponse<{ data: ThirtyInThirtyResponse; membership: ScreenerMembership; lockedCount: number }>(
+          await fetch("/api/screener/preview", { cache: "no-store" }), "Screener unavailable");
+        setData(preview.data);
+        setMembership(preview.membership);
+        setLockedCount(preview.lockedCount);
+        setUpdatedAt(preview.data.generatedAt);
+        return;
+      }
       const results = await Promise.allSettled([
         post<ThirtyInThirtyResponse>("/api/thirty-in-thirty-screener/run", { filters: { ...filters, showAll: true } }),
         post<{ results: QRow[] }>("/api/qullamaggie-screener", { filters: { ...savedQFilters, universe: filters.universe } }),
@@ -2754,7 +2773,7 @@ function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedS
         queueMicrotask(() => void latestRun.current());
       }
     }
-  }, [filters, month, emaFilters, stochFilters]);
+  }, [fullAccess, filters, month, emaFilters, stochFilters]);
   latestRun.current = run;
   useEffect(() => { void run(); }, [month, filters.universe]);
   useEffect(() => {
@@ -2766,14 +2785,16 @@ function CombinedScreenerView({ settings, emaFilters, stochFilters, setLiveFeedS
   return <>
     {error && <div className="error">{error}</div>}
     {sourceErrors.length > 0 && <div className="notice"><AlertTriangle size={18}/><span>{sourceErrors.join(" · ")}</span></div>}
-    <ThirtyInThirtyScreenerView combined data={data} membership={membership} source={source} setSource={setSource} month={month} setMonth={setMonth} filters={filters} setFilters={setFilters} loading={loading} onRun={run} onReset={() => { setFilters(defaultCombinedScreenerFilters); setSource("All watchlists"); setMonth(new Date().getMonth()); }} selected={selected} setSelected={setSelected} setLiveFeedStatus={setLiveFeedStatus} updatedAt={updatedAt} settings={settings} />
+    <ThirtyInThirtyScreenerView combined lockedCount={lockedCount} data={data} membership={membership} source={source} setSource={setSource} month={month} setMonth={setMonth} filters={filters} setFilters={setFilters} loading={loading} onRun={run} onReset={() => { setFilters(defaultCombinedScreenerFilters); setSource("All watchlists"); setMonth(new Date().getMonth()); }} selected={selected} setSelected={setSelected} setLiveFeedStatus={setLiveFeedStatus} updatedAt={updatedAt} settings={settings} />
   </>;
 }
 
-function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings, seasonal, month, setMonth, onBuild, onOpenSeasonality, combined, membership = {}, source = "All watchlists", setSource }: { data: ThirtyInThirtyResponse | SeasonalStocksResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: Dispatch<SetStateAction<ThirtyInThirtyRow | null>>; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null; seasonal?: boolean; month?: number; setMonth?: (month: number) => void; onBuild?: () => void; onOpenSeasonality?: () => void; combined?: boolean; membership?: ScreenerMembership; source?: ScreenerSource | "All watchlists"; setSource?: (source: ScreenerSource | "All watchlists") => void }) {
+function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun, onReset, selected, setSelected, setLiveFeedStatus, updatedAt, settings, seasonal, month, setMonth, onBuild, onOpenSeasonality, combined, lockedCount = 0, membership = {}, source = "All watchlists", setSource }: { data: ThirtyInThirtyResponse | SeasonalStocksResponse | null; filters: ThirtyInThirtyFilters; setFilters: (filters: ThirtyInThirtyFilters) => void; loading: boolean; onRun: (options?: ThirtyUpRunOptions) => void; onReset: () => void; selected: ThirtyInThirtyRow | null; setSelected: Dispatch<SetStateAction<ThirtyInThirtyRow | null>>; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void; updatedAt?: string | null; settings?: TradingSettings | null; seasonal?: boolean; month?: number; setMonth?: (month: number) => void; onBuild?: () => void; onOpenSeasonality?: () => void; combined?: boolean; lockedCount?: number; membership?: ScreenerMembership; source?: ScreenerSource | "All watchlists"; setSource?: (source: ScreenerSource | "All watchlists") => void }) {
   const [sort, setSort] = useState<{ key: ThirtyInThirtySortKey; direction: "asc" | "desc" }>({ key: seasonal ? "seasonal_avg" : "today_return", direction: "desc" });
   const [chartMonths, setChartMonths] = useState<3 | 6>(3);
   const isAdmin = useSession().data?.isAdmin === true;
+  const fullAccess = useSession().data?.fullAccess === true;
+  const previewOnly = combined === true && !fullAccess;
   const switchesLocked = combined === true && !isAdmin;
   const [cleanTrendOnly, setCleanTrendOnly] = useState(false);
   const [lowAbove10EmaOnly, setLowAbove10EmaOnly] = useState(combined === true);
@@ -2998,8 +3019,9 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!lowAbove10EmaOnly || isLatestLowAbove10Ema(row)) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, lowAbove10EmaOnly, aboveRedOnly, requiresStochHigh, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
   const visibleRows = useMemo(() => {
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
+    if (previewOnly) return activeData?.results.slice(0, 1) ?? [];
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
-  }, [pinnedRows, sortedRows, tileLimit]);
+  }, [pinnedRows, sortedRows, tileLimit, previewOnly, activeData]);
   const visibleSecurityKey = useMemo(() => visibleRows.map((row) => row.security_id).join(","), [visibleRows]);
   const togglePinned = (securityId: string) => setPinnedIds((current) => current.includes(securityId) ? current.filter((id) => id !== securityId) : [...current, securityId]);
   const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "swing_sl_pct" || key === "closest_stoch_high" || key === "closest_red_entry" || key === "closest_abnormal_high" ? "asc" : "desc" });
@@ -3062,7 +3084,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setLowAbove10EmaOnly(combined === true); setAboveRedOnly(combined === true); setStochHighOnly(false); setShowTileEma10(combined !== true); onReset(); }}>Reset</button>
       </div>
     </div>
-    <div className="momentum-filter-bar thirty-in-thirty-filters">
+    {!previewOnly && <div className="momentum-filter-bar thirty-in-thirty-filters">
       {combined ? <><label>Watchlist<select value={source} onChange={event => { setSelected(null); const nextSource = event.target.value as ScreenerSource | "All watchlists"; setSource?.(nextSource); if (switchesLocked) return; if (nextSource === "MStochRSI80" || nextSource === "SwingHigh") setFilters({ ...filters, upTodayOnly: false, stochBelow80Only: false }); else if (nextSource === "StochHigh") setFilters({ ...filters, upTodayOnly: false, stochBelow80Only: true }); }}><option value="All watchlists">All watchlists</option>{screenerSources.map(name => <option key={name} value={name}>{name}</option>)}</select></label><label>Seasonal Month<select value={month} onChange={event => setMonth?.(Number(event.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name}</option>)}</select></label></> : !seasonal && <label>Watchlist<select value={watchlistMode} onChange={event => { setSelected(null); setWatchlistMode(event.target.value as "thirty" | "qullamaggie"); }}><option value="thirty">30 in 30 results</option><option value="qullamaggie">Qullamaggie resistance</option></select></label>}
       {seasonal ? <label>Universe · Month<select value={month} disabled={loading} onChange={(e) => setMonth?.(Number(e.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name} → {["Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb"][index]}</option>)}</select></label> : <><label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as ThirtyInThirtyFilters["universe"] })}>{combined ? <><option value="CNX500">NIFTY 500</option><option value="NIFTYSC500">NIFTY SMALLCAP 500</option><option value="ALL">ALL</option></> : <option value="ALL">Nifty 500</option>}</select></label><label>Lookback<input className="plain-input" type="number" value={filters.lookbackDays} onChange={(e) => setNumber("lookbackDays", Number(e.target.value))}/></label><label>Window<input className="plain-input" type="number" value={filters.windowDays} onChange={(e) => setNumber("windowDays", Number(e.target.value))}/></label><label>Return %<input className="plain-input" type="number" value={filters.minReturnPct} onChange={(e) => setNumber("minReturnPct", Number(e.target.value))}/></label></>}
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
@@ -3070,7 +3092,8 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
       <div className="thirty-sort-control"><label htmlFor="thirty-sort">Sort</label><div><select id="thirty-sort" value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{(seasonal || combined) && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Latest Session Gain</option><option value="stoch">Stoch</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option>{combined && <option value="closest_stoch_high">Closest to StochHigh Green Line</option>}{!seasonal && <option value="closest_abnormal_high">Closest to Abnormal Vol High</option>}{combined && <option value="closest_red_entry">Closest to Red Entry</option>}<option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="falling_trend">Falling Trend {chartMonths}M</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select><button className="secondary compact" aria-label={`Sort ${sort.direction === "asc" ? "ascending" : "descending"}; change direction`} title="Change sort direction" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button></div></div>
     </div>
-    {!qMode && <fieldset className="thirty-in-thirty-switches" aria-label="Screener filters" disabled={switchesLocked}>
+    }
+    {!previewOnly && !qMode && <fieldset className="thirty-in-thirty-switches" aria-label="Screener filters" disabled={switchesLocked}>
       {!seasonal && <label title={`Show clean up and down trends on the selected ${chartMonths}M chart`}><input type="checkbox" checked={cleanTrendOnly} onChange={(e) => setCleanTrendOnly(e.target.checked)}/><span>Clean {chartMonths}M Trend</span></label>}
       <label><input type="checkbox" checked={filters.upTodayOnly} onChange={(e) => setFilters({ ...filters, upTodayOnly: e.target.checked })}/><span>Up</span></label>
       {combined && <label title="Show stocks whose latest price is above the red line from the latest StochRSI oversold zone"><input type="checkbox" checked={aboveRedOnly} onChange={(e) => setAboveRedOnly(e.target.checked)}/><span>AboveRed</span></label>}
@@ -3106,7 +3129,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <div><span>Evaluated</span><b>{qMode ? qWatchlist?.stocks.length ?? 0 : activeData.evaluated}</b></div>
         <div><span>Watchlist</span><b>{combined ? liveRows.length : qMode ? liveRows.length : activeData.qualified}</b></div>
         <div><span>{combined ? "Sources" : qMode ? "Source" : seasonal ? "Window" : "No Move"}</span><b>{combined ? source === "All watchlists" ? screenerSources.length : 1 : qMode ? "Qullamaggie" : seasonal ? activeData.results[0]?.seasonal_window ?? "—" : "statusSummary" in activeData ? activeData.statusSummary.NO_30D_MOVE ?? 0 : 0}</b></div>
-        <div><span>Shown</span><b>{visibleRows.length} / {sortedRows.length}</b></div>
+        <div><span>Shown</span><b>{visibleRows.length} / {previewOnly ? visibleRows.length + lockedCount : sortedRows.length}</b></div>
       </div>
       <section className="screenshot-tile-grid">
         {visibleRows.length ? visibleRows.map((row) => {
@@ -3139,6 +3162,10 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
             </>}
           </div>;
         }) : <p className="panel-empty">{qMode ? qWatchlistLoading ? "Loading Qullamaggie resistance stocks…" : "No Qullamaggie stocks with confirmed resistance were found." : seasonal ? "No stocks in this month's seasonal watchlist match the selected filters." : source === "SwingHigh" ? "No stocks have a higher StochRSI oversold zone with %D at or below 80 and price above the prior low." : "No stocks matched the selected 30 in 30 criteria."}</p>}
+      {previewOnly && Array.from({ length: lockedCount }, (_, index) => <div key={index} className="screenshot-tile locked-screener-tile">
+          <div aria-hidden="true" className="locked-tile-preview"><b>••••••</b><div /></div>
+          <button type="button" disabled aria-label="Locked screener result"><LockKeyhole size={16} /> Locked</button>
+        </div>)}
       </section>
     </>}
     {selected && <div className="drawer" onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
@@ -3961,17 +3988,18 @@ function WorkspaceNavigation({ view, onNavigate }: { view: View; onNavigate: (na
       </div>}
     </div>
     <button type="button" onClick={() => onNavigate("Settings")} className={view === "Settings" ? "active" : ""}><Settings size={17} /><span>Settings</span></button>
+    <OwnerOnly><button onClick={() => onNavigate("Users")} className={view === "Users" ? "active" : ""}><Users size={17} /><span>Users</span></button></OwnerOnly>
   </nav>;
 }
 
 export default function Home() {
-  return <SessionProvider><WorkspaceGate /></SessionProvider>;
+  return <SessionProvider refetchInterval={30}><WorkspaceGate /></SessionProvider>;
 }
 
 function WorkspaceGate() {
   const { data: session, status } = useSession();
   if (status === "loading") return <main className="login-shell" aria-label="Checking session" />;
-  if (session) return <Workspace key={session.user?.email} isAdmin={session.isAdmin} />;
+  if (session) return <Workspace key={`${session.user?.email}-${session.fullAccess}`} isAdmin={session.isAdmin} />;
   return <main className="login-shell"><section className="login-card">
     <div className="brand login-brand"><BrandLogo /><span>JOB<span>POTHE</span></span></div>
     <h1>Sign in to JobPothe</h1>
@@ -4123,7 +4151,7 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
   async function buildSeasonalStocks() { setLoading(true); try { const r = await fetch("/api/seasonal-stocks/rebuild", { method: "POST" }); await readJsonResponse(r, "Seasonal watchlist build failed"); const snapshot = await readJsonResponse<SeasonalStocksResponse>(await fetch(`/api/seasonal-stocks?month=${seasonalMonth}`, { cache: "no-store" }), "Seasonal stocks unavailable"); setSeasonalStocksByMonth({ [snapshot.month]: snapshot }); setSelectedSeasonalStock(null); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Seasonal watchlist build failed"); } finally { setLoading(false); } }
   async function runStochRsiScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/stoch-rsi-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: stochRsiFilters }) }); const d = await readJsonResponse<StochRsiResponse>(r, "StochRSI screener unavailable"); setStochRsi(d); setStochRsiUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "StochRSI screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function runBasketBacktest() { setLoading(true); try { const r = await fetch("/api/basket-backtest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: basketBacktestFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setBasketBacktest(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Basket backtest unavailable"); } finally { setLoading(false); } }
-  async function loadPortfolio() { setLoading(true); setError(""); try { const r = await fetch("/api/portfolio"); const d = await r.json(); if (!r.ok) throw new Error(d.error); setPortfolio(d); if (d.tradeManagement?.settings) setTradingSettings(d.tradeManagement.settings); } catch (e) { setError(e instanceof Error ? e.message : "Portfolio unavailable"); } finally { setLoading(false); } }
+  async function loadPortfolio(refresh = false) { setLoading(true); setError(""); try { const r = await fetch(refresh ? "/api/portfolio?refresh=1" : "/api/portfolio"); const d = await r.json(); if (!r.ok) throw new Error(d.error); setPortfolio(d); if (d.tradeManagement?.settings) setTradingSettings(d.tradeManagement.settings); } catch (e) { setError(e instanceof Error ? e.message : "Portfolio unavailable"); } finally { setLoading(false); } }
   async function recordTradeEvent(tradeId: string, event: Partial<TradeEvent> & { eventType: string }) { try { const r = await fetch(`/api/trade-management/trades/${tradeId}/events`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(event) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); await loadPortfolio(); } catch (e) { setError(e instanceof Error ? e.message : "Could not record trade event"); } }
   async function updateManagedTrade(tradeId: string, patch: Partial<ManagedTradeView>) { try { const r = await fetch(`/api/trade-management/trades/${tradeId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); await loadPortfolio(); } catch (e) { setError(e instanceof Error ? e.message : "Could not update managed trade"); } }
   async function deleteManagedTrade(tradeId: string) { try { const r = await fetch(`/api/trade-management/trades/${tradeId}`, { method: "DELETE" }); const d = await r.json(); if (!r.ok) throw new Error(d.error); await loadPortfolio(); } catch (e) { setError(e instanceof Error ? e.message : "Could not delete managed trade"); } }
@@ -4133,8 +4161,8 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
 
 
   return <main><button className="mobile-menu-button icon-button" onClick={() => setNavOpen(true)} aria-label="Open menu"><Menu size={18} /></button>{navOpen && <button className="menu-backdrop" onClick={() => setNavOpen(false)} aria-label="Close menu" />}<aside className={navOpen ? "open" : ""}><div className="side-topbar"><div className="brand"><BrandLogo compact /><span>JOB<span>POTHE</span></span></div><button className="icon-button side-close" onClick={() => setNavOpen(false)} aria-label="Close menu"><X size={18} /></button></div><div className="workspace">MARKET RESEARCH <b>India · Equity workspace</b></div><WorkspaceNavigation view={view} onNavigate={(name) => { setView(name); setNavOpen(false); }} /><div className="side-bottom"><div className="data-status"><span className={configured ? "ready" : "pending"} /><div><b>{configured ? "Dhan connected" : "Dhan setup needed"}</b><small>{configured ? "Secure server connection" : "Credentials stay on server"}</small></div></div><LiveFeedStatusIndicator status={liveFeedStatus} message={liveFeedMessage} view={view} dataJob={dataStatus?.latest_job} /><button className="help">Documentation <ArrowUpRight size={14} /></button></div></aside><div className="content"><header><div className="page-heading"><p className="eyebrow">JobPothe / Research workspace</p><h1>{view}</h1></div><div className="header-actions"><button className="icon-button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button><OwnerOnly><button className="icon-button" disabled={!security || loading} onClick={() => analyze(true)} aria-label="Refresh security analysis" title="Refresh security analysis"><RefreshCw size={17} className={loading ? "spin" : ""} /></button></OwnerOnly><button className="icon-button" onClick={() => void signOut({ callbackUrl: "/" })} aria-label="Sign out"><LogOut size={17} /></button><span className="user">{isAdmin ? "Admin" : "Viewer"}</span></div></header>{error && <div className="error">{error}</div>}
-    {view === "Dashboard" && <DashboardView portfolio={portfolio} loading={loading} onRefresh={loadPortfolio} />}
-    {view === "Portfolio" && <PortfolioView portfolio={portfolio} loading={loading} onRefresh={loadPortfolio} setLiveFeedStatus={updateLiveFeedStatus} />}
+    {view === "Dashboard" && <DashboardView portfolio={portfolio} loading={loading} onRefresh={() => loadPortfolio(true)} />}
+    {view === "Portfolio" && <PortfolioView portfolio={portfolio} loading={loading} onRefresh={() => loadPortfolio(true)} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Data Status" && <DataStatusView status={dataStatus} loading={loading || isActiveDataJob(dataStatus?.latest_job)} onRefresh={loadDataStatus} onRefreshUniverse={refreshUniverse} onRetryFailures={retryFailures} />}
     {view === "USA Data" && <USADataView />}
     {view === "Seasonality" && <section className="research-page"><div className="notice"><AlertTriangle size={18} /><span>Universe uses current index constituents. Historical results may be affected by survivorship bias.</span></div><div className="data-toolbar"><div><p className="eyebrow">Market-level research</p><h2>Rolling 3-month seasonality</h2><small>Entry uses first available monthly close; exit uses last available ending-month close.</small></div><OwnerOnly><button className="primary" onClick={rebuildSeasonality} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""} />Rebuild Seasonality Statistics</button></OwnerOnly></div><Controls windows={seasons} windowKey={windowKey} setWindowKey={setWindowKey} universe={universe} setUniverse={setUniverse} sector={sector} setSector={setSector} sectors={seasonality?.sectors ?? ["Unknown"]} search={seasonalitySearch} setSearch={setSeasonalitySearch} /><div className="toolbar-actions"><button className="secondary" onClick={() => loadSeasonality()} disabled={loading}>Apply</button><span className="count">{seasonality?.statistics.length ?? 0} rows · {seasonality?.missingSectorCount ?? 0} stocks missing sector</span></div>{seasonality?.latestBuild && <div className="stats-grid"><Stat label="Observations" value={`${seasonality.latestBuild.observations_generated}`} /><Stat label="Statistics" value={`${seasonality.latestBuild.statistics_generated}`} /><Stat label="Excluded" value={`${seasonality.latestBuild.excluded_observations}`} /><Stat label="Last rebuild" value={seasonality.latestBuild.finished_at.slice(0, 10)} /></div>}<section className="panel"><SeasonalityTable rows={sortedSeasonality} sort={sort} setSort={setSort} onSelect={(row) => loadSeasonality(row)} /></section>{selected && <DetailDrawer row={selected} observations={detailObservations} onClose={() => setSelected(null)} />}</section>}
@@ -4153,8 +4181,9 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
     {view === "StochRSI" && <StochRsiScreenerView data={stochRsi} filters={stochRsiFilters} setFilters={setStochRsiFilters} loading={loading} onRun={runStochRsiScreener} onReset={() => setStochRsiFilters(defaultStochRsiFilters)} selected={selectedStochRsi} setSelected={setSelectedStochRsi} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={stochRsiUpdatedAt} settings={tradingSettings} />}
     {view === "Backtest" && <BasketBacktestView filters={basketBacktestFilters} setFilters={setBasketBacktestFilters} data={basketBacktest} loading={loading} onRun={runBasketBacktest} />}
     {view === "Stock Search" && <><section className="search-card"><div className="search-copy"><p className="eyebrow">01 / Research a security</p><h2>Find an Indian equity</h2><p>Search the Dhan security master by symbol or company name.</p></div><div className="search-area"><form onSubmit={(e) => { e.preventDefault(); runSearch(); }}><div className="search-row"><div className="search-input"><Search size={18} /><input placeholder="Search RELIANCE, TCS, INFY…" value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>Enter</kbd></div><button className="primary search-button" type="submit" disabled={loading}>{loading ? "Searching…" : "Search"}</button></div></form>{results.length > 0 && <div className="results">{results.map((s) => <button key={`${s.securityId}-${s.segment}`} onClick={() => { setSecurity(s); setQuery(""); setResults([]); setAnalysis(null); }}><div><b>{s.symbol}</b><span>{s.name}</span></div><small>{s.exchange} · {s.securityId}</small></button>)}</div>}<div className="search-hint"><Database size={14} /><span>Security IDs are resolved from Dhan’s master—not ticker text alone.</span></div></div></section>{!configured && <section className="setup"><div className="setup-icon"><ShieldCheck size={25} /></div><div><p className="eyebrow">Secure data connection</p><h2>Connect your Dhan account to begin</h2><p>Market data and calculated statistics remain empty until server-side Dhan credentials are configured.</p></div><code>DHAN_CLIENT_ID= · DHAN_ACCESS_TOKEN=</code></section>}{!security && <section className="empty"><div className="empty-art"><CalendarDays size={30} /></div><p className="eyebrow">Awaiting a selection</p><h2>Start with a security search</h2><p>Select an equity to load its daily OHLCV history and derive seasonality statistics.</p></section>}{security && <><section className="stock-header"><div><div className="ticker-row"><span className="ticker">{security.symbol}</span><span className="exchange">{security.exchange}</span></div><h2>{security.name}</h2><p>Security ID {security.securityId} · Daily OHLCV · {analysis ? `${analysis.candles.length} trading sessions` : "Not loaded"}</p></div><button className="primary" onClick={() => analyze()} disabled={loading || !configured}>{loading ? <><RefreshCw size={16} className="spin" /> Calculating…</> : <><BarChart3 size={16} /> Load seasonality</>}</button></section>{analysis && <><section className="stats-grid"><Stat label="Current close" value={latest ? money(latest.close) : "—"} sub={latest?.date} /><Stat label="History available" value={`${new Set(analysis.candles.map((c) => c.date.slice(0, 4))).size} years`} sub="Complete years used" /><Stat label="Data through" value={latest?.date || "—"} sub="Cached locally" /><Stat label="Method" value="Daily OHLCV" sub="Adjusted data must be verified" /></section></>}</>}</>}
+    {view === "Users" && isAdmin && <UsersView />}
     {view === "Settings" && <TradingSettingsView settings={tradingSettings} onSaved={setTradingSettings} />}
-    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "USA Data", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Screener", "Qullamaggie", "10 EMA Catchup", "Seasonal Stocks", "StochRSI", "Backtest", "Settings"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
+    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "USA Data", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Screener", "Qullamaggie", "10 EMA Catchup", "Seasonal Stocks", "StochRSI", "Backtest", "Settings", "Users"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
   </div></main>;
 }
 
