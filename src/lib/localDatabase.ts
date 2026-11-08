@@ -364,6 +364,30 @@ export async function readDatabase(): Promise<SeasonalityDatabase> {
   return useMysqlStorage ? ensureMysqlDatabase() : ensureJsonFileDb();
 }
 
+export async function readLatestDownloadJob(): Promise<DataDownloadJobRecord | null> {
+  if (!useMysqlStorage) return (await readDatabase()).data_download_jobs[0] ?? null;
+  await ensureMysqlDb();
+  const [rows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
+    "SELECT data FROM seasonality_json_collections WHERE document_id = ? AND collection_name = 'data_download_jobs' AND shard_key = 'default'",
+    [mysqlDatabaseId],
+  ));
+  return parseMysqlJson<DataDownloadJobRecord[]>(rows[0]?.data)?.[0] ?? null;
+}
+
+// Partial MySQL snapshots must only be saved through writeMarketDataBatch.
+export async function readMarketDataBatch(ids: string[]) {
+  if (!useMysqlStorage) return readDatabase();
+  await ensureMysqlDb();
+  const scoped = ids.length ? ` OR (collection_name IN ('daily_prices', 'data_quality_issues') AND shard_key IN (${ids.map(() => "?").join(",")}))` : "";
+  const [rows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
+    `SELECT collection_name, data FROM seasonality_json_collections WHERE document_id = ?
+     AND (collection_name IN ('__meta__', 'universe_members', 'instruments', 'data_download_jobs', 'download_failures')${scoped})`,
+    [mysqlDatabaseId, ...ids],
+  ));
+  // Bootstrap a new store or migrate legacy data through the normal path.
+  return databaseFromShards(rows) ?? readDatabase();
+}
+
 // Seasonal screen reads one prebuilt month without loading the full daily-price database.
 export async function readSeasonalWatchlistSnapshot<T>(month: number): Promise<T | null> {
   if (useMysqlStorage) {

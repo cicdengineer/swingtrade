@@ -18,7 +18,9 @@ import {
   getDatabaseSizeBytes,
   latestPriceDate,
   markFailureResolved,
+  readDailyPricesForWatchlist,
   readDatabase,
+  readMarketDataBatch,
   replaceQualityIssues,
   upsertDailyPrices,
   upsertFailure,
@@ -40,24 +42,20 @@ const universeSources: Record<UniverseName, { label: string; url: string }> = {
   },
 };
 const cacheRoot = path.join(process.cwd(), ".data", "market-data-cache");
-function dateInTimeZone(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+const indiaTimeZone = "Asia/Kolkata";
+const dailyFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: indiaTimeZone, year: "numeric", month: "2-digit", day: "2-digit",
+});
+function dhanDate(date: Date) {
+  const parts = dailyFormatter.formatToParts(date);
   const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
-
-const dhanDate = (date: Date) => dateInTimeZone(date, "Asia/Kolkata");
-const dhanDailyTimestampDate = (timestampSeconds: number) => dateInTimeZone(new Date(timestampSeconds * 1000), "Asia/Kolkata");
+const dhanDailyTimestampDate = (timestampSeconds: number) => dhanDate(new Date(timestampSeconds * 1000));
 const pad = (value: number) => String(value).padStart(2, "0");
 const dhanDateTime = (date: Date) =>
   `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 const today = () => dhanDate(new Date());
-const indiaTimeZone = "Asia/Kolkata";
 const marketOpenMinutes = 9 * 60 + 15;
 const marketCloseMinutes = 15 * 60 + 30;
 const provisionalDataSource = "DHAN_INTRADAY_AGGREGATED" as const;
@@ -90,8 +88,7 @@ function dataRefreshConcurrency() {
   return Math.min(Math.max(Number.isFinite(configured) ? Math.floor(configured) : 6, 1), 12);
 }
 
-export function getIndiaNow(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
+const indiaClockFormatter = new Intl.DateTimeFormat("en-GB", {
     timeZone: indiaTimeZone,
     year: "numeric",
     month: "2-digit",
@@ -100,7 +97,10 @@ export function getIndiaNow(now = new Date()) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-  }).formatToParts(now);
+  });
+
+export function getIndiaNow(now = new Date()) {
+  const parts = indiaClockFormatter.formatToParts(now);
   const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
   return {
     date: `${value("year")}-${value("month")}-${value("day")}`,
@@ -126,32 +126,12 @@ function indiaSessionDateTime(tradingDate: string, minutes: number) {
 function indiaTimestampParts(timestamp: string) {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return null;
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: indiaTimeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
+  const parts = indiaClockFormatter.formatToParts(date);
   const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
   return {
     date: `${value("year")}-${value("month")}-${value("day")}`,
     minutes: Number(value("hour")) * 60 + Number(value("minute")),
   };
-}
-
-const staleRefreshJobMs = 2 * 60 * 1000;
-
-function jobActivityTime(job: DataDownloadJobRecord) {
-  return Date.parse(job.last_successful_update ?? job.started_at);
-}
-
-function isStaleRefreshJob(job: DataDownloadJobRecord) {
-  const activityTime = jobActivityTime(job);
-  return Number.isFinite(activityTime) && Date.now() - activityTime > staleRefreshJobMs;
 }
 
 function splitCsvLine(line: string) {
@@ -558,6 +538,8 @@ async function postDhanJson(pathname: string, payload: Record<string, unknown>) 
         "client-id": process.env.DHAN_CLIENT_ID!,
       },
     }, (response) => {
+      response.once("aborted", () => reject(new Error("Dhan response interrupted.")));
+      response.once("error", reject);
       const chunks: Buffer[] = [];
       response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
       response.on("end", () => {
@@ -585,6 +567,7 @@ async function getDhanProfileStatus(): Promise<DhanProfileStatus> {
       hostname: "api.dhan.co",
       path: "/v2/profile",
       method: "GET",
+      signal: AbortSignal.timeout(10_000),
       rejectUnauthorized: false,
       headers: {
         "accept": "application/json",
@@ -593,6 +576,8 @@ async function getDhanProfileStatus(): Promise<DhanProfileStatus> {
         "dhanClientId": process.env.DHAN_CLIENT_ID!,
       },
     }, (response) => {
+      response.once("aborted", () => resolve({ ok: false, error: "Dhan profile response interrupted." }));
+      response.once("error", (error) => resolve({ ok: false, error: error.message }));
       const chunks: Buffer[] = [];
       response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
       response.on("end", () => {
@@ -1049,11 +1034,11 @@ function emitDataStatusJob(job: DataDownloadJobRecord) {
 
 async function updateJob(jobId: string, update: (job: DataDownloadJobRecord) => void) {
   return mutateDataStore(async () => {
-    const db = await readDatabase();
+    const db = await readMarketDataBatch([]);
     const job = db.data_download_jobs.find((row) => row.id === jobId);
     if (!job) return null;
     update(job);
-    await writeDatabase(db);
+    await writeMarketDataBatch(db, []);
     emitDataStatusJob(job);
     return job;
   });
@@ -1130,13 +1115,13 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
             continue;
           }
           const index = await getIndexSecurity(indexName);
-          const latest = await readDatabase();
           const storedIndexId = `IDX_I:${index.securityId}`;
+          const latest = await readMarketDataBatch([storedIndexId]);
           const latestDate = latestPriceDate(latest, storedIndexId);
           const prepared = await fetchInstrumentRefresh(index, latestDate);
           if (prepared.result.candles.length || prepared.provisionalAggregate?.candle) {
             await mutateDataStore(async () => {
-              const db = await readDatabase();
+              const db = await readMarketDataBatch([storedIndexId]);
               applyInstrumentRefresh(db, {
                 ...prepared,
                 result: { ...prepared.result, security: { ...index, securityId: storedIndexId } },
@@ -1152,7 +1137,7 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
       }
     }
 
-    const db = await readDatabase();
+    const db = await readMarketDataBatch([]);
     const selectedMembers = retryFailures
       ? db.universe_members.filter((member) => db.download_failures.some((failure) => failure.status === "open" && failure.security_id === member.security_id))
       : db.universe_members.filter((member) => !universeName || member.universe_name === universeName);
@@ -1172,14 +1157,20 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
 
     // Persist several completed downloads together: the database can be hundreds
     // of MB, so one full read/write for every symbol dominates the API time.
-    const latestBySecurity = new Map<string, string>();
-    for (const price of db.daily_prices) {
-      const latest = latestBySecurity.get(price.security_id);
-      if (!latest || price.trade_date > latest) latestBySecurity.set(price.security_id, price.trade_date);
+    function latestDates(prices: DailyPriceRecord[]) {
+      const latestBySecurity = new Map<string, string>();
+      for (const price of prices) {
+        const latest = latestBySecurity.get(price.security_id);
+        if (!latest || price.trade_date > latest) latestBySecurity.set(price.security_id, price.trade_date);
+      }
+      return latestBySecurity;
     }
+    const savedDates = db.daily_prices.length ? latestDates(db.daily_prices) : null;
     const batchSize = Math.max(concurrency, 9);
     for (let start = 0; start < members.length; start += batchSize) {
       const batch = members.slice(start, start + batchSize);
+      const ids = batch.map((member) => member.security_id).filter(Boolean);
+      const latestBySecurity = savedDates ?? latestDates(await readDailyPricesForWatchlist(ids));
       const results: Array<{ member: UniverseMemberRecord; result: Awaited<ReturnType<typeof fetchInstrumentRefresh>> } | { member: UniverseMemberRecord; error: unknown }> = [];
       await runMemberWorkers(batch, concurrency, async (member) => {
         try {
@@ -1191,7 +1182,7 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
       });
 
       await mutateDataStore(async () => {
-        const db = await readDatabase();
+        const db = await readMarketDataBatch(ids);
         const job = db.data_download_jobs.find((row) => row.id === jobId);
         for (const item of results) {
           let report: ReturnType<typeof applyInstrumentRefresh> | undefined;
@@ -1247,7 +1238,7 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
               ? "Finished; waiting for Dhan EOD candle"
               : "Finished";
         }
-        await writeMarketDataBatch(db, batch.map((member) => member.security_id).filter(Boolean));
+        await writeMarketDataBatch(db, ids);
         if (job) emitDataStatusJob(job);
       });
     }
@@ -1268,9 +1259,9 @@ const activeRefreshJobs = ((globalThis as typeof globalThis & { __seasonalityAct
 
 export async function startHistoricalDataRefresh(universeName?: UniverseName, retryFailures = false, forceUniverse = false) {
   const result = await mutateDataStore(async () => {
-    const db = await readDatabase();
+    const db = await readMarketDataBatch([]);
     const running = db.data_download_jobs.find((job) => job.status === "running" || job.status === "queued");
-    if (running && activeRefreshJobs.has(running.id) && !isStaleRefreshJob(running)) return { job: running, started: false };
+    if (running && activeRefreshJobs.has(running.id)) return { job: running, started: false };
     if (running) {
       running.status = "failed";
       running.finished_at = new Date().toISOString();
@@ -1283,7 +1274,7 @@ export async function startHistoricalDataRefresh(universeName?: UniverseName, re
     job.status = "queued";
     job.current_status = "Queued";
     db.data_download_jobs.unshift(job);
-    await writeDatabase(db);
+    await writeMarketDataBatch(db, []);
     emitDataStatusJob(job);
     return { job, started: true };
   });

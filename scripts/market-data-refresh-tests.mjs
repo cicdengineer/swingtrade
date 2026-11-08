@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import https from "node:https";
+import { EventEmitter } from "node:events";
+import { mock } from "node:test";
 import fs from "node:fs";
 import Module from "node:module";
 import path from "node:path";
@@ -40,6 +43,7 @@ function loadTs(file) {
 
 const {
   aggregateIntradayToDaily,
+  getHistoricalData,
   getIndiaTradingDate,
   getLatestTradingSessionDate,
   isIndianMarketClosed,
@@ -155,6 +159,39 @@ const atUtc = (iso) => new Date(iso);
   }));
   assert.equal(results.filter((row) => row.ok).length, 2, "CASE 8: one failed security must not stop other securities");
   assert.equal(results.filter((row) => !row.ok).length, 1);
+}
+
+// A socket can close after headers without the incoming response emitting "end".
+{
+  const original = [process.env.DHAN_CLIENT_ID, process.env.DHAN_ACCESS_TOKEN];
+  process.env.DHAN_CLIENT_ID = process.env.DHAN_ACCESS_TOKEN = "fixture";
+  let attempts = 0;
+  const requestMock = mock.method(https, "request", (_options, onResponse) => {
+    const req = new EventEmitter();
+    req.setTimeout = req.write = () => {};
+    req.end = () => {
+      const response = Object.assign(new EventEmitter(), { statusCode: 200 });
+      onResponse(response);
+      if (++attempts === 1) {
+        response.emit("aborted");
+        response.emit("error", new Error("connection reset"));
+      } else {
+        response.emit("data", Buffer.from(JSON.stringify({ timestamp: [1793903400], open: [1], high: [2], low: [1], close: [2], volume: [3] })));
+        response.emit("end");
+      }
+    };
+    return req;
+  });
+  try {
+    const candles = await getHistoricalData({ securityId: "1", symbol: "TEST", segment: "NSE_EQ" }, "2026-11-06", "2026-11-07");
+    assert.equal(candles.length, 1);
+    assert.equal(attempts, 2);
+  } finally {
+    requestMock.mock.restore();
+    for (const [index, key] of ["DHAN_CLIENT_ID", "DHAN_ACCESS_TOKEN"].entries()) {
+      if (original[index] === undefined) delete process.env[key]; else process.env[key] = original[index];
+    }
+  }
 }
 
 console.log("market-data refresh tests passed");
