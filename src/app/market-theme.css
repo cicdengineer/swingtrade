@@ -271,6 +271,18 @@ td, :root[data-theme="light"] td { border-color: var(--line); color: var(--text)
 .empty, :root[data-theme="light"] .empty { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 .empty-art, :root[data-theme="light"] .empty-art { background: var(--soft-green); border-color: var(--line); }
 .login-shell { background: radial-gradient(circle at 50% 0, var(--soft-green), transparent 42%), var(--bg); }
+.login-with-disclaimer { grid-template-rows: 1fr auto; }
+.trading-disclaimer {
+  width: 100%;
+  margin-top: 2rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+  color: var(--text);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.trading-disclaimer p { max-width: 85ch; margin: 0.35rem 0 0; }
+.login-with-disclaimer .trading-disclaimer { max-width: 85ch; }
 
 @media (max-width: 850px) {
   aside, :root[data-theme="light"] aside { background: var(--panel); }

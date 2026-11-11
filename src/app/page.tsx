@@ -4011,16 +4011,23 @@ export default function Home() {
   return <SessionProvider refetchInterval={30}><WorkspaceGate /></SessionProvider>;
 }
 
+function TradingDisclaimer() {
+  return <footer className="trading-disclaimer" aria-label="Trading disclaimer">
+    <strong>Trading disclaimer</strong>
+    <p>I’m not a SEBI-registered research analyst. I share trades I make for my own account. Nothing here is investment advice or a recommendation to buy, sell or hold. You don’t know how much risk I’m taking, and I don’t know your finances or goals. Copying a trade takes one click. Undoing a loss is trickier. Please do your own research before you trade.</p>
+  </footer>;
+}
+
 function WorkspaceGate() {
   const { data: session, status } = useSession();
   if (status === "loading") return <main className="login-shell" aria-label="Checking session" />;
   if (session) return <Workspace key={`${session.user?.email}-${session.fullAccess}`} isAdmin={session.isAdmin} />;
-  return <main className="login-shell"><section className="login-card">
+  return <main className="login-shell login-with-disclaimer"><section className="login-card">
     <div className="brand login-brand"><BrandLogo /><span>JOB<span>POTHE</span></span></div>
     <h1>Sign in to JobPothe</h1>
     <p>View the portfolio, trade history, and equity research.</p>
     <button className="primary" onClick={() => void signIn("google", { callbackUrl: "/" })}>Continue with Google</button>
-  </section></main>;
+  </section><TradingDisclaimer /></main>;
 }
 
 function OwnerOnly({ children }: { children: React.ReactNode }) {
@@ -4227,6 +4234,7 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
     {view === "Users" && isAdmin && <UsersView />}
     {view === "Settings" && <TradingSettingsView settings={tradingSettings} onSaved={setTradingSettings} />}
     {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "USA Data", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Screener", "Qullamaggie", "10 EMA Catchup", "Seasonal Stocks", "StochRSI", "Backtest", "Settings", "Users"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
+    {viewerViews.has(view) && <TradingDisclaimer />}
   </div></main>;
 }
 
