@@ -274,14 +274,14 @@ td, :root[data-theme="light"] td { border-color: var(--line); color: var(--text)
 .login-with-disclaimer { grid-template-rows: 1fr auto; }
 .trading-disclaimer {
   width: 100%;
-  margin-top: 2rem;
+  margin-top: 1rem;
   padding: 1rem 0;
   border-top: 1px solid var(--line);
   color: var(--text);
   font-size: 0.875rem;
   line-height: 1.6;
 }
-.trading-disclaimer p { max-width: 85ch; margin: 0.35rem 0 0; }
+.trading-disclaimer p { margin: 0.35rem 0 0; text-wrap: pretty; }
 .login-with-disclaimer .trading-disclaimer { max-width: 85ch; }
 
 @media (max-width: 850px) {
