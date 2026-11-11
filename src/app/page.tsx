@@ -1510,9 +1510,45 @@ function PortfolioHoldingDrawer({ holding, onClose }: { holding: PortfolioHoldin
   return <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={onClose}>×</button><p className="eyebrow">Dhan Holding</p><h2>{adjustedHolding.tradingSymbol}</h2><p className="muted">10 EMA, 50 EMA, volume and StochRSI %D{fullAccess ? ", with entry and stored SL." : "."}</p><PortfolioHoldingChart holding={adjustedHolding} live={Boolean(liveDailyRow)} dailyError={dailyError} /><HoldingDecisionTiles holding={adjustedHolding} /><HoldingDecisionMeter holding={adjustedHolding} /><div className="stats-grid compact-stats"><Stat label="LTP" value={adjustedHolding.currentPrice === undefined ? "—" : money(adjustedHolding.currentPrice)} sub={adjustedHolding.todayChangePct === undefined ? undefined : pct2(adjustedHolding.todayChangePct)} /><Stat label="Avg Cost" value={fullAccess ? money(adjustedHolding.avgCostPrice) : <LockedValue />} sub={`Qty ${adjustedHolding.totalQty}`} /><Stat label="10 EMA" value={adjustedHolding.ema10 === undefined ? "—" : money(adjustedHolding.ema10)} sub={ema10FromAvgCost === undefined ? undefined : pct2(ema10FromAvgCost)} /><Stat label="50 EMA" value={adjustedHolding.ema50 === undefined ? "—" : money(adjustedHolding.ema50)} sub={adjustedHolding.distanceFrom50EmaPct === undefined ? undefined : pct2(adjustedHolding.distanceFrom50EmaPct)} /><Stat label="SL" value={fullAccess ? (adjustedHolding.stopLoss === undefined ? "—" : money(adjustedHolding.stopLoss)) : <LockedValue />} sub={fullAccess && adjustedHolding.riskFree ? "Risk-free" : undefined} /></div></div></div>;
 }
 
+type HoldingColumn = {
+  label: string;
+  value?: (holding: PortfolioHolding) => string | number | undefined;
+  restricted?: boolean;
+};
+
+const holdingColumns: HoldingColumn[] = [
+  { label: "Symbol", value: h => h.tradingSymbol },
+  { label: "Chart" },
+  { label: "Qty", value: h => h.totalQty },
+  { label: "Days", value: h => h.brokerTradingDaysHeld },
+  { label: "Avg Cost", value: h => h.avgCostPrice, restricted: true },
+  { label: "SL", value: h => h.stopLoss, restricted: true },
+  { label: "Risk", value: h => h.riskFree ? 0 : h.stopLoss === undefined ? undefined : holdingRisk(h), restricted: true },
+  { label: "Invested", value: h => h.invested },
+  { label: "LTP", value: h => h.currentPrice },
+  { label: "Change %", value: h => h.todayChangePct },
+  { label: "Unrealized", value: h => h.unrealizedPnl },
+  { label: "10 EMA", value: h => h.ema10 },
+  { label: "50 EMA", value: h => h.distanceFrom50EmaPct === undefined ? undefined : h.ema50 },
+  { label: "Swing High", value: previousSwingHigh },
+];
+
 function PortfolioTable({ holdings, ticks, intradayUpdatedAt, priceClock, onStopLossSaved }: { holdings: PortfolioHolding[]; ticks: Record<string, LiveTick>; intradayUpdatedAt: Record<string, number>; priceClock: number; onStopLossSaved: () => Promise<void> | void }) {
   const fullAccess = useSession().data?.fullAccess === true;
   const [selected, setSelected] = useState<PortfolioHolding | null>(null);
+  const [sort, setSort] = useState<{ column: HoldingColumn; ascending: boolean } | null>(null);
+  const sortedHoldings = useMemo(() => {
+    const value = sort?.column.value;
+    if (!sort || !value || (sort.column.restricted && !fullAccess)) return holdings;
+    return [...holdings].sort((left, right) => {
+      const a = value(left);
+      const b = value(right);
+      if (a === undefined) return b === undefined ? 0 : 1;
+      if (b === undefined) return -1;
+      const order = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b));
+      return sort.ascending ? order : -order;
+    });
+  }, [holdings, sort, fullAccess]);
   return <section className="panel portfolio-holdings-panel">
     <div className="panel-head">
       <div><p className="eyebrow">Portfolio</p><h2>Dhan holdings</h2></div>
@@ -1521,10 +1557,18 @@ function PortfolioTable({ holdings, ticks, intradayUpdatedAt, priceClock, onStop
     {holdings.length ? <div className="table-wrap">
       <table className="portfolio-holdings-table">
         <thead>
-          <tr><th>Symbol</th><th>Chart</th><th>Qty</th><th>Days</th><th>Avg Cost</th><th>SL</th><th>Risk</th><th>Invested</th><th>LTP</th><th>Change %</th><th>Unrealized</th><th>10 EMA</th><th>50 EMA</th><th>Swing High</th></tr>
+          <tr>{holdingColumns.map(column => {
+            const sortable = column.value && (!column.restricted || fullAccess);
+            const active = sortable && sort?.column === column;
+            return <th key={column.label} scope="col" aria-sort={active ? (sort.ascending ? "ascending" : "descending") : undefined}>
+              {sortable ? <button type="button" className="holding-sort" onClick={() => setSort({
+                column, ascending: active ? !sort.ascending : column.label === "Symbol",
+              })}>{column.label} <span aria-hidden="true">{active ? (sort.ascending ? "↑" : "↓") : "↕"}</span></button> : column.label}
+            </th>;
+          })}</tr>
         </thead>
         <tbody>
-          {holdings.map((holding) => {
+          {sortedHoldings.map((holding) => {
             const days = holding.brokerTradingDaysHeld;
             const above50Ema = holding.distanceFrom50EmaPct !== undefined && holding.distanceFrom50EmaPct >= 0;
             const todayTone = holding.todayChangePct === undefined ? "neutral" : holding.todayChangePct >= 0 ? "positive" : "negative";
