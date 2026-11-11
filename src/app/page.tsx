@@ -708,6 +708,7 @@ const thirtyInThirtySwingLowPoint = (rows: DailyChartPoint[]) => {
 };
 const latestHourlyStop = (rows: DailyChartPoint[]) => rows.at(-1)?.low;
 const stopLossPct = (entry: number, stop?: number) => entry > 0 && stop !== undefined && stop > 0 && entry > stop ? ((entry - stop) / entry) * 100 : undefined;
+const swingLowRiskPct = (row: ThirtyInThirtyRow) => stopLossPct(row.current_close, thirtyInThirtySwingLowPoint(row.recent)?.low);
 const toneFromRange = (value: number | undefined, good: (value: number) => boolean, average: (value: number) => boolean): TileTone => {
   if (value === undefined || Number.isNaN(value)) return "neutral";
   if (good(value)) return "good";
@@ -2851,6 +2852,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const previewOnly = combined === true && !fullAccess;
   const [cleanTrendOnly, setCleanTrendOnly] = useState(false);
   const [lowAbove10EmaOnly, setLowAbove10EmaOnly] = useState(combined === true);
+  const [swingLowOnly, setSwingLowOnly] = useState(false);
   const [aboveRedOnly, setAboveRedOnly] = useState(combined === true);
   const [stochHighOnly, setStochHighOnly] = useState(false);
   const [showTileEma10, setShowTileEma10] = useState(combined !== true);
@@ -3034,7 +3036,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       if (sort.key === "today_return") return latestSessionReturnPct(row, liveTicks[row.security_id]) ?? -Infinity;
       if (sort.key === "stoch") return row.daily_stoch_d ?? -Infinity;
       if (sort.key === "daily_sl_pct") return stopLossPct(row.current_close, latestDailyStop(row.recent)) ?? Infinity;
-      if (sort.key === "swing_sl_pct") return stopLossPct(row.current_close, thirtyInThirtySwingLowPoint(row.recent)?.low) ?? Infinity;
+      if (sort.key === "swing_sl_pct") return swingLowRiskPct(row) ?? Infinity;
       if (sort.key === "pullback") return row.pullback_from_best_end_pct;
       if (sort.key === "near_3m_high") return row.pullback_from_3m_high_pct;
       if (sort.key === "near_6m_high") return row.pullback_from_6m_high_pct;
@@ -3068,8 +3070,16 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const matchesSelectedTrend = useCallback((row: ThirtyInThirtyRow) => !cleanTrendOnly || matchesCleanTrend(row.recent, chartMonths === 6 ? 126 : 63), [chartMonths, cleanTrendOnly]);
   const aboveRed = (row: ThirtyInThirtyRow) => isAboveSwingHighRed(row.recent, row.current_close);
   const requiresStochHigh = stochHighOnly || (combined && source === "StochHigh");
-  const sortedRows = useMemo(() => sortRows(qMode ? liveRows : liveRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (!lowAbove10EmaOnly || isLatestLowAbove10Ema(row)) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (seasonal || matchesSelectedTrend(row)))), [liveRows, liveTicks, filters, lowAbove10EmaOnly, aboveRedOnly, requiresStochHigh, sortRows, qMode, seasonal, matchesSelectedTrend]);
-  const pinnedRows = useMemo(() => qMode ? [] : sortRows(liveRows.filter((row) => pinnedIds.includes(row.security_id) && (!lowAbove10EmaOnly || isLatestLowAbove10Ema(row)) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [liveRows, pinnedIds, lowAbove10EmaOnly, aboveRedOnly, requiresStochHigh, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const swingFilteredRows = useMemo(() => {
+    if (!combined || !swingLowOnly) return liveRows;
+    return liveRows.filter(row => {
+      const risk = swingLowRiskPct(row);
+      // Ignore floating-point noise at the strict 7.1% boundary.
+      return risk !== undefined && Number(risk.toFixed(10)) < 7.1;
+    });
+  }, [combined, liveRows, swingLowOnly]);
+  const sortedRows = useMemo(() => sortRows(qMode ? swingFilteredRows : swingFilteredRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (!lowAbove10EmaOnly || isLatestLowAbove10Ema(row)) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (seasonal || matchesSelectedTrend(row)))), [swingFilteredRows, liveTicks, filters, lowAbove10EmaOnly, aboveRedOnly, requiresStochHigh, sortRows, qMode, seasonal, matchesSelectedTrend]);
+  const pinnedRows = useMemo(() => qMode ? [] : sortRows(swingFilteredRows.filter((row) => pinnedIds.includes(row.security_id) && (!lowAbove10EmaOnly || isLatestLowAbove10Ema(row)) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [swingFilteredRows, pinnedIds, lowAbove10EmaOnly, aboveRedOnly, requiresStochHigh, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
   const visibleRows = useMemo(() => {
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
     if (previewOnly) return activeData?.results.slice(0, 1) ?? [];
@@ -3134,7 +3144,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <div className="refresh-status"><span className={freshPriceCount && isNseSessionOpen() ? "ready" : "pending"} /><b>{priceStatus}</b><small>{freshPriceCount} live · {intradayPriceCount} intraday · {visibleRows.length} shown</small></div>
         <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{combined ? loading ? "Scanning…" : "Refresh All" : qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <OwnerOnly><button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button></OwnerOnly>}
-        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setLowAbove10EmaOnly(combined === true); setAboveRedOnly(combined === true); setStochHighOnly(false); setShowTileEma10(combined !== true); onReset(); }}>Reset</button>
+        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setSwingLowOnly(false); setLowAbove10EmaOnly(combined === true); setAboveRedOnly(combined === true); setStochHighOnly(false); setShowTileEma10(combined !== true); onReset(); }}>Reset</button>
       </div>
     </div>
     {!previewOnly && <div className="momentum-filter-bar thirty-in-thirty-filters">
@@ -3169,6 +3179,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label><input type="checkbox" checked={filters.positive6MonthsOnly} onChange={(e) => setFilters({ ...filters, positive6MonthsOnly: e.target.checked })}/><span>Positive in 6M</span></label>
       <label><input type="checkbox" checked={filters.nearPreviousDayHighOnly} onChange={(e) => setFilters({ ...filters, nearPreviousDayHighOnly: e.target.checked })}/><span>Near PD High</span></label>
       <label><input type="checkbox" checked={filters.nearSwingHighOnly} onChange={(e) => setFilters({ ...filters, nearSwingHighOnly: e.target.checked })}/><span>Swing High</span></label>
+      {combined && <label title="Show stocks with swing-low stop risk below 7.1% of the entry price"><input type="checkbox" checked={swingLowOnly} onChange={(e) => setSwingLowOnly(e.target.checked)}/><span>SwingLow 7%</span></label>}
       <label title="Daily StochRSI %D below 21"><input type="checkbox" checked={filters.stoch20Only} onChange={(e) => setFilters({ ...filters, stoch20Only: e.target.checked })}/><span>Stoch20</span></label>
       <label title="Daily StochRSI %D above 80"><input type="checkbox" checked={filters.stoch80Only} onChange={(e) => setFilters({ ...filters, stoch80Only: e.target.checked })}/><span>Stoch80</span></label>
     </fieldset>}
