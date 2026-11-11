@@ -39,8 +39,8 @@ const tradeCharges = (trade: DhanTrade) =>
 function portfolioPeriod(today = new Date()) {
   const to = dateInTimeZone(today, "Asia/Kolkata");
   return {
-    label: "15 Apr 2026 onwards",
-    from: "2026-04-15",
+    label: "1 Nov 2026 onwards",
+    from: "2026-11-01",
     to,
     // FIFO needs purchases made before the visible reporting period.
     inventoryFrom: "2026-01-01",
