@@ -2920,8 +2920,12 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const liveRows = useMemo(() => {
     const rows = (activeData?.results ?? []).filter(row => combined ? source === "SwingHigh" || source === "All watchlists" || membership[row.security_id]?.includes(source) : !qMode || qIdSet.has(row.security_id));
     const uniqueRows = qMode ? [...new Map(rows.map(row => [row.security_id, row])).values()] : rows;
-    return uniqueRows.map(row => liveAdjustedThirtyInThirty(row, liveTicks[row.security_id])).filter(row => !combined || (source === "All watchlists" ? rowSources(row).length > 0 : rowSources(row).includes(source)));
-  }, [activeData, liveTicks, sessionDate, qMode, qIdSet, combined, source, membership]);
+    return uniqueRows.filter(row => {
+      if (!isNseSessionOpen()) return true;
+      const tick = liveTicks[row.security_id];
+      return tick && isCurrentSessionTick(tick) && priceClock - tick.receivedAt < (tick.source === "intraday" ? 90_000 : 45_000) && (tick.source === "intraday" || isCurrentIndiaTrade(tick.lastTradeTime, sessionDate));
+    }).map(row => liveAdjustedThirtyInThirty(row, liveTicks[row.security_id])).filter(row => !combined || (source === "All watchlists" ? rowSources(row).length > 0 : rowSources(row).includes(source)));
+  }, [activeData, liveTicks, priceClock, sessionDate, qMode, qIdSet, combined, source, membership]);
   useEffect(() => {
     if (!selected) return;
     const replacement = liveRows.find((row) => row.security_id === selected.security_id);
@@ -2929,16 +2933,15 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       setSelected((current) => current === selected ? replacement : current);
     }
   }, [liveRows, selected, setSelected]);
+  const subscriptionIds = useMemo(() => [...new Set((activeData?.results ?? []).map(row => row.security_id))].sort().join(","), [activeData]);
   useEffect(() => {
-    const rows = (activeData?.results ?? []).filter(row => combined ? source === "SwingHigh" || source === "All watchlists" || membership[row.security_id]?.includes(source) : !qMode || qIdSet.has(row.security_id));
-    if (!rows.length) {
+    const ids = subscriptionIds.split(",").filter(Boolean);
+    if (!ids.length) {
       setLiveTicks({});
       setStreamState("idle");
       setLiveFeedStatus("idle");
       return;
     }
-    const liveRows = rows.slice(0, Math.min(tileLimit, thirtyInThirtyLiveFeedLimit));
-    const ids = liveRows.map((row) => row.security_id);
     let controller = new AbortController();
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let watchdog: ReturnType<typeof setInterval> | undefined;
@@ -2950,7 +2953,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       setStreamState(state);
       setLiveFeedStatus(state, message);
     };
-    status("connecting", `Starting live prices for ${ids.length} of ${rows.length} stocks`);
+    status("connecting", `Starting live prices for all ${ids.length} stocks`);
 
     const handleEvent = (event: string, data: string) => {
       if (event === "status") {
@@ -3027,7 +3030,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       if (watchdog) clearInterval(watchdog);
       setLiveFeedStatus("idle");
     };
-  }, [activeData, setLiveFeedStatus, tileLimit, seasonal, qMode, qIdSet, combined, source, membership]);
+  }, [subscriptionIds, setLiveFeedStatus]);
   const sortRows = useCallback((rows: ThirtyInThirtyRow[]) => {
     const valueFor = (row: ThirtyInThirtyRow): string | number => {
       if (sort.key === "symbol") return row.symbol;
@@ -3085,7 +3088,6 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     if (previewOnly) return activeData?.results.slice(0, 1) ?? [];
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
   }, [pinnedRows, sortedRows, tileLimit, previewOnly, activeData]);
-  const visibleSecurityKey = useMemo(() => visibleRows.map((row) => row.security_id).join(","), [visibleRows]);
   const togglePinned = (securityId: string) => setPinnedIds((current) => current.includes(securityId) ? current.filter((id) => id !== securityId) : [...current, securityId]);
   const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "swing_sl_pct" || key === "closest_stoch_high" || key === "closest_red_entry" || key === "closest_abnormal_high" ? "asc" : "desc" });
 
@@ -3118,7 +3120,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     };
     const run = async () => {
       if (!isNseSessionOpen()) return;
-      const rows = visibleRows.filter((row) => !liveTicksRef.current[row.security_id] || liveTicksRef.current[row.security_id].source !== "websocket" || Date.now() - liveTicksRef.current[row.security_id].receivedAt > 45_000);
+      const rows = (activeData?.results ?? []).filter((row) => !liveTicksRef.current[row.security_id] || liveTicksRef.current[row.security_id].source !== "websocket" || Date.now() - liveTicksRef.current[row.security_id].receivedAt > 45_000);
       const batch = rows.slice(offset, offset + 20);
       offset = rows.length ? (offset + batch.length) % rows.length : 0;
       for (let index = 0; index < batch.length; index += 5) await Promise.all(batch.slice(index, index + 5).map(hydrateRow));
@@ -3126,10 +3128,14 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     void run();
     const timer = window.setInterval(() => void run(), 60_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [visibleSecurityKey]);
+  }, [activeData]);
 
   const freshPriceCount = visibleRows.filter((row) => liveTicks[row.security_id]?.source === "websocket" && priceClock - liveTicks[row.security_id].receivedAt < 45_000).length;
   const intradayPriceCount = visibleRows.filter((row) => liveTicks[row.security_id]?.source === "intraday" && priceClock - liveTicks[row.security_id].receivedAt < 90_000).length;
+  const waitingPriceCount = isNseSessionOpen() ? (activeData?.results ?? []).filter(row => {
+    const tick = liveTicks[row.security_id];
+    return !tick || !isCurrentSessionTick(tick) || priceClock - tick.receivedAt >= (tick.source === "intraday" ? 90_000 : 45_000) || (tick.source !== "intraday" && !isCurrentIndiaTrade(tick.lastTradeTime, sessionDate));
+  }).length : 0;
   const priceStatus = !isNseSessionOpen() ? "Market closed" : freshPriceCount ? "Live prices" : intradayPriceCount ? "Intraday backup" : streamState === "error" ? "Feed error" : "Waiting for prices";
 
   return <section className={`research-page thirty-in-thirty-page thirty-in-thirty-screener-page ${combined ? "combined-screener-page" : ""}`}>

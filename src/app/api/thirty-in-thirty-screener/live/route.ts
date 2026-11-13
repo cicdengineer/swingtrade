@@ -1,3 +1,4 @@
+import { ensureDhanLiveUniverse } from "@/lib/dhanLiveUniverse";
 import { NextResponse } from "next/server";
 import { createDhanLiveStream } from "@/lib/dhanLiveStream";
 
@@ -10,6 +11,8 @@ export async function GET(request: Request) {
     const ids = (url.searchParams.get("ids") ?? "").split(",").map((id) => id.trim()).filter(Boolean);
     if (!ids.length) return NextResponse.json({ error: "No security IDs provided." }, { status: 400 });
 
+    // Keep the backend feed independent of browser filters and tile limits.
+    await ensureDhanLiveUniverse();
     return createDhanLiveStream(request, ids);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Live feed unavailable" }, { status: 500 });
@@ -22,6 +25,8 @@ export async function POST(request: Request) {
     const ids = Array.isArray(body.ids) ? body.ids.map((id: unknown) => String(id).trim()).filter(Boolean) : [];
     if (!ids.length) return NextResponse.json({ error: "No security IDs provided." }, { status: 400 });
 
+    // Keep the backend feed independent of browser filters and tile limits.
+    await ensureDhanLiveUniverse();
     return createDhanLiveStream(request, ids);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Live feed unavailable" }, { status: 500 });
