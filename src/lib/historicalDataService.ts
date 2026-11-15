@@ -319,28 +319,36 @@ export function parseNseIndexDailyReport(text: string, expectedDate: string): Ca
   return candle;
 }
 
-async function refreshNseSmallcap500Index() {
-  const db = await readDatabase();
-  const latest = latestPriceDate(db, niftySmallcap500IndexId);
-  const tradingDate = getLatestTradingSessionDate();
-  const dates = dateRange(addDays(tradingDate, -18), tradingDate).filter(isNseBusinessDay).slice(-8)
-    .filter((date) => !latest || date >= latest);
+// One budget covers all reports and their response bodies, rather than allowing
+// eight independent request timeouts to block every stock download.
+export async function fetchNseIndexDailyCandles(dates: string[], signal = AbortSignal.timeout(20_000)) {
   const candles: Candle[] = [];
   for (const date of dates) {
+    signal.throwIfAborted();
     const [year, month, day] = date.split("-");
     const url = `https://archives.nseindia.com/content/indices/ind_close_all_${day}${month}${year}.csv`;
-    const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    const response = await fetch(url, { cache: "no-store", signal });
     if (response.status === 404) continue;
     if (!response.ok) throw new Error(`Could not download NSE index report for ${date} (${response.status}).`);
     const candle = parseNseIndexDailyReport(await response.text(), date);
     if (candle) candles.push(candle);
   }
+  return candles;
+}
+
+async function refreshNseSmallcap500Index() {
+  const db = await readMarketDataBatch([niftySmallcap500IndexId]);
+  const latest = latestPriceDate(db, niftySmallcap500IndexId);
+  const tradingDate = getLatestTradingSessionDate();
+  const dates = dateRange(addDays(tradingDate, -18), tradingDate).filter(isNseBusinessDay).slice(-8)
+    .filter((date) => !latest || date >= latest);
+  const candles = await fetchNseIndexDailyCandles(dates);
   if (!candles.length) {
     if (latest) return;
     throw new Error("Nifty Smallcap 500 is missing from recent NSE index reports.");
   }
   await mutateDataStore(async () => {
-    const current = await readDatabase();
+    const current = await readMarketDataBatch([niftySmallcap500IndexId]);
     applyHistoricalData(current, {
       securityId: niftySmallcap500IndexId,
       symbol: niftySmallcap500Symbol,
@@ -1086,7 +1094,7 @@ async function runHistoricalDataJob(jobId: string, universeName?: UniverseName, 
     });
 
     if (!retryFailures) {
-      const currentDb = await readDatabase();
+      const currentDb = await readMarketDataBatch([]);
       const required = universeName ? [universeName] : ["CNX500", "NIFTYSC500"] as UniverseName[];
       const missing = required.filter((name) => !currentDb.universe_members.some((member) => member.universe_name === name));
       if (forceUniverse || missing.length) {

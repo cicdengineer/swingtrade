@@ -42,6 +42,7 @@ function loadTs(file) {
 }
 
 const {
+  fetchNseIndexDailyCandles,
   aggregateIntradayToDaily,
   getHistoricalData,
   getIndiaTradingDate,
@@ -54,6 +55,26 @@ const {
   validateConstructedDailyCandle,
   withRetry,
 } = loadTs("src/lib/historicalDataService.ts");
+
+// Archive reports share a deadline, including response-body downloads.
+{
+  const controller = new AbortController();
+  const dates = ["2026-11-11", "2026-11-12", "2026-11-13"];
+  let calls = 0;
+  const fetchMock = mock.method(globalThis, "fetch", async (_url, options) => {
+    assert.equal(options.signal, controller.signal);
+    calls++;
+    if (calls === 1) return { status: 404 };
+    return { status: 200, ok: true, text: async () => {
+      controller.abort(new Error("archive budget expired"));
+      options.signal.throwIfAborted();
+    } };
+  });
+  try {
+    await assert.rejects(fetchNseIndexDailyCandles(dates, controller.signal), /archive budget expired/);
+    assert.equal(calls, 2, "expired archive budget must prevent further reports");
+  } finally { fetchMock.mock.restore(); }
+}
 
 const candle = (date, open, high, low, close, volume) => ({ date, open, high, low, close, volume });
 const atUtc = (iso) => new Date(iso);
