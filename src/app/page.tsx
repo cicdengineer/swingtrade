@@ -41,6 +41,7 @@ import QullamaggieView from "./QullamaggieView";
 import VolumeSellingView from "./VolumeSellingView";
 import USADataView from "./USADataView";
 import EntrySizingTile from "./EntrySizingTile";
+import PaperTradeView from "./PaperTradeView";
 import { isLatestLowAbove10Ema } from "@/lib/dailyEmaLow";
 import { EarningsMarkers, useEarnings } from "./EarningsMarkers";
 import type { EarningsEvent } from "@/lib/earnings";
@@ -51,7 +52,7 @@ import { findStochHigh, type StochHighLine } from "@/lib/stochHigh";
 import { findSwingHigh, isAboveSwingHighRed, type SwingHighSignal } from "@/lib/swingHigh";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
 
-type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Backtest" | "Settings" | "Users";
+type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Paper Trade" | "Backtest" | "Settings" | "Users";
 type DataSummary = { universe_name: UniverseName; total_constituents: number; mapped: number; stocks_downloaded: number; stocks_pending: number; stocks_failed: number; earliest_data_date: string | null; latest_data_date: string | null; index_latest_date: string | null; total_ohlcv_rows: number; last_refresh: string | null; historical_sessions: number; latest_official?: number; latest_provisional?: number };
 type DataDownloadJob = { id?: string; status: string; total: number; completed: number; remaining: number; successful: number; failed: number; current_stock?: string; current_status?: string; progress: number; started_at?: string; finished_at?: string; last_successful_update?: string; data_through_date?: string; notice?: string; pending_eod_count?: number; trading_date?: string; historical_candles_backfilled?: number; official_candles_updated?: number; provisional_candles_created?: number; provisional_candles_reconciled?: number; already_up_to_date?: number; errors: string[] };
 type DataStatus = { dhan_connected: boolean; dhan_profile?: { ok: boolean; dhanClientId?: string; tokenValidity?: string; activeSegment?: string; dataPlan?: string; dataValidity?: string; error?: string }; database_size_bytes: number; price_adjustment_status: string; latest_market_data: null | { trading_date: string; official: number; provisional: number; data_status: string }; latest_job: null | DataDownloadJob; summaries: DataSummary[]; failures: { symbol: string; security_id: string; error_message: string; attempt_count: number; last_attempt: string }[]; quality_issues: unknown[]; universe_sources: Record<string, { label: string; url: string }> };
@@ -143,6 +144,7 @@ const viewerViews = new Set<View>(["Dashboard", "Portfolio", "Screener", "Settin
 const nav: { name: View; icon: typeof Activity }[] = [
   { name: "Dashboard", icon: LayoutDashboard },
   { name: "Portfolio", icon: WalletCards },
+  { name: "Paper Trade", icon: WalletCards },
   { name: "Stock Search", icon: Search },
   { name: "Data Status", icon: Database },
   { name: "Screener", icon: SlidersHorizontal },
@@ -2599,13 +2601,13 @@ function ThirtyInThirtyTileChart({ earnings, row, chartMonths, showEma10, onOpen
   </span>;
 }
 
-function ThirtyInThirtyRiskTiles({ selected, activeRows, settings }: { selected: ThirtyInThirtyRow; activeRows: DailyChartPoint[]; settings?: TradingSettings | null }) {
+function ThirtyInThirtyRiskTiles({ selected, activeRows, settings, paper }: { selected: ThirtyInThirtyRow; activeRows: DailyChartPoint[]; settings?: TradingSettings | null; paper?: boolean }) {
   const entry = selected.current_close;
   const dailyStop = latestDailyStop(activeRows.length ? activeRows : selected.recent);
   const swingStop = thirtyInThirtySwingLowPoint(activeRows.length ? activeRows : selected.recent)?.low;
   const emaStop = activeRows.at(-1)?.ema10 ?? selected.ema10;
   return <div className="entry-sizing-grid three-sizing-tiles">
-    <EntrySizingTile title="Daily Low Entry" entry={entry} stop={dailyStop} settings={settings} />
+    <EntrySizingTile title="Daily Low Entry" entry={entry} stop={dailyStop} settings={settings} paper={paper ? { securityId: selected.security_id, symbol: selected.symbol } : undefined} />
     <EntrySizingTile title="Swing Low Sizing" entry={entry} stop={swingStop} settings={settings} />
     <EntrySizingTile title="10EMA Sizing" entry={entry} stop={emaStop} settings={settings} />
   </div>;
@@ -2723,7 +2725,7 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
   const dailyRows = lastTradingMonths(mergedDailyRows, chartMonths === 6 ? 126 : 63);
   const activeRows = timeframe === "daily" ? dailyRows : todayMinuteRows(hourlyRows);
   return <><div className="chart-shell">
-    <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} settings={settings} />
+    <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} settings={settings} paper={showScreenerStoch} />
     <div className="chart-toolbar">
       <div>
         <div className="chart-timeframe-heading"><p className="eyebrow">Chart timeframe</p>{sources?.length ? <div className="chart-source-tags" aria-label="Watchlists">{sources.map(name => <span className={`screener-tag-${screenerSourceClasses[name]}`} key={name}>{name}</span>)}</div> : null}</div>
@@ -4273,6 +4275,7 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
 
   return <main><button className="mobile-menu-button icon-button" onClick={() => setNavOpen(true)} aria-label="Open menu"><Menu size={18} /></button>{navOpen && <button className="menu-backdrop" onClick={() => setNavOpen(false)} aria-label="Close menu" />}<aside className={navOpen ? "open" : ""}><div className="side-topbar"><div className="brand"><BrandLogo compact /><span>JOB<span>POTHE</span></span></div><button className="icon-button side-close" onClick={() => setNavOpen(false)} aria-label="Close menu"><X size={18} /></button></div><div className="workspace">MARKET RESEARCH <b>India · Equity workspace</b></div><WorkspaceNavigation view={view} isAdmin={isAdmin} onNavigate={(name) => { setView(name); setNavOpen(false); }} /><div className="side-bottom"><div className="data-status"><span className={configured ? "ready" : "pending"} /><div><b>{configured ? "Dhan connected" : "Dhan setup needed"}</b><small>{configured ? "Secure server connection" : "Credentials stay on server"}</small></div></div><LiveFeedStatusIndicator status={liveFeedStatus} message={liveFeedMessage} view={view} dataJob={dataStatus?.latest_job} /><button className="help">Documentation <ArrowUpRight size={14} /></button></div></aside><div className="content"><header><div className="page-heading"><p className="eyebrow">JobPothe / Research workspace</p><h1>{view}</h1></div><div className="header-actions"><button className="icon-button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button><OwnerOnly><button className="icon-button" disabled={!security || loading} onClick={() => analyze(true)} aria-label="Refresh security analysis" title="Refresh security analysis"><RefreshCw size={17} className={loading ? "spin" : ""} /></button></OwnerOnly><button className="icon-button" onClick={() => void signOut({ callbackUrl: "/" })} aria-label="Sign out"><LogOut size={17} /></button><span className="user">{isAdmin ? "Admin" : "Viewer"}</span></div></header>{error && <div className="error">{error}</div>}
     {view === "Dashboard" && <DashboardView portfolio={portfolio} loading={loading} onRefresh={() => loadPortfolio(true)} />}
+    {view === "Paper Trade" && isAdmin && <PaperTradeView chart={points => <MiniLineChart points={points} />} />}
     {view === "Portfolio" && <PortfolioView portfolio={portfolio} loading={loading} onRefresh={() => loadPortfolio(true)} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Data Status" && <DataStatusView status={dataStatus} loading={loading || isActiveDataJob(dataStatus?.latest_job)} onRefresh={loadDataStatus} onRefreshUniverse={refreshUniverse} onRetryFailures={retryFailures} />}
     {view === "USA Data" && <USADataView />}
