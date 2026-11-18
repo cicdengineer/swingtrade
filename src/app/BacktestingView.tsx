@@ -4,163 +4,195 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { BacktestConfig, BacktestResult } from "@/lib/screenerBacktest";
 import type { EntrySizingSettings } from "@/lib/entrySizing";
 
-const rupees = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
-const money = (value: number) => rupees.format(value);
-const price = (value: number) => value.toFixed(2);
-const pct = (value: number) => `${value.toFixed(2)}%`;
-const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format;
+const pct = (n: number | null) => n === null ? "—" : `${n.toFixed(2)}%`;
+const fixed = (n: number) => n.toFixed(2);
+const indiaToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+const controls = [
+  ["holdoutPct", "Holdout (%)", 30, 20, 50, 1],
+  ["drawdownBudget", "Drawdown budget (%)", 8, 0.1, 100, 0.1],
+  ["minTrades", "Minimum development exits", 15, 1, 500, 1],
+  ["feeBps", "Fees per side (bps)", 15, 0, 250, 1],
+  ["slippageBps", "Slippage per side (bps)", 10, 0, 250, 1],
+  ["openRiskPct", "Portfolio entry-risk cap (%)", 1, 0.01, 10, 0.01],
+  ["maxExposurePct", "Entry exposure cap (%)", 60, 1, 100, 1],
+  ["maxPositionPct", "Position cap (%)", 12, 1, 100, 1],
+  ["maxPositions", "Open positions", 6, 1, 30, 1],
+  ["maxNew", "New entries per session", 2, 1, 30, 1],
+  ["maxHold", "Maximum holding sessions", 40, 2, 252, 1],
+  ["minTurnoverCr", "Minimum 20-day turnover (₹ crore)", 10, 0, 10000, 1],
+  ["breadthPct", "Minimum breadth (%)", 55, 0, 100, 1],
+  ["protectR", "Start trailing at (R)", 1.5, 0, 20, 0.1],
+  ["maxGapPct", "Maximum next-close move (%)", 2, 0, 20, 0.1],
+  ["minVolume", "Minimum breakout volume ratio", 1.5, 0.1, 20, 0.1],
+  ["maxStopPct", "Maximum initial stop distance (%)", 5, 1, 25, 0.1],
+] as const;
 
-function defaultDates() {
-  const endDate = today();
-  const [year, month, day] = endDate.split("-").map(Number);
-  const lastDay = new Date(Date.UTC(year - 1, month, 0)).getUTCDate();
-  return { startDate: new Date(Date.UTC(year - 1, month - 1, Math.min(day, lastDay))).toISOString().slice(0, 10), endDate };
+function Table({ headers, rows, empty = "No records for this session." }: { headers: string[]; rows: (string | number)[][]; empty?: string }) {
+  if (!rows.length) return <p className="panel-empty">{empty}</p>;
+  return <div style={{ overflowX: "auto" }}><table><thead><tr>{headers.map(header => <th scope="col" key={header}>{header}</th>)}</tr></thead>
+    <tbody>{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>;
 }
 
-function Curve({ values, index, label, format }: { values: number[]; index: number; label: string; format: (value: number) => string }) {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const x = (i: number) => 8 + i * 584 / Math.max(1, values.length - 1);
-  const y = (value: number) => max === min ? 55 : 100 - (value - min) * 90 / (max - min);
+function EquityChart({ snapshots, index, capital }: { snapshots: BacktestResult["validation"]["snapshots"]; index: number; capital: number }) {
+  const visible = snapshots.slice(0, index + 1);
+  const values = [capital, ...visible.flatMap(day => day.benchmark === null ? [day.equity] : [day.equity, day.benchmark])];
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const x = (i: number) => 14 + 692 * i / Math.max(1, snapshots.length - 1);
+  const y = (n: number) => high === low ? 80 : 145 - 130 * (n - low) / (high - low);
+  const points = (select: (day: typeof visible[number]) => number | null) => visible.map((day, i) => {
+    const value = select(day);
+    return value === null ? null : `${x(i)},${y(value)}`;
+  }).filter(Boolean).join(" ");
   return <section className="panel dashboard-panel">
-    <h3>{label} · {format(values[index])}</h3>
-    <svg viewBox="0 0 600 110" width="100%" role="img" aria-label={label}>
-      <polyline points={values.slice(0, index + 1).map((value, i) => `${x(i)},${y(value)}`).join(" ")} fill="none" stroke="#3a8ff0" strokeWidth="2.5" />
-      <circle cx={x(index)} cy={y(values[index])} r="4" fill="#3a8ff0" />
+    <div className="panel-head"><h3>Holdout equity</h3><small>Strategy · blue | Price index · gold</small></div>
+    <svg width="100%" viewBox="0 0 720 160" role="img" aria-label="Strategy and benchmark equity curves through the selected session">
+      <line x1="14" x2="706" y1={y(capital)} y2={y(capital)} stroke="currentColor" opacity=".2" />
+      <polyline points={points(day => day.benchmark)} stroke="#bf8b29" strokeWidth="2" fill="none" />
+      <polyline points={points(day => day.equity)} stroke="#3a8ff0" strokeWidth="3" fill="none" />
+      <circle cx={x(index)} cy={y(snapshots[index].equity)} r="4" fill="#3a8ff0" />
     </svg>
-    <small>Range {format(min)} to {format(max)}</small>
+    <small>{money(low)} to {money(high)}</small>
   </section>;
 }
 
-function DataTable({ headers, rows, empty }: { headers: string[]; rows: (string | number)[][]; empty: string }) {
-  if (!rows.length) return <p className="panel-empty">{empty}</p>;
-  return <div style={{ overflowX: "auto" }}><table><thead><tr>{headers.map(header => <th key={header}>{header}</th>)}</tr></thead>
-    <tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column}>{cell}</td>)}</tr>)}</tbody>
-  </table></div>;
+function DrawdownChart({ snapshots, index, budget }: { snapshots: BacktestResult["validation"]["snapshots"]; index: number; budget: number }) {
+  const visible = snapshots.slice(0, index + 1);
+  const depth = Math.max(budget, ...visible.map(day => day.drawdown));
+  const path = visible.map((day, i) => `${14 + 692 * i / Math.max(1, snapshots.length - 1)},${15 + 130 * day.drawdown / depth}`).join(" ");
+  const budgetY = 15 + 130 * budget / depth;
+  return <section className="panel dashboard-panel">
+    <div className="panel-head"><h3>Holdout drawdown · {pct(snapshots[index].drawdown)}</h3><small>Dashed line · {pct(budget)} budget</small></div>
+    <svg width="100%" viewBox="0 0 720 160" role="img" aria-label="Drawdown history and budget through the selected session">
+      <line x1="14" x2="706" y1={budgetY} y2={budgetY} stroke="currentColor" opacity=".5" strokeDasharray="6 4" />
+      <polyline points={path} stroke="#e46b58" strokeWidth="3" fill="none" />
+    </svg>
+  </section>;
 }
 
+const metricRow = (label: string, m: BacktestResult["validation"]["metrics"]) => [
+  label, pct(m.returnPct), pct(m.annualizedReturn), pct(m.drawdown), m.trades, pct(m.winRate),
+  m.profitFactor === null ? "—" : fixed(m.profitFactor), fixed(m.expectancyR), pct(m.exposure), money(m.costs),
+];
+const metricHeaders = ["Strategy", "Net return", "CAGR", "Max drawdown", "Exits", "Win rate", "Profit factor", "Net R / trade", "Avg exposure", "Paid costs"];
+
 export default function BacktestingView({ settings }: { settings: EntrySizingSettings | null }) {
-  const [fields, setFields] = useState(() => ({
-    ...defaultDates(), universe: "ALL", totalCapital: "", riskPercent: "", openRiskPct: "1.5", mtmTarget: "100000",
-    volumeRatio: "1.5", maxEntries: "0", stopMode: "cost", riskSizing: "full", cashSizing: "fit",
-  }));
+  const [fields, setFields] = useState<Record<string, string>>(() => {
+    const endDate = indiaToday();
+    return { startDate: `${Number(endDate.slice(0, 4)) - 3}${endDate.slice(4).replace("-02-29", "-02-28")}`, endDate,
+      universe: "CNX500", mode: "compare", totalCapital: "", riskPercent: "", trailEma: "20",
+      ...Object.fromEntries(controls.map(([key, , initial]) => [key, String(initial)])) };
+  });
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(400);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const lastIndex = (result?.snapshots.length ?? 1) - 1;
-  const set = (key: keyof typeof fields, value: string) => setFields(current => ({ ...current, [key]: value }));
+  const last = (result?.validation.snapshots.length ?? 1) - 1;
+  const set = (key: string, value: string) => setFields(before => ({ ...before, [key]: value }));
+  const jump = (next: number) => { setPlaying(false); setIndex(next); };
 
   useEffect(() => {
-    if (!playing || index >= lastIndex) return;
+    if (!playing || index >= last) return;
     const timer = window.setTimeout(() => {
-      const next = index + 1;
-      setIndex(next);
-      if (next >= lastIndex) setPlaying(false);
-    }, speed);
+      setIndex(index + 1);
+      if (index + 1 === last) setPlaying(false);
+    }, 350);
     return () => window.clearTimeout(timer);
-  }, [playing, index, lastIndex, speed]);
+  }, [playing, index, last]);
 
-  async function run(event: FormEvent) {
+  async function run(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setPlaying(false);
-    setError("");
     setResult(null);
-    const config: Partial<BacktestConfig> = {
-      startDate: fields.startDate, endDate: fields.endDate, universe: fields.universe as BacktestConfig["universe"],
-      stopMode: fields.stopMode as BacktestConfig["stopMode"],
-      riskSizing: fields.riskSizing as BacktestConfig["riskSizing"],
-      cashSizing: fields.cashSizing as BacktestConfig["cashSizing"],
-      totalCapital: fields.totalCapital === "" ? undefined : Number(fields.totalCapital),
-      riskPercent: fields.riskPercent === "" ? undefined : Number(fields.riskPercent),
-      openRiskPct: Number(fields.openRiskPct), mtmTarget: Number(fields.mtmTarget),
-      volumeRatio: Number(fields.volumeRatio), maxEntries: Number(fields.maxEntries),
-    };
+    setError("");
+    const config = {
+      startDate: fields.startDate, endDate: fields.endDate, universe: fields.universe, mode: fields.mode,
+      totalCapital: fields.totalCapital ? Number(fields.totalCapital) : undefined,
+      riskPercent: fields.riskPercent ? Number(fields.riskPercent) : undefined,
+      trailEma: Number(fields.trailEma),
+      ...Object.fromEntries(controls.map(([key]) => [key, Number(fields[key])])),
+    } satisfies Partial<Record<keyof BacktestConfig, string | number | undefined>>;
     try {
-      const response = await fetch("/api/backtesting", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config),
-      });
+      const response = await fetch("/api/backtesting", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
       setResult(data);
-      setIndex(data.snapshots.length - 1);
+      setIndex(data.validation.snapshots.length - 1);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Backtesting failed.");
+      setError(cause instanceof Error ? cause.message : "Backtest failed.");
     } finally {
       setLoading(false);
     }
   }
 
-  const numbers = [
-    ["totalCapital", "Capital (₹)", settings?.totalCapital, 1],
-    ["riskPercent", "Risk per trade (%)", settings?.riskPercent, 0.001],
-    ["openRiskPct", "Maximum open risk (%)", undefined, 0.001],
-    ["mtmTarget", "Portfolio MTM trigger (₹, 0 disables)", undefined, 0],
-    ["volumeRatio", "Minimum volume / 20-day average", undefined, 0.01],
-    ["maxEntries", "Max new positions per day (0 unlimited)", undefined, 0],
-  ] as const;
-  const day = result?.snapshots[index];
-  const visible = result?.snapshots.slice(0, index + 1) ?? [];
-  const closed = visible.flatMap(item => item.events.filter(event => event.action === "Sell"));
-  const wins = closed.filter(event => (event.pnl ?? 0) > 0);
-  const stats = day && result ? [
-    ["Equity", money(day.equity)],
-    ["Return", pct((day.equity / result.config.totalCapital - 1) * 100)],
-    ["Maximum drawdown", pct(Math.max(...visible.map(item => item.drawdown)))],
-    ["Cash", money(day.cash)],
-    ["Market value", money(day.marketValue)],
-    ["Realized P&L", money(day.realized)],
-    ["Open MTM", money(day.unrealized)],
-    ["Open risk / limit", `${money(day.openRisk)} / ${money(result.limit)}`],
-    ["Closed positions", String(closed.length)],
-    ["Win rate", closed.length ? pct(wins.length / closed.length * 100) : "—"],
-  ] : [];
-
+  const session = result?.validation.snapshots[index];
+  const metrics = result?.validation.metrics;
   return <section className="portfolio-page backtest-page">
     <form className="panel dashboard-panel" onSubmit={run}>
-      <div className="data-toolbar"><div><h2>End-of-day screener simulation</h2><small>Capital and risk per trade default to Trading Settings. Overrides apply only to this run.</small></div>
-        <button className="primary" disabled={loading}>{loading ? "Running…" : "Run backtest"}</button>
+      <div className="data-toolbar"><div><h2>Swing strategy research</h2><small>Compare setup quality, portfolio drawdown and net returns on chronological data.</small></div>
+        <button className="primary" disabled={loading}>{loading ? "Running research…" : "Run comparison"}</button>
       </div>
       <div className="settings-grid">
         <label>Start date<input required className="plain-input" type="date" max={fields.endDate} value={fields.startDate} onChange={e => set("startDate", e.target.value)} /></label>
-        <label>End date<input required className="plain-input" type="date" min={fields.startDate} max={today()} value={fields.endDate} onChange={e => set("endDate", e.target.value)} /></label>
-        <label>Universe<select value={fields.universe} onChange={e => set("universe", e.target.value)}><option value="ALL">All tracked stocks</option><option value="CNX500">Nifty 500</option><option value="NIFTYSC500">Nifty Smallcap 500</option></select></label>
-        {numbers.map(([key, label, placeholder, min]) => <label key={key}>{label}<input className="plain-input" type="number" min={min} step={key === "maxEntries" ? 1 : "any"} required={key !== "totalCapital" && key !== "riskPercent"} value={fields[key]} placeholder={placeholder === undefined ? "Use Trading Settings" : String(placeholder)} onChange={e => set(key, e.target.value)} /></label>)}
-        <label>After EMA rises above entry<select value={fields.stopMode} onChange={e => set("stopMode", e.target.value)}><option value="cost">Hold stop at entry cost</option><option value="ema">Keep trailing EMA with a cost floor</option></select></label>
-        <label>When open risk is limited<select value={fields.riskSizing} onChange={e => set("riskSizing", e.target.value)}><option value="full">Require full risk-sized order</option><option value="fit">Reduce quantity to fit</option></select></label>
-        <label>When cash is limited<select value={fields.cashSizing} onChange={e => set("cashSizing", e.target.value)}><option value="fit">Reduce quantity to fit</option><option value="full">Require full order</option></select></label>
+        <label>End date<input required className="plain-input" type="date" min={fields.startDate} max={indiaToday()} value={fields.endDate} onChange={e => set("endDate", e.target.value)} /></label>
+        <label>Universe<select value={fields.universe} onChange={e => set("universe", e.target.value)}><option value="CNX500">Nifty 500</option><option value="NIFTYSC500">Nifty Smallcap 500</option></select></label>
+        <label>Setup<select value={fields.mode} onChange={e => set("mode", e.target.value)}><option value="compare">Compare four presets</option><option value="catchup">10 EMA Catchup</option><option value="breakout">30 in 30 breakout</option><option value="blend">Catchup + breakout</option><option value="gain">Highest session gain</option></select></label>
+        <label>Capital (₹)<input className="plain-input" type="number" min="1" step="any" value={fields.totalCapital} placeholder={settings ? String(settings.totalCapital) : "Trading Settings"} onChange={e => set("totalCapital", e.target.value)} /></label>
+        <label>Risk per trade (%)<input className="plain-input" type="number" min=".001" max="5" step="any" value={fields.riskPercent} placeholder={settings ? String(Math.min(settings.riskPercent, 0.25)) : "Trading Settings · capped at 0.25%"} onChange={e => set("riskPercent", e.target.value)} /></label>
       </div>
-      <details><summary>Simulation rules</summary><p>Uses the combined screener’s standard watchlist settings and current universe membership. Candidates must close up, meet the volume threshold, and have a low above 10 EMA. Highest session gains go first. Entries and exits fill at the session close, before fees and slippage.</p><p>Checks the previous stop first, then updates surviving stops. A close above the entry candle high protects at cost and enables the EMA rule. After stops, one top rupee winner is sold if open MTM crosses the configured threshold. Entries use the remaining cash and risk budget, measured against starting capital.</p></details>
+      <details><summary>Execution, risk and validation settings</summary>
+        <div className="settings-grid">{controls.map(([key, label, , min, max, step]) => <label key={key}>{label}<input required className="plain-input" type="number" min={min} max={max} step={step} value={fields[key]} onChange={e => set(key, e.target.value)} /></label>)}
+          <label>Trailing EMA<select value={fields.trailEma} onChange={e => set("trailEma", e.target.value)}><option value="20">20 EMA</option><option value="10">10 EMA</option></select></label>
+        </div>
+      </details>
+      <details><summary>How the research works</summary>
+        <p>Catchup requires a rising 50 EMA, the screener’s 10 EMA Catchup pattern and a close above the previous high. Breakouts require a 30% move within 30 sessions during the scan window, a close above the prior 20-session high and volume expansion. Ranking favors 63-session momentum, tight bases, modest extension and short stop distance. Breadth measures the share of covered constituents above their 50 EMA.</p>
+        <p>Orders queue after a completed close for the next session. The model sizes and checks entry limits at that next close. A stop breach queues an exit for the following tradable close, so losses can exceed planned risk. Fees and slippage are estimated on both sides. Trailing stops only tighten. Open holdings are marked net of estimated exit costs.</p>
+        <p>The highest-gain baseline uses the three original candle filters across the selected universe, with the same execution and portfolio limits and no breadth gate. The holdout starts from cash. Repeated parameter changes after inspecting a holdout make it part of strategy development. Current constituents can introduce survivorship bias. The available comparison index is price-only and excludes dividends.</p>
+      </details>
     </form>
-    {error && <p className="error" role="alert">{error}</p>}
-    {result && day && <>
+    {error && <p role="alert" className="error">{error}</p>}
+    {result && session && metrics && <>
       <section className="panel dashboard-panel">
-        <div className="data-toolbar"><div><h2>{day.date}</h2><small>Session {index + 1} of {result.snapshots.length} · {result.snapshots[0].date} to {result.snapshots[lastIndex].date} · {result.coveredStocks}/{result.universeSize} stocks with data</small></div>
+        <div className="panel-head"><div><h2>{result.validated ? "Passed this holdout" : "No setup passed every validation check"}</h2><p>Development selection · {result.selected.variant.label}</p></div></div>
+        <ul>{result.validationChecks.map(check => <li key={check.label}><strong>{check.passed ? "Pass" : "Fail"}</strong> · {check.label}</li>)}</ul><p><small>Drawdown budget {pct(result.config.drawdownBudget)}</small></p>
+        <p><small>{result.coveredStocks}/{result.universeSize} constituents covered · {result.verifiedStocks} marked adjusted or verified · {metrics.open} open at period end{!result.sufficientBreadth && " · Insufficient breadth coverage"}{metrics.benchmark === null && " · No index closes on one or both holdout endpoints"}</small></p>
+        <p><small>Selected settings · {result.selected.variant.breadth}% breadth · {result.selected.variant.maxStop}% max stop · {result.selected.variant.volume}× breakout volume · {result.selected.variant.trail} EMA trail · {result.config.riskPercent}% equity risk per trade</small></p>
+      </section>
+      <section className="panel dashboard-panel"><h3>Development · {result.development.from} to {result.development.through}</h3>
+        <Table headers={[...metricHeaders, "Return / drawdown", "Eligible"]} rows={result.comparison.map(row => [...metricRow(row.variant.label, row.metrics), fixed(row.score), row.eligible ? "Yes" : "No"])} />
+      </section>
+      <section className="panel dashboard-panel"><h3>Holdout · {result.holdout.from} to {result.holdout.through}</h3>
+        <Table headers={metricHeaders} rows={[
+          metricRow(result.selected.variant.label, metrics),
+          metricRow("Highest-gain baseline", result.benchmarkBaseline),
+          metricRow("Selected setup · double costs", result.stressed),
+          ["Buy and hold price index", pct(metrics.benchmark), "—", pct(metrics.benchmarkDrawdown), "—", "—", "—", "—", "—", "—"],
+        ]} />
+      </section>
+      <div className="dashboard-grid">
+        <EquityChart snapshots={result.validation.snapshots} index={index} capital={result.config.totalCapital} />
+        <DrawdownChart snapshots={result.validation.snapshots} index={index} budget={result.config.drawdownBudget} />
+      </div>
+      <section className="panel dashboard-panel">
+        <div className="data-toolbar"><div><h3>{session.date} · Session {index + 1} of {last + 1}</h3>
+          <small>Equity {money(session.equity)} · Cash {money(session.cash)} · Drawdown {pct(session.drawdown)} · Open risk {money(session.openRisk)} · Breadth {pct(session.breadth)}</small></div>
           <div className="toolbar-actions">
-            <button className="secondary compact" onClick={() => { setPlaying(false); setIndex(0); }}>First day</button>
-            <button className="secondary compact" disabled={index === 0} onClick={() => { setPlaying(false); setIndex(index - 1); }}>Previous</button>
-            <button className="primary compact" disabled={lastIndex === 0} onClick={() => { if (!playing && index === lastIndex) setIndex(0); setPlaying(!playing); }}>{playing ? "Pause" : "Play"}</button>
-            <button className="secondary compact" disabled={index === lastIndex} onClick={() => { setPlaying(false); setIndex(index + 1); }}>Next day</button>
-            <button className="secondary compact" onClick={() => { setPlaying(false); setIndex(lastIndex); }}>Last day</button>
-            <label>Speed <select value={speed} onChange={e => setSpeed(Number(e.target.value))}><option value={1000}>1 second</option><option value={400}>0.4 seconds</option><option value={100}>0.1 seconds</option></select></label>
+            <button className="secondary compact" onClick={() => jump(0)}>First</button>
+            <button className="secondary compact" disabled={index === 0} onClick={() => jump(index - 1)}>Previous</button>
+            <button className="primary compact" onClick={() => { if (!playing && index === last) setIndex(0); setPlaying(!playing); }}>{playing ? "Pause" : "Play"}</button>
+            <button className="secondary compact" disabled={index === last} onClick={() => jump(index + 1)}>Next</button>
+            <button className="secondary compact" onClick={() => jump(last)}>Last</button>
           </div>
         </div>
-        <label>Replay session <input style={{ width: "100%" }} type="range" min={0} max={lastIndex} value={index} onChange={e => { setPlaying(false); setIndex(Number(e.target.value)); }} /></label>
-        <p><small>MTM before profit exit {money(day.mtmBeforeProfitExit)}{!result.hasSeasonalData && " · No saved seasonal observations for this universe"}</small></p>
+        <label>Replay session <input type="range" style={{ width: "100%" }} min={0} max={last} value={index} onChange={e => jump(Number(e.target.value))} /></label>
       </section>
-      <div className="stats-grid">{stats.map(([label, value]) => <section className="panel dashboard-panel" key={label}><small>{label}</small><h3>{value}</h3></section>)}</div>
-      <div className="dashboard-grid">
-        <Curve label="Equity" values={result.snapshots.map(item => item.equity)} index={index} format={money} />
-        <Curve label="Drawdown" values={result.snapshots.map(item => -item.drawdown)} index={index} format={pct} />
-        <Curve label="Open risk" values={result.snapshots.map(item => item.openRisk)} index={index} format={money} />
-      </div>
-      <section className="panel dashboard-panel"><h3>Session events</h3><DataTable headers={["Stock", "Action", "Reason", "Price (₹)", "Shares", "Realized P&L"]} rows={day.events.map(item => [item.symbol, item.action, item.reason, price(item.price), item.quantity, item.pnl === undefined ? "—" : money(item.pnl)])} empty="No entries, exits, or stop changes this session." /></section>
-      <section className="panel dashboard-panel"><h3>Ranked candidates</h3><DataTable headers={["Rank", "Stock", "Session gain", "Volume ratio", "Watchlists", "Decision"]} rows={day.candidates.map((item, rank) => [rank + 1, item.symbol, pct(item.gain), `${item.volume.toFixed(2)}×`, item.sources.join(", "), item.decision])} empty="No screener candidates this session." /></section>
-      <section className="panel dashboard-panel"><h3>End-of-day holdings</h3><DataTable headers={["Stock", "Entry date", "Shares", "Entry (₹)", "Close (₹)", "Stop (₹)", "Stop phase", "MTM", "Open risk"]} rows={day.holdings.map(item => [item.symbol, item.entryDate, item.quantity, price(item.entry), price(item.close) + (item.stale ? " (last available)" : ""), price(item.stop), item.phase, money(item.pnl), money(item.risk)])} empty="No open positions." /></section>
-      <details className="panel dashboard-panel"><summary>Trade history through {day.date}</summary><DataTable headers={["Date", "Stock", "Action", "Reason", "Price (₹)", "Shares", "Realized P&L"]} rows={visible.flatMap(item => item.events.filter(event => event.action !== "Stop").map(event => [item.date, event.symbol, event.action, event.reason, price(event.price), event.quantity, event.pnl === undefined ? "—" : money(event.pnl)]))} empty="No trades yet." /></details>
+      <section className="panel dashboard-panel"><h3>Session events</h3><Table headers={["Stock", "Event", "Reason", "Price", "Shares", "Net P&L"]} rows={session.events.map(event => [event.symbol, event.action, event.reason, event.price > 0 ? fixed(event.price) : "—", event.quantity, event.pnl === undefined ? "—" : money(event.pnl)])} /></section>
+      <section className="panel dashboard-panel"><h3>Orders queued for the next session</h3><Table headers={["Stock", "Setup", "Ranking score"]} rows={session.signals.map(signal => [signal.symbol, signal.setup, fixed(signal.score)])} /></section>
+      <section className="panel dashboard-panel"><h3>Holdings at the close</h3><Table headers={["Stock", "Entry date", "Shares", "Close", "Stop", "Net MTM", "Status"]} rows={session.holdings.map(pos => [pos.symbol, pos.entryDate, pos.quantity, fixed(pos.close), fixed(pos.stop), money(pos.pnl), [pos.pending && "Exit queued", pos.stale && "Stale close"].filter(Boolean).join(" · ") || "Open"])} /></section>
     </>}
   </section>;
 }
