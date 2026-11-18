@@ -154,7 +154,7 @@ function deriveWeeklyCandles(rows: Candle[]) {
   return weeks;
 }
 
-function analyzeStock(input: {
+export function analyzeStochRsiStock(input: {
   securityId: string;
   symbol: string;
   companyName: string;
@@ -282,7 +282,7 @@ async function calculateStochRsiScreener(filters: Partial<StochRsiScreenerFilter
     else pricesBySecurity.set(price.security_id, [price]);
   }
   const rows = members.flatMap((member) => {
-    const row = analyzeStock({
+    const row = analyzeStochRsiStock({
       securityId: member.security_id,
       symbol: member.symbol,
       companyName: member.company_name,

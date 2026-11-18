@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 // These POST handlers accept query/filter payloads for research or live quotes.
 const viewerQueries = new Set([
-  "/api/analysis", "/api/scanner", "/api/basket-backtest", "/api/usa-data",
+  "/api/analysis", "/api/scanner", "/api/usa-data",
   "/api/qullamaggie-screener", "/api/trade-management/preview",
   ...["early-breakout", "ema-no-touch", "ema-reversal-pullback", "hourly-breakout",
     "momentum-contraction", "stoch-rsi", "swing", "thirty-in-thirty", "thirty-up"]

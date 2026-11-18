@@ -41,6 +41,7 @@ import QullamaggieView from "./QullamaggieView";
 import VolumeSellingView from "./VolumeSellingView";
 import USADataView from "./USADataView";
 import EntrySizingTile from "./EntrySizingTile";
+import BacktestingView from "./BacktestingView";
 import PaperTradeView from "./PaperTradeView";
 import { isLatestLowAbove10Ema } from "@/lib/dailyEmaLow";
 import { EarningsMarkers, useEarnings } from "./EarningsMarkers";
@@ -52,7 +53,7 @@ import { findStochHigh, type StochHighLine } from "@/lib/stochHigh";
 import { findSwingHigh, isAboveSwingHighRed, type SwingHighSignal } from "@/lib/swingHigh";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
 
-type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Paper Trade" | "Backtest" | "Settings" | "Users";
+type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Paper Trade" | "Backtesting" | "Settings" | "Users";
 type DataSummary = { universe_name: UniverseName; total_constituents: number; mapped: number; stocks_downloaded: number; stocks_pending: number; stocks_failed: number; earliest_data_date: string | null; latest_data_date: string | null; index_latest_date: string | null; total_ohlcv_rows: number; last_refresh: string | null; historical_sessions: number; latest_official?: number; latest_provisional?: number };
 type DataDownloadJob = { id?: string; status: string; total: number; completed: number; remaining: number; successful: number; failed: number; current_stock?: string; current_status?: string; progress: number; started_at?: string; finished_at?: string; last_successful_update?: string; data_through_date?: string; notice?: string; pending_eod_count?: number; trading_date?: string; historical_candles_backfilled?: number; official_candles_updated?: number; provisional_candles_created?: number; provisional_candles_reconciled?: number; already_up_to_date?: number; errors: string[] };
 type DataStatus = { dhan_connected: boolean; dhan_profile?: { ok: boolean; dhanClientId?: string; tokenValidity?: string; activeSegment?: string; dataPlan?: string; dataValidity?: string; error?: string }; database_size_bytes: number; price_adjustment_status: string; latest_market_data: null | { trading_date: string; official: number; provisional: number; data_status: string }; latest_job: null | DataDownloadJob; summaries: DataSummary[]; failures: { symbol: string; security_id: string; error_message: string; attempt_count: number; last_attempt: string }[]; quality_issues: unknown[]; universe_sources: Record<string, { label: string; url: string }> };
@@ -121,12 +122,6 @@ type TradingSettings = { id: "default"; totalCapital: number; riskPercent: numbe
 type TradeEvent = { id: string; managedTradeId: string; eventType: string; timestamp: string; price?: number; quantity?: number; notes?: string; source: string };
 type ManagedTradeView = { id: string; broker: "DHAN" | "MANUAL"; symbol: string; companyName?: string; exchange: string; instrumentId?: string; isin?: string; strategy: string; status: "ACTIVE" | "RECONCILIATION_REQUIRED" | "CLOSED"; entryDate: string; averageEntry: number; initialStop: number; plannedStop: number; initialRiskPerShare: number; initialRiskAmount: number; trailMethod: "10 EMA" | "20 EMA" | "Manual"; managementTimeframe: "Daily" | "Hourly"; partialTaken: boolean; protectedStopRecorded: boolean; source: "30UP" | "BROKER_HOLDING" | "MANUAL"; quantity: number; brokerQuantity: number | null; brokerEntryDate?: string; brokerCalendarDaysHeld?: number; tradingDaysHeld: number; calendarDaysHeld: number; currentPrice: number; unrealizedPnl: number; unrealizedPnlPct: number; rMultiple: number; peakR: number; ema10?: number; ema20?: number; distanceFrom10EmaPct?: number; distanceFrom20EmaPct?: number; currentOpenRisk: number; currentOpenRiskPct: number; initialRiskPct: number; stage: "INITIAL RISK" | "EARLY HOLD" | "PARTIAL PROFIT WINDOW" | "BREAKEVEN / PROTECTED" | "RUNNER" | "TREND TRAIL" | "EXIT WARNING" | "CLOSED"; instruction: string; recommendedAction: string; nextReview: string; events: TradeEvent[] };
 type TradeManagementSnapshot = { settings: TradingSettings; trades: ManagedTradeView[]; summary: { totalCapital: number; riskPercent: number; riskUnit: number; managedTrades: number; tradesAtInitialRisk: number; protectedTrades: number; runners: number; totalCurrentOpenRisk: number; portfolioOpenRiskPct: number; unrealizedPnl: number; realizedSwingPnl: number; averageR: number; medianR: number; largestWinnerR: number; largestLoserR: number; riskLevel: "Normal" | "Elevated" | "High" } };
-type BasketBacktestFilters = { strategyMode: "PULLBACK_RECLAIM" | "RS_TIGHT_2025" | "DRY_VOLUME_BREAKOUT" | "DRY_VOLUME_BREAKOUT_QULLAMAGGIE" | "DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RANDOM" | "DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RISK_RANDOM"; universe: "ALL" | UniverseName; initialCapital: number; compoundEquity: boolean; basketSize: number; maxRiskPerTradePct: number; maxOpenRiskPct: number; exitRankBelow: number; breadthMin: number; exitBreadthBelow: number; minRs60: number; maxEntryVolumeRatio: number; exitBelow20Ema: boolean; minMovePct: number; moveWindowDays: number; impulseLookbackDays: number; minImpulseVolumeRatio: number; minPullbackDays: number; maxPullbackDays: number; minPullbackPct: number; maxPullbackPct: number; maxPullbackVolumeRatio: number; dryVolumeRatio: number; dryVolumeLookbackDays: number; breakoutWithinDays: number; maxDistanceToEntryPct: number; stopBufferPct: number; partialExitDay: number; target1R: number; target1ExitPct: number; target2R: number; target2ExitPct: number; exitBelow10Ema: boolean; startDate: string; endDate: string };
-type BasketCandidate = { rank: number; security_id: string; symbol: string; company_name: string; close: number; entry_price?: number; stop_loss?: number; signal_date?: string; score: number; trigger: boolean; entry_triggered?: boolean; impulse_return_pct: number; impulse_volume_ratio: number; pullback_pct: number; pullback_days: number; pullback_volume_ratio: number; distance_from_10ema_pct: number; reason: string; blocked_reason?: string };
-type BasketHolding = { security_id: string; symbol: string; company_name: string; entry_date: string; entry_price: number; quantity: number; current_price: number; stop_loss?: number; market_value: number; pnl: number; pnl_pct: number; open_risk?: number; open_risk_pct?: number; rank?: number; score?: number };
-type BasketEvent = { date: string; type: "BUY" | "SELL"; symbol: string; reason: string; price: number; quantity: number; amount: number; pnl?: number };
-type BasketSnapshot = { date: string; equity: number; cash: number; invested: number; drawdown_pct: number; day_pnl: number; candidates: BasketCandidate[]; holdings: BasketHolding[]; events: BasketEvent[] };
-type BasketBacktestResult = { filters: BasketBacktestFilters; summary: { startDate: string; endDate: string; initialCapital: number; finalEquity: number; totalReturnPct: number; maxDrawdownPct: number; trades: number; closedTrades: number; winRate: number; bestTradePct: number; worstTradePct: number; averageTradePct: number }; snapshots: BasketSnapshot[]; finalHoldings: BasketHolding[]; trades: BasketEvent[]; generatedAt: string };
 type PositionSizingResult = { valid: boolean; errors: string[]; riskAmount: number; riskPerShare: number; quantity: number; positionValue: number; capitalUsagePercent: number; stopLossPercent: number };
 type PortfolioResponse = {
   holdings: PortfolioHolding[];
@@ -157,7 +152,7 @@ const strategyNav: { name: View; icon: typeof Activity }[] = [
   { name: "10 EMA Catchup", icon: TrendingUp },
   { name: "Seasonal Stocks", icon: CalendarDays },
   { name: "StochRSI", icon: Activity },
-  { name: "Backtest", icon: BarChart3 },
+  { name: "Backtesting", icon: BarChart3 },
 ];
 const defaultFilters: Filters = {
   minAverage: { enabled: true, value: 10 },
@@ -327,43 +322,6 @@ const defaultEmaReversalFilters: EmaReversalFilters = {
   maxCompletedPullbacks: 0,
   minSetupScore: 0,
   showAll: false,
-};
-const defaultBasketBacktestFilters: BasketBacktestFilters = {
-  strategyMode: "DRY_VOLUME_BREAKOUT",
-  universe: "ALL",
-  initialCapital: 1000000,
-  compoundEquity: true,
-  basketSize: 3,
-  maxRiskPerTradePct: 0.3,
-  maxOpenRiskPct: 2,
-  exitRankBelow: 9,
-  breadthMin: 0,
-  exitBreadthBelow: 0,
-  minRs60: 24,
-  maxEntryVolumeRatio: 1.8,
-  exitBelow20Ema: true,
-  minMovePct: 30,
-  moveWindowDays: 30,
-  impulseLookbackDays: 90,
-  minImpulseVolumeRatio: 1.2,
-  minPullbackDays: 3,
-  maxPullbackDays: 35,
-  minPullbackPct: 3,
-  maxPullbackPct: 25,
-  maxPullbackVolumeRatio: 0.85,
-  dryVolumeRatio: 0.4,
-  dryVolumeLookbackDays: 5,
-  breakoutWithinDays: 4,
-  maxDistanceToEntryPct: 3,
-  stopBufferPct: 0.5,
-  partialExitDay: 3,
-  target1R: 3,
-  target1ExitPct: 30,
-  target2R: 9,
-  target2ExitPct: 30,
-  exitBelow10Ema: true,
-  startDate: "2026-08-01",
-  endDate: "2026-12-30",
 };
 const filterLabels: Record<FilterKey, string> = {
   minAverage: "Minimum Average Return",
@@ -1140,66 +1098,6 @@ function WinLossBars({ wins, losses }: { wins: number; losses: number }) {
   return <div className="win-loss-strip" aria-label="Win loss ratio"><span style={{ width: `${wins / total * 100}%` }} /><i style={{ width: `${losses / total * 100}%` }} /></div>;
 }
 
-function BacktestEquityChart({ points, trades }: { points: { date: string; cumulative: number }[]; trades: BasketEvent[] }) {
-  if (!points.length) return <div className="chart-empty">Run a backtest to see dated equity and trade markers.</div>;
-  const width = 900;
-  const height = 260;
-  const pad = { top: 20, right: 22, bottom: 44, left: 66 };
-  const values = points.map((point) => point.cumulative);
-  const min = Math.min(...values, 0);
-  const max = Math.max(...values, 0);
-  const innerWidth = width - pad.left - pad.right;
-  const innerHeight = height - pad.top - pad.bottom;
-  const xFor = (index: number) => pad.left + (points.length <= 1 ? 0 : (index / (points.length - 1)) * innerWidth);
-  const yFor = (value: number) => pad.top + scaleValue(value, min, max, innerHeight, 0);
-  const dateIndex = new Map(points.map((point, index) => [point.date, index]));
-  const path = points.map((point, index) => `${index === 0 ? "M" : "L"}${xFor(index).toFixed(2)} ${yFor(point.cumulative).toFixed(2)}`).join(" ");
-  const zeroY = yFor(0);
-  const tickIndexes = Array.from(new Set([0, Math.floor(points.length * 0.25), Math.floor(points.length * 0.5), Math.floor(points.length * 0.75), points.length - 1])).filter((index) => index >= 0 && index < points.length);
-  return <div className="backtest-equity-chart"><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Backtest equity curve with trade dots">
-    <line className="chart-guide" x1={pad.left} x2={width - pad.right} y1={zeroY} y2={zeroY} />
-    <path className="spark-area" d={`${path} L${width - pad.right} ${height - pad.bottom} L${pad.left} ${height - pad.bottom} Z`} />
-    <path className={values.at(-1)! >= 0 ? "spark-line up" : "spark-line down"} d={path} />
-    {trades.map((trade, index) => {
-      const pointIndex = dateIndex.get(trade.date);
-      if (pointIndex === undefined) return null;
-      const point = points[pointIndex];
-      const tone = trade.type === "BUY" ? "buy" : (trade.pnl ?? 0) >= 0 ? "sell win" : "sell loss";
-      return <circle key={`${trade.date}-${trade.symbol}-${trade.type}-${index}`} className={`trade-dot ${tone}`} cx={xFor(pointIndex)} cy={yFor(point.cumulative)} r={trade.type === "BUY" ? 3.4 : 4.3}><title>{`${trade.date} ${trade.type} ${trade.symbol}: ${trade.pnl === undefined ? rupees(trade.amount) : rupees(trade.pnl)}`}</title></circle>;
-    })}
-    {tickIndexes.map((index) => <g key={points[index].date}><line className="axis-tick" x1={xFor(index)} x2={xFor(index)} y1={height - pad.bottom} y2={height - pad.bottom + 5} /><text className="chart-label" x={xFor(index)} y={height - 18} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"}>{points[index].date.slice(5)}</text></g>)}
-    <text className="chart-label" x={pad.left} y={16}>{rupees(max)}</text>
-    <text className="chart-label" x={pad.left} y={height - pad.bottom - 6}>{rupees(min)}</text>
-  </svg><div className="chart-legend compact-legend"><span><i className="legend-buy" />Buy</span><span><i className="legend-sell-win" />Profit sell</span><span><i className="legend-sell-loss" />Loss sell</span></div></div>;
-}
-
-function BacktestReturnBars({ rows }: { rows: { label: string; pnl: number }[] }) {
-  if (!rows.length) return <div className="chart-empty">Monthly bars appear after the backtest creates daily equity snapshots.</div>;
-  const width = 720;
-  const height = 190;
-  const maxAbs = Math.max(...rows.map((row) => Math.abs(row.pnl)), 1);
-  const zero = height / 2;
-  const slot = width / rows.length;
-  return <div className="portfolio-chart backtest-bars"><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Backtest monthly P and L bars">
-    <line className="chart-guide" x1="0" x2={width} y1={zero} y2={zero} />
-    {rows.map((row, index) => {
-      const barHeight = Math.max(2, Math.abs(row.pnl) / maxAbs * (height / 2 - 18));
-      const y = row.pnl >= 0 ? zero - barHeight : zero;
-      return <g key={row.label}><title>{`${row.label}: ${rupees(row.pnl)}`}</title><rect className={row.pnl >= 0 ? "pnl-bar up" : "pnl-bar down"} x={index * slot + slot * 0.18} y={y} width={Math.max(9, slot * 0.64)} height={barHeight} rx="2" /><text className="chart-label" x={index * slot + slot * 0.5} y={height - 6} textAnchor="middle">{row.label.slice(5)}</text></g>;
-    })}
-  </svg></div>;
-}
-
-function BacktestTradeDonut({ wins, losses, breakeven }: { wins: number; losses: number; breakeven: number }) {
-  const total = wins + losses + breakeven;
-  if (!total) return <div className="chart-empty">Trade distribution appears after exits are generated.</div>;
-  const winPct = wins / total;
-  const lossPct = losses / total;
-  const winEnd = winPct * 100;
-  const lossEnd = (winPct + lossPct) * 100;
-  return <div className="donut-card"><div className="donut" style={{ background: `conic-gradient(var(--green) 0 ${winEnd}%, var(--red) ${winEnd}% ${lossEnd}%, #7d8996 ${lossEnd}% 100%)` }}><span>{Math.round(winPct * 100)}%</span></div><div className="trade-quality donut-legend"><span>Winners <b className="positive">{wins}</b></span><span>Losers <b className="negative">{losses}</b></span><span>Flat <b>{breakeven}</b></span></div></div>;
-}
-
 function TradeStageBadge({ stage }: { stage: ManagedTradeView["stage"] }) {
   const tone = stage === "EXIT WARNING" ? "danger" : stage === "PARTIAL PROFIT WINDOW" ? "warn" : stage === "RUNNER" || stage === "TREND TRAIL" || stage === "BREAKEVEN / PROTECTED" ? "good" : "neutral";
   return <span className={`stage-badge ${tone}`}>{stage}</span>;
@@ -1623,223 +1521,6 @@ function DashboardView({ portfolio, loading, onRefresh }: { portfolio: Portfolio
   const avgTrade = stats?.closedTrades ? stats.realizedPnl / stats.closedTrades : 0;
   const riskTone = accountRiskPct > 0.7 ? "danger" : accountRiskPct > 0.5 ? "warn" : "good";
   return <section className="portfolio-page dashboard-snapshot"><div className="data-toolbar dashboard-hero"><div><p className="eyebrow">Dashboard</p><h2>{stats ? `Trading snapshot · ${stats.from} onward` : "Dhan portfolio snapshot"}</h2><small>{stats ? `${stats.from} to ${stats.to}` : "Fetch holdings and trades from Dhan."}</small></div><button className="primary" onClick={onRefresh} disabled={loading || !fullAccess}><RefreshCw size={15} className={loading ? "spin" : ""} />Refresh</button></div>{!portfolio ? <section className="empty compact-empty"><div className="empty-art"><LayoutDashboard size={30} /></div><p className="eyebrow">Dashboard</p><h2>Ready to fetch Dhan data</h2><p>Use Refresh to load holdings, realized P&amp;L for the reporting period, and risk statistics.</p></section> : <><div className="dashboard-kpi-grid"><div className={`dashboard-kpi hero-kpi ${stats!.portfolioPnl >= 0 ? "good" : "bad"}`}><span>Total P&amp;L</span><b>{rupees(stats!.portfolioPnl)}</b><small>Realized {rupees(stats!.realizedPnl)} · Open {rupees(stats!.unrealizedPnl)}</small></div><div className="dashboard-kpi"><span>Invested</span><b>{rupees(stats!.totalInvested)}</b><small>{portfolio.holdings.length} live holdings</small></div><div className={`dashboard-kpi ${stats!.unrealizedPnl >= 0 ? "good" : "bad"}`}><span>Open P&amp;L</span><b>{rupees(stats!.unrealizedPnl)}</b><small>Current broker holdings</small></div>{fullAccess ? <div className={`dashboard-kpi account-risk-card ${riskTone}`}><span>Account Risk</span><b>{rupees(accountRisk)}</b><small>{pct2(accountRiskPct)} of {rupees(totalCapital)}</small></div> : <div className="dashboard-kpi"><span>Account Risk</span><b><LockedValue /></b></div>}</div><div className="dashboard-glance-grid"><section className="panel dashboard-panel compact-dashboard-panel"><div className="panel-head"><div><p className="eyebrow">Trade Quality</p><h2>{stats!.winRate.toFixed(1)}% win rate</h2></div><span className="count">{stats!.closedTrades} closed</span></div><div className="dashboard-metrics"><span>Wins / Losses <b>{stats!.winners}:{stats!.losers}</b></span><span>Avg trade <b className={avgTrade >= 0 ? "positive" : "negative"}>{rupees(avgTrade)}</b></span><span>Avg win <b className="positive">{rupees(stats!.averageWin)}</b></span><span>Avg loss <b className="negative">{rupees(stats!.averageLoss)}</b></span><span>Best <b className="positive">{rupees(stats!.maxProfit)}</b></span><span>Worst <b className="negative">{rupees(stats!.maxLoss)}</b></span></div></section><section className="panel dashboard-panel compact-dashboard-panel recent-trades-panel"><div className="panel-head"><div><p className="eyebrow">Recent Realized Trades</p><h2>Last 3 closed lots</h2></div></div>{lastTrades.length ? <div className="recent-trade-list">{lastTrades.map((trade, index) => <div key={`${trade.securityId}-${trade.date}-${index}`}><span><b>{trade.symbol}</b><small>{trade.date} · Qty {trade.quantity}</small></span><strong className={trade.netPnl >= 0 ? "positive" : "negative"}>{rupees(trade.netPnl)}</strong></div>)}</div> : <p className="panel-empty">No lots closed during this period.</p>}</section><TradeConfidenceCard trades={lastTrades} /><section className="panel dashboard-panel compact-dashboard-panel dashboard-chart-panel wide-chart"><div className="panel-head"><div><p className="eyebrow">Overall P&amp;L</p><h2>Equity line</h2></div></div><MiniLineChart points={portfolio.equityCurve} /></section><section className="panel dashboard-panel compact-dashboard-panel dashboard-chart-panel wide-chart"><div className="panel-head"><div><p className="eyebrow">Month-on-Month</p><h2>Realized bars</h2></div></div><MonthlyBars rows={portfolio.monthlyPnl} /></section></div></>}</section>;
-}
-
-function BasketBacktestView({ filters, setFilters, data, loading, onRun }: { filters: BasketBacktestFilters; setFilters: (filters: BasketBacktestFilters) => void; data: BasketBacktestResult | null; loading: boolean; onRun: () => void }) {
-  const [step, setStep] = useState(0);
-  useEffect(() => { if (data?.snapshots.length) setStep(data.snapshots.length - 1); }, [data]);
-  const setNumber = (key: keyof BasketBacktestFilters, value: number) => setFilters({ ...filters, [key]: value });
-  const isDryVolumeStrategy = filters.strategyMode === "DRY_VOLUME_BREAKOUT" || filters.strategyMode === "DRY_VOLUME_BREAKOUT_QULLAMAGGIE" || filters.strategyMode === "DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RANDOM" || filters.strategyMode === "DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RISK_RANDOM";
-  const isQullamaggieStrategy = filters.strategyMode === "DRY_VOLUME_BREAKOUT_QULLAMAGGIE" || filters.strategyMode === "DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RANDOM" || filters.strategyMode === "DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RISK_RANDOM";
-  const isRandomEntryStrategy = filters.strategyMode === "DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RANDOM";
-  const isRiskRandomEntryStrategy = filters.strategyMode === "DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RISK_RANDOM";
-  const snapshot = data?.snapshots[step];
-  const equityPoints = data?.snapshots.map((row) => ({ date: row.date, cumulative: row.equity - data.summary.initialCapital })) ?? [];
-  const report = useMemo(() => {
-    if (!data) return null;
-    const monthly = new Map<string, { label: string; pnl: number; startEquity: number; endEquity: number; trades: number }>();
-    const yearly = new Map<string, { label: string; pnl: number; startEquity: number; endEquity: number; trades: number }>();
-    for (const snap of data.snapshots) {
-      const month = snap.date.slice(0, 7);
-      const year = snap.date.slice(0, 4);
-      const monthRow = monthly.get(month) ?? { label: month, pnl: 0, startEquity: snap.equity - snap.day_pnl, endEquity: snap.equity, trades: 0 };
-      monthRow.endEquity = snap.equity;
-      monthly.set(month, monthRow);
-      const yearRow = yearly.get(year) ?? { label: year, pnl: 0, startEquity: snap.equity - snap.day_pnl, endEquity: snap.equity, trades: 0 };
-      yearRow.endEquity = snap.equity;
-      yearly.set(year, yearRow);
-    }
-    for (const trade of data.trades) {
-      const month = monthly.get(trade.date.slice(0, 7));
-      const year = yearly.get(trade.date.slice(0, 4));
-      if (trade.type === "BUY") {
-        if (month) month.trades += 1;
-        if (year) year.trades += 1;
-        continue;
-      }
-      if (trade.type !== "SELL" || trade.pnl === undefined) continue;
-      const monthKey = trade.date.slice(0, 7);
-      const yearKey = trade.date.slice(0, 4);
-      const monthRow = month ?? { label: monthKey, pnl: 0, startEquity: data.summary.initialCapital, endEquity: data.summary.initialCapital, trades: 0 };
-      monthRow.pnl += trade.pnl;
-      monthly.set(monthKey, monthRow);
-      const yearRow = year ?? { label: yearKey, pnl: 0, startEquity: data.summary.initialCapital, endEquity: data.summary.initialCapital, trades: 0 };
-      yearRow.pnl += trade.pnl;
-      yearly.set(yearKey, yearRow);
-    }
-    const sells = data.trades.filter((event) => event.type === "SELL" && event.pnl !== undefined);
-    const pnlValues = sells.map((event) => event.pnl ?? 0);
-    const wins = pnlValues.filter((value) => value > 0);
-    const losses = pnlValues.filter((value) => value < 0);
-    const flats = pnlValues.length - wins.length - losses.length;
-    const grossProfit = wins.reduce((sum, value) => sum + value, 0);
-    const grossLoss = Math.abs(losses.reduce((sum, value) => sum + value, 0));
-    const exposurePct = data.snapshots.length ? data.snapshots.filter((row) => row.invested > 0).length / data.snapshots.length * 100 : 0;
-    const averageWin = wins.length ? grossProfit / wins.length : 0;
-    const averageLoss = losses.length ? grossLoss / losses.length : 0;
-    const expectancy = pnlValues.length ? pnlValues.reduce((sum, value) => sum + value, 0) / pnlValues.length : 0;
-    const firstSnapshot = data.snapshots[0];
-    const bestDay = firstSnapshot ? data.snapshots.reduce((best, row) => row.day_pnl > best.day_pnl ? row : best, firstSnapshot) : undefined;
-    const worstDay = firstSnapshot ? data.snapshots.reduce((worst, row) => row.day_pnl < worst.day_pnl ? row : worst, firstSnapshot) : undefined;
-    const partialExits = data.trades.filter((event) => event.reason.startsWith("Qullamaggie partial")).length;
-    const realizedDayBuckets = new Map<string, number>();
-    let cumulativeRealized = 0;
-    let realizedPeak = 0;
-    let maxRealizedDrawdown = 0;
-    let maxRealizedDrawdownDate = "";
-    for (const sell of sells) {
-      const pnl = sell.pnl ?? 0;
-      cumulativeRealized += pnl;
-      realizedDayBuckets.set(sell.date, (realizedDayBuckets.get(sell.date) ?? 0) + pnl);
-      realizedPeak = Math.max(realizedPeak, cumulativeRealized);
-      const drawdown = cumulativeRealized - realizedPeak;
-      if (drawdown < maxRealizedDrawdown) {
-        maxRealizedDrawdown = drawdown;
-        maxRealizedDrawdownDate = sell.date;
-      }
-    }
-    const realizedDays = Array.from(realizedDayBuckets.entries()).map(([date, pnl]) => ({ date, pnl }));
-    const bestRealizedDay = realizedDays.reduce<{ date: string; pnl: number } | undefined>((best, row) => !best || row.pnl > best.pnl ? row : best, undefined);
-    const worstRealizedDay = realizedDays.reduce<{ date: string; pnl: number } | undefined>((worst, row) => !worst || row.pnl < worst.pnl ? row : worst, undefined);
-    const monthKeys = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthlyByYear = Array.from(yearly.keys()).sort().map((year) => {
-      const months = monthKeys.map((month) => monthly.get(`${year}-${month}`)?.pnl ?? 0);
-      return { year, months, total: months.reduce((sum, value) => sum + value, 0) };
-    });
-    const monthlyTotals = monthKeys.map((_, index) => monthlyByYear.reduce((sum, row) => sum + row.months[index], 0));
-    const returnBase = data.summary.initialCapital;
-    const monthlyRows = Array.from(monthly.values()).map((row) => ({ ...row, returnPct: returnBase ? (row.pnl / returnBase) * 100 : 0 }));
-    const yearlyRows = Array.from(yearly.values()).map((row) => ({ ...row, returnPct: returnBase ? (row.pnl / returnBase) * 100 : 0 }));
-    const startTime = Date.parse(data.summary.startDate);
-    const endTime = Date.parse(data.summary.endDate);
-    const elapsedYears = Number.isFinite(startTime) && Number.isFinite(endTime) ? Math.max((endTime - startTime) / (365.25 * 24 * 60 * 60 * 1000), 1 / 365.25) : 1;
-    const cagrPct = (Math.pow(data.summary.finalEquity / Math.max(1, data.summary.initialCapital), 1 / elapsedYears) - 1) * 100;
-    const realizedTotal = pnlValues.reduce((sum, value) => sum + value, 0);
-    const realizedReturnPct = returnBase ? realizedTotal / returnBase * 100 : 0;
-    const realizedDrawdownPct = returnBase ? maxRealizedDrawdown / returnBase * 100 : 0;
-    const averageMonthlyReturnPct = monthlyRows.length ? monthlyRows.reduce((sum, row) => sum + row.returnPct, 0) / monthlyRows.length : 0;
-    const averageYearlyReturnPct = yearlyRows.length ? yearlyRows.reduce((sum, row) => sum + row.returnPct, 0) / yearlyRows.length : 0;
-    const bestExitPnl = pnlValues.length ? Math.max(...pnlValues) : 0;
-    const worstExitPnl = pnlValues.length ? Math.min(...pnlValues) : 0;
-    return {
-      monthlyRows,
-      yearlyRows,
-      monthNames,
-      monthlyByYear,
-      monthlyTotals,
-      grandMonthlyTotal: monthlyTotals.reduce((sum, value) => sum + value, 0),
-      cagrPct,
-      realizedTotal,
-      realizedReturnPct,
-      returnBase,
-      maxRealizedDrawdown,
-      maxRealizedDrawdownDate,
-      realizedDrawdownPct,
-      averageMonthlyReturnPct,
-      averageYearlyReturnPct,
-      wins: wins.length,
-      losses: losses.length,
-      flats,
-      profitFactor: grossLoss ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0,
-      averageWin,
-      averageLoss,
-      bestExitPnl,
-      worstExitPnl,
-      payoffRatio: averageLoss ? averageWin / averageLoss : 0,
-      expectancy,
-      exposurePct,
-      bestDay,
-      worstDay,
-      bestRealizedDay,
-      worstRealizedDay,
-      partialExits,
-    };
-  }, [data, filters.compoundEquity]);
-  return <section className="portfolio-page backtest-page">
-    <div className="data-toolbar"><div><p className="eyebrow">Basket Rotation Backtest</p><h2>{isRiskRandomEntryStrategy ? "Dry Volume Breakout + Qullamaggie Risk Random Entry" : isRandomEntryStrategy ? "Dry Volume Breakout + Qullamaggie Random Entry" : isQullamaggieStrategy ? "Dry Volume Breakout + Qullamaggie Partial" : "Dry Volume Breakout"}</h2><small>{isRiskRandomEntryStrategy ? `Same random watchlist selection and Qullamaggie management, but position size and new entries are controlled by account risk.` : isRandomEntryStrategy ? `Same Qullamaggie trade management, but randomly picks from fresh eligible ENTRY signals when slots are limited.` : isQullamaggieStrategy ? `Same dry-volume entry and exit, plus sell 30% at 3R or day ${filters.partialExitDay || 3} close if still holding.` : "Ranks 30% impulse stocks by low-volume pullback, dry-candle breakout level, SL risk, and 10 EMA trail behavior."} This is research simulation only.</small></div><button className="primary" onClick={onRun} disabled={loading}><BarChart3 size={15}/>{loading ? "Running..." : "Run Backtest"}</button></div>
-    <div className="control-grid">
-      <label>Strategy<select value={filters.strategyMode} onChange={(e) => setFilters({ ...filters, strategyMode: e.target.value as BasketBacktestFilters["strategyMode"] })}><option value="DRY_VOLUME_BREAKOUT">Dry Volume Breakout</option><option value="DRY_VOLUME_BREAKOUT_QULLAMAGGIE">Dry Volume Breakout + Qullamaggie Partial</option><option value="DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RANDOM">Dry Volume Breakout + Qullamaggie Random Entry</option><option value="DRY_VOLUME_BREAKOUT_QULLAMAGGIE_RISK_RANDOM">Dry Volume Breakout + Qullamaggie Risk Random Entry</option></select></label>
-      <label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as BasketBacktestFilters["universe"] })}><option value="ALL">Nifty 500</option></select></label>
-      <label>Capital<input className="plain-input" type="number" value={filters.initialCapital} onChange={(e) => setNumber("initialCapital", Number(e.target.value))}/></label>
-      {!isRiskRandomEntryStrategy && <label>Basket Size<input className="plain-input" type="number" value={filters.basketSize} onChange={(e) => setNumber("basketSize", Number(e.target.value))}/></label>}
-      {isRiskRandomEntryStrategy && <>
-        <label>Max Risk / Trade %<input className="plain-input" type="number" min="0" step="0.05" value={filters.maxRiskPerTradePct} onChange={(e) => setNumber("maxRiskPerTradePct", Number(e.target.value))}/></label>
-        <label>Max Open Risk %<input className="plain-input" type="number" min="0" step="0.1" value={filters.maxOpenRiskPct} onChange={(e) => setNumber("maxOpenRiskPct", Number(e.target.value))}/></label>
-      </>}
-      {!isRiskRandomEntryStrategy && <label>Exit Below Rank<input className="plain-input" type="number" value={filters.exitRankBelow} onChange={(e) => setNumber("exitRankBelow", Number(e.target.value))}/></label>}
-      <label className="toggle-row"><input type="checkbox" checked={filters.compoundEquity} onChange={(e) => setFilters({ ...filters, compoundEquity: e.target.checked })}/><span>Compound equity into next entries</span></label>
-      {filters.strategyMode === "RS_TIGHT_2025" && <>
-        <label>Enter Breadth %<input className="plain-input" type="number" value={filters.breadthMin} onChange={(e) => setNumber("breadthMin", Number(e.target.value))}/></label>
-        <label>Exit Breadth %<input className="plain-input" type="number" value={filters.exitBreadthBelow} onChange={(e) => setNumber("exitBreadthBelow", Number(e.target.value))}/></label>
-        <label>Min 60D RS %<input className="plain-input" type="number" value={filters.minRs60} onChange={(e) => setNumber("minRs60", Number(e.target.value))}/></label>
-        <label>Max Entry Vol<input className="plain-input" type="number" step="0.1" value={filters.maxEntryVolumeRatio} onChange={(e) => setNumber("maxEntryVolumeRatio", Number(e.target.value))}/></label>
-        <label className="toggle-row"><input type="checkbox" checked={filters.exitBelow20Ema} onChange={(e) => setFilters({ ...filters, exitBelow20Ema: e.target.checked })}/><span>Exit below 20 EMA</span></label>
-      </>}
-      {(filters.strategyMode === "PULLBACK_RECLAIM" || isDryVolumeStrategy) && <>
-      <label>Impulse Move %<input className="plain-input" type="number" value={filters.minMovePct} onChange={(e) => setNumber("minMovePct", Number(e.target.value))}/></label>
-      <label>Move Window<input className="plain-input" type="number" value={filters.moveWindowDays} onChange={(e) => setNumber("moveWindowDays", Number(e.target.value))}/></label>
-      <label>Impulse Lookback<input className="plain-input" type="number" value={filters.impulseLookbackDays} onChange={(e) => setNumber("impulseLookbackDays", Number(e.target.value))}/></label>
-      <label>Impulse Vol Ratio<input className="plain-input" type="number" step="0.1" value={filters.minImpulseVolumeRatio} onChange={(e) => setNumber("minImpulseVolumeRatio", Number(e.target.value))}/></label>
-      <label>Min Pullback Days<input className="plain-input" type="number" value={filters.minPullbackDays} onChange={(e) => setNumber("minPullbackDays", Number(e.target.value))}/></label>
-      <label>Max Pullback Days<input className="plain-input" type="number" value={filters.maxPullbackDays} onChange={(e) => setNumber("maxPullbackDays", Number(e.target.value))}/></label>
-      <label>Min Pullback %<input className="plain-input" type="number" value={filters.minPullbackPct} onChange={(e) => setNumber("minPullbackPct", Number(e.target.value))}/></label>
-      <label>Max Pullback %<input className="plain-input" type="number" value={filters.maxPullbackPct} onChange={(e) => setNumber("maxPullbackPct", Number(e.target.value))}/></label>
-      {filters.strategyMode === "PULLBACK_RECLAIM" && 
-      <label>Pullback Vol Max<input className="plain-input" type="number" step="0.05" value={filters.maxPullbackVolumeRatio} onChange={(e) => setNumber("maxPullbackVolumeRatio", Number(e.target.value))}/></label>
-      }
-      {isDryVolumeStrategy && <>
-        <label>Dry Vol Ratio<input className="plain-input" type="number" step="0.05" value={filters.dryVolumeRatio} onChange={(e) => setNumber("dryVolumeRatio", Number(e.target.value))}/></label>
-        <label>Dry Vol Lookback<input className="plain-input" type="number" value={filters.dryVolumeLookbackDays} onChange={(e) => setNumber("dryVolumeLookbackDays", Number(e.target.value))}/></label>
-        <label>Breakout Within<input className="plain-input" type="number" value={filters.breakoutWithinDays} onChange={(e) => setNumber("breakoutWithinDays", Number(e.target.value))}/></label>
-        <label>Entry Near %<input className="plain-input" type="number" step="0.1" value={filters.maxDistanceToEntryPct} onChange={(e) => setNumber("maxDistanceToEntryPct", Number(e.target.value))}/></label>
-        <label>SL Buffer %<input className="plain-input" type="number" step="0.05" value={filters.stopBufferPct} onChange={(e) => setNumber("stopBufferPct", Number(e.target.value))}/></label>
-        {isQullamaggieStrategy && <>
-          <label>Target 1 R<input className="plain-input" type="number" min="0.1" step="0.1" value={filters.target1R} onChange={(e) => setNumber("target1R", Number(e.target.value))}/></label>
-          <label>Target 1 Sell %<input className="plain-input" type="number" min="0" max="100" step="1" value={filters.target1ExitPct} onChange={(e) => setNumber("target1ExitPct", Number(e.target.value))}/></label>
-          <label>Target 2 R<input className="plain-input" type="number" min="0.1" step="0.1" value={filters.target2R} onChange={(e) => setNumber("target2R", Number(e.target.value))}/></label>
-          <label>Target 2 Sell %<input className="plain-input" type="number" min="0" max="100" step="1" value={filters.target2ExitPct} onChange={(e) => setNumber("target2ExitPct", Number(e.target.value))}/></label>
-          <label>Target 1 Day Exit<input className="plain-input" type="number" min="1" value={filters.partialExitDay} onChange={(e) => setNumber("partialExitDay", Number(e.target.value))}/></label>
-        </>}
-        <label className="toggle-row"><input type="checkbox" checked={filters.exitBelow10Ema} onChange={(e) => setFilters({ ...filters, exitBelow10Ema: e.target.checked })}/><span>Exit below 10 EMA</span></label>
-      </>}
-      </>}
-      <label>Start Date<input className="plain-input" type="date" value={filters.startDate} onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}/></label>
-      <label>End Date<input className="plain-input" type="date" value={filters.endDate} onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}/></label>
-    </div>
-    {data && <><div className="stats-grid">
-      <Stat label="Realized P&L" value={report ? rupees(report.realizedTotal) : "—"} sub={report ? `${pct(report.realizedReturnPct)} on ${rupees(report.returnBase)}` : undefined} />
-      <Stat label="Liquidation Equity" value={rupees(data.summary.finalEquity)} sub="Includes open positions" />
-      <Stat label="Realized Drawdown" value={report ? pct(report.realizedDrawdownPct) : "—"} sub={report?.maxRealizedDrawdownDate ? `${rupees(report.maxRealizedDrawdown)} on ${report.maxRealizedDrawdownDate}` : "Closed trades only"} />
-      <Stat label="Trades / Win Rate" value={`${data.summary.trades} / ${data.summary.winRate.toFixed(1)}%`} sub={`${data.summary.closedTrades} closed`} />
-      <Stat label="Avg / Best / Worst Exit" value={report ? `${rupees(report.expectancy)} / ${rupees(report.bestExitPnl)} / ${rupees(report.worstExitPnl)}` : "—"} />
-    </div>
-    {report && <><div className="stats-grid">
-      <Stat label="Profit Factor" value={Number.isFinite(report.profitFactor) ? `${report.profitFactor.toFixed(2)}x` : "∞"} sub={`Gross winners / gross losers`} />
-      <Stat label="Expectancy / Exit" value={rupees(report.expectancy)} sub={`Avg win ${rupees(report.averageWin)} · Avg loss ${rupees(report.averageLoss)}`} />
-      <Stat label="Payoff Ratio" value={`${report.payoffRatio.toFixed(2)}x`} sub={`${report.wins} wins · ${report.losses} losses · ${report.flats} flat`} />
-      <Stat label="Exposure" value={pct(report.exposurePct)} sub={`${report.partialExits} partial exits`} />
-    </div><div className="stats-grid">
-      <Stat label="Best Realized Day" value={rupees(report.bestRealizedDay?.pnl ?? 0)} sub={report.bestRealizedDay?.date} />
-      <Stat label="Worst Realized Day" value={rupees(report.worstRealizedDay?.pnl ?? 0)} sub={report.worstRealizedDay?.date} />
-      <Stat label="Positive Realized Months" value={`${report.monthlyRows.filter((row) => row.pnl > 0).length}/${report.monthlyRows.length}`} />
-      <Stat label="Avg Monthly Realized" value={pct(report.averageMonthlyReturnPct)} sub={report.monthlyRows.at(-1) ? `Latest ${report.monthlyRows.at(-1)!.label}: ${rupees(report.monthlyRows.at(-1)!.pnl)}` : undefined} />
-      <Stat label="Avg Yearly Realized" value={pct(report.averageYearlyReturnPct)} sub={`${report.yearlyRows.length} year rows`} />
-    </div></>}
-    <section className="panel dashboard-panel"><div className="panel-head"><div><p className="eyebrow">Equity Curve</p><h2>Basket simulation P&amp;L with trade dots</h2></div><div className="chart-legend compact-legend"><span><i className="legend-buy" />Buy</span><span><i className="legend-sell-win" />Profit sell</span><span><i className="legend-sell-loss" />Loss sell</span></div></div><BacktestEquityChart points={equityPoints} trades={data.trades} /></section>
-    {report && <div className="dashboard-grid backtest-analytics-grid">
-      <section className="panel dashboard-panel"><div className="panel-head"><div><p className="eyebrow">Monthly P&amp;L</p><h2>Realized month-by-month bars</h2></div></div><BacktestReturnBars rows={report.monthlyRows.map((row) => ({ label: row.label, pnl: row.pnl }))} /></section>
-      <section className="panel dashboard-panel"><div className="panel-head"><div><p className="eyebrow">Trade Mix</p><h2>Exit distribution</h2></div></div><BacktestTradeDonut wins={report.wins} losses={report.losses} breakeven={report.flats} /></section>
-    </div>}
-    {report && <section className="panel"><div className="panel-head"><div><p className="eyebrow">Monthly Report</p><h2>Realized profit/loss matrix</h2></div><span className="count">SELL P&amp;L only</span></div><div className="table-wrap"><table className="monthly-matrix-table"><thead><tr><th>Year</th>{report.monthNames.map((month) => <th key={month}>{month}</th>)}<th>Total</th></tr></thead><tbody>{report.monthlyByYear.map((row) => <tr key={row.year}><td className="window">{row.year}</td>{row.months.map((value, index) => <td key={`${row.year}-${index}`} className={value >= 0 ? "positive" : "negative"}>{value === 0 ? "—" : rupees(value)}</td>)}<td className={row.total >= 0 ? "positive" : "negative"}>{rupees(row.total)}</td></tr>)}<tr className="matrix-total-row"><td className="window">Total</td>{report.monthlyTotals.map((value, index) => <td key={`total-${index}`} className={value >= 0 ? "positive" : "negative"}>{value === 0 ? "—" : rupees(value)}</td>)}<td className={report.grandMonthlyTotal >= 0 ? "positive" : "negative"}>{rupees(report.grandMonthlyTotal)}</td></tr></tbody></table></div></section>}
-    <section className="panel"><div className="panel-head"><div><p className="eyebrow">Day Replay</p><h2>{snapshot?.date ?? "No snapshot"}</h2></div><div className="toolbar-actions"><button className="secondary compact" onClick={() => setStep(0)} disabled={!step}>First</button><button className="secondary compact" onClick={() => setStep((value) => Math.max(0, value - 1))} disabled={!step}>Prev Day</button><button className="primary compact" onClick={() => setStep((value) => Math.min((data.snapshots.length || 1) - 1, value + 1))} disabled={step >= data.snapshots.length - 1}>Next Day</button><button className="secondary compact" onClick={() => setStep(data.snapshots.length - 1)}>Latest</button></div></div><div className="progress-track"><i style={{ width: `${data.snapshots.length <= 1 ? 100 : (step / (data.snapshots.length - 1)) * 100}%` }} /></div>{snapshot && <div className="stats-grid compact-stats"><Stat label="Equity" value={rupees(snapshot.equity)} sub={`Day ${step + 1} of ${data.snapshots.length}`}/><Stat label="P&L Change" value={rupees(snapshot.day_pnl)} /><Stat label="Cash" value={rupees(snapshot.cash)} /><Stat label="Drawdown" value={pct(snapshot.drawdown_pct)} sub={`Invested ${rupees(snapshot.invested)}`} /></div>}</section>
-    {snapshot && <div className="dashboard-grid">
-      <section className="panel"><div className="panel-head"><div><p className="eyebrow">Basket</p><h2>Current holdings</h2></div></div>{snapshot.holdings.length ? <div className="table-wrap"><table><thead><tr><th>Symbol</th><th>Rank</th><th>Entry</th><th>Stop</th><th>Current</th><th>Value</th><th>Open Risk</th><th>P&L</th><th>Score</th></tr></thead><tbody>{snapshot.holdings.map((holding) => <tr key={holding.security_id}><td className="window">{holding.symbol}<small className="sample-warning">{holding.company_name}</small></td><td>{holding.rank ?? "Off list"}</td><td>{money(holding.entry_price)}<small className="sample-warning">{holding.entry_date}</small></td><td>{holding.stop_loss === undefined ? "—" : money(holding.stop_loss)}</td><td>{money(holding.current_price)}</td><td>{rupees(holding.market_value)}</td><td>{holding.open_risk === undefined ? "—" : rupees(holding.open_risk)}<small>{holding.open_risk_pct === undefined ? "" : pct(holding.open_risk_pct)}</small></td><td className={holding.pnl >= 0 ? "positive" : "negative"}>{rupees(holding.pnl)}<small>{pct(holding.pnl_pct)}</small></td><td>{holding.score ?? "—"}</td></tr>)}</tbody></table></div> : <p className="panel-empty">Basket is empty on this day.</p>}</section>
-      <section className="panel"><div className="panel-head"><div><p className="eyebrow">Events</p><h2>Today decisions</h2></div></div>{snapshot.events.length ? <div className="timeline">{snapshot.events.map((event, index) => <div key={`${event.type}-${event.symbol}-${index}`}><b>{event.type} · {event.symbol}</b><span>{money(event.price)} · {rupees(event.amount)}{event.pnl !== undefined ? ` · P&L ${rupees(event.pnl)}` : ""}</span><small>{event.reason}</small></div>)}</div> : <p className="panel-empty">No basket changes on this day.</p>}</section>
-    </div>}
-    {snapshot && <section className="panel"><div className="panel-head"><div><p className="eyebrow">Ranked Watchlist</p><h2>Top setup candidates</h2></div><span className="count">{snapshot.candidates.length} shown</span></div>{snapshot.candidates.length ? <div className="table-wrap"><table><thead><tr><th>Rank</th><th>Symbol</th><th>Trigger</th><th>Score</th><th>Close</th><th>Entry / SL</th><th>Impulse</th><th>Impulse Vol</th><th>Pullback</th><th>Dry Vol</th><th>10 EMA</th><th>Reason</th></tr></thead><tbody>{snapshot.candidates.map((row) => { const triggerLabel = row.trigger ? "ENTRY" : row.entry_triggered ? "TRIGGERED" : "WAIT"; const triggerClass = row.trigger ? "good" : row.entry_triggered ? "warn" : "neutral"; return <tr key={row.security_id}><td>{row.rank}</td><td className="window">{row.symbol}<small className="sample-warning">{row.company_name}</small></td><td><span className={`stage-badge ${triggerClass}`}>{triggerLabel}</span></td><td>{row.score}</td><td>{money(row.close)}</td><td>{row.entry_price === undefined ? "—" : money(row.entry_price)}<small className="sample-warning">{row.stop_loss === undefined ? "" : `SL ${money(row.stop_loss)}`}</small></td><td className="positive">{pct(row.impulse_return_pct)}</td><td>{row.impulse_volume_ratio.toFixed(2)}x</td><td className="negative">{pct(-row.pullback_pct)}<small>{row.pullback_days} days</small></td><td>{row.pullback_volume_ratio.toFixed(2)}x</td><td className={row.distance_from_10ema_pct >= 0 ? "positive" : "negative"}>{pct(row.distance_from_10ema_pct)}</td><td>{row.reason}{row.blocked_reason && <small className="sample-warning">{row.blocked_reason}</small>}</td></tr>; })}</tbody></table></div> : <p className="panel-empty">No ranked setups on this day.</p>}</section>}
-    <section className="panel"><div className="panel-head"><div><p className="eyebrow">Trade Log</p><h2>All simulated basket changes</h2></div><span className="count">{data.trades.length} events</span></div>{data.trades.length ? <div className="table-wrap"><table><thead><tr><th>Date</th><th>Action</th><th>Symbol</th><th>Price</th><th>Amount</th><th>P&L</th><th>Reason</th></tr></thead><tbody>{data.trades.slice(-80).reverse().map((event, index) => <tr key={`${event.date}-${event.symbol}-${event.type}-${index}`}><td>{event.date}</td><td><span className={`stage-badge ${event.type === "BUY" ? "good" : "warn"}`}>{event.type}</span></td><td className="window">{event.symbol}</td><td>{money(event.price)}</td><td>{rupees(event.amount)}</td><td className={(event.pnl ?? 0) >= 0 ? "positive" : "negative"}>{event.pnl === undefined ? "—" : rupees(event.pnl)}</td><td>{event.reason}</td></tr>)}</tbody></table></div> : <p className="panel-empty">No trades generated yet.</p>}</section></>}
-  </section>;
 }
 
 function PortfolioView({ portfolio, loading, onRefresh, setLiveFeedStatus }: { portfolio: PortfolioResponse | null; loading: boolean; onRefresh: () => void; setLiveFeedStatus: (status: LiveFeedStatus, message?: string) => void }) {
@@ -4158,8 +3839,6 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
   const [selectedSeasonalStock, setSelectedSeasonalStock] = useState<ThirtyInThirtyRow | null>(null);
   const [stochRsiFilters, setStochRsiFilters] = useState<StochRsiFilters>(defaultStochRsiFilters);
   const [selectedStochRsi, setSelectedStochRsi] = useState<StochRsiRow | null>(null);
-  const [basketBacktestFilters, setBasketBacktestFilters] = useState<BasketBacktestFilters>(defaultBasketBacktestFilters);
-  const [basketBacktest, setBasketBacktest] = useState<BasketBacktestResult | null>(null);
   const [liveFeedStatus, setLiveFeedStatus] = useState<LiveFeedStatus>("idle");
   const [liveFeedMessage, setLiveFeedMessage] = useState<string>();
   const updateLiveFeedStatus = useCallback((status: LiveFeedStatus, message?: string) => {
@@ -4181,7 +3860,7 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("seasonal-edge-theme", theme); }, [theme]);
   useEffect(() => { localStorage.setItem("momentum-contraction-filters", JSON.stringify(momentumContractionFilters)); }, [momentumContractionFilters]);
-  useEffect(() => { if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "10 EMA Catchup") runEmaNoTouchScreener(); if (view === "StochRSI") runStochRsiScreener(); if (view === "Backtest" && !basketBacktest) runBasketBacktest(); }, [view, configured]);
+  useEffect(() => { if ((view === "Dashboard" || view === "Portfolio") && configured && !portfolio) loadPortfolio(); if (view === "Data Status") loadDataStatus(); if (view === "Seasonality") loadSeasonality(); if (view === "Scanner") runScanner(); if (view === "Swing Screener") runSwingScreener(); if (view === "30%Up") runThirtyUpScreener(); if (view === "Early Breakout") runEarlyBreakoutScreener(); if (view === "Hourly Breakout") runHourlyBreakoutScreener(); if (view === "Momentum Tight") runMomentumContractionScreener(); if (view === "30 in 30") runThirtyInThirtyScreener(); if (view === "10 EMA Catchup") runEmaNoTouchScreener(); if (view === "StochRSI") runStochRsiScreener(); }, [view, configured]);
   useEffect(() => { if (view === "Seasonal Stocks" && !seasonalStocksByMonth[seasonalMonth]) void runSeasonalStocks(); }, [view, seasonalMonth]);
   useEffect(() => {
     if (view !== "Data Status") return;
@@ -4263,7 +3942,6 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
   async function runSeasonalStocks(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch(`/api/seasonal-stocks?month=${seasonalMonth}`, { cache: "no-store" }); const d = await readJsonResponse<SeasonalStocksResponse>(r, "Seasonal stocks unavailable"); setSeasonalStocksByMonth((current) => ({ ...current, [d.month]: d })); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "Seasonal stocks unavailable"); } finally { if (!options.silent) setLoading(false); } }
   async function buildSeasonalStocks() { setLoading(true); try { const r = await fetch("/api/seasonal-stocks/rebuild", { method: "POST" }); await readJsonResponse(r, "Seasonal watchlist build failed"); const snapshot = await readJsonResponse<SeasonalStocksResponse>(await fetch(`/api/seasonal-stocks?month=${seasonalMonth}`, { cache: "no-store" }), "Seasonal stocks unavailable"); setSeasonalStocksByMonth({ [snapshot.month]: snapshot }); setSelectedSeasonalStock(null); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Seasonal watchlist build failed"); } finally { setLoading(false); } }
   async function runStochRsiScreener(options: ThirtyUpRunOptions = {}) { if (!options.silent) setLoading(true); try { const r = await fetch("/api/stoch-rsi-screener/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: stochRsiFilters }) }); const d = await readJsonResponse<StochRsiResponse>(r, "StochRSI screener unavailable"); setStochRsi(d); setStochRsiUpdatedAt(new Date().toISOString()); if (!options.silent) setError(""); } catch (e) { if (!options.silent) setError(e instanceof Error ? e.message : "StochRSI screener unavailable"); } finally { if (!options.silent) setLoading(false); } }
-  async function runBasketBacktest() { setLoading(true); try { const r = await fetch("/api/basket-backtest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: basketBacktestFilters }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); setBasketBacktest(d); setError(""); } catch (e) { setError(e instanceof Error ? e.message : "Basket backtest unavailable"); } finally { setLoading(false); } }
   async function loadPortfolio(refresh = false) { setLoading(true); setError(""); try { const r = await fetch(refresh ? "/api/portfolio?refresh=1" : "/api/portfolio"); const d = await r.json(); if (!r.ok) throw new Error(d.error); setPortfolio(d); if (d.tradeManagement?.settings) setTradingSettings(d.tradeManagement.settings); } catch (e) { setError(e instanceof Error ? e.message : "Portfolio unavailable"); } finally { setLoading(false); } }
   async function recordTradeEvent(tradeId: string, event: Partial<TradeEvent> & { eventType: string }) { try { const r = await fetch(`/api/trade-management/trades/${tradeId}/events`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(event) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); await loadPortfolio(); } catch (e) { setError(e instanceof Error ? e.message : "Could not record trade event"); } }
   async function updateManagedTrade(tradeId: string, patch: Partial<ManagedTradeView>) { try { const r = await fetch(`/api/trade-management/trades/${tradeId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }); const d = await r.json(); if (!r.ok) throw new Error(d.error); await loadPortfolio(); } catch (e) { setError(e instanceof Error ? e.message : "Could not update managed trade"); } }
@@ -4293,11 +3971,11 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
     {view === "10 EMA Catchup" && <EmaNoTouchScreenerView data={emaNoTouch} filters={emaNoTouchFilters} setFilters={setEmaNoTouchFilters} loading={loading} onRun={runEmaNoTouchScreener} selected={selectedEmaNoTouch} setSelected={setSelectedEmaNoTouch} settings={tradingSettings} />}
     {view === "Seasonal Stocks" && <ThirtyInThirtyScreenerView seasonal month={seasonalMonth} setMonth={(month) => { setSelectedSeasonalStock(null); setSeasonalMonth(month); }} data={seasonalStocksByMonth[seasonalMonth] ?? null} filters={seasonalFilters} setFilters={setSeasonalFilters} loading={loading} onRun={runSeasonalStocks} onBuild={buildSeasonalStocks} onOpenSeasonality={() => setView("Seasonality")} onReset={() => setSeasonalFilters(defaultThirtyInThirtyFilters)} selected={selectedSeasonalStock} setSelected={setSelectedSeasonalStock} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={seasonalStocksByMonth[seasonalMonth]?.generatedAt} settings={tradingSettings} />}
     {view === "StochRSI" && <StochRsiScreenerView data={stochRsi} filters={stochRsiFilters} setFilters={setStochRsiFilters} loading={loading} onRun={runStochRsiScreener} onReset={() => setStochRsiFilters(defaultStochRsiFilters)} selected={selectedStochRsi} setSelected={setSelectedStochRsi} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={stochRsiUpdatedAt} settings={tradingSettings} />}
-    {view === "Backtest" && <BasketBacktestView filters={basketBacktestFilters} setFilters={setBasketBacktestFilters} data={basketBacktest} loading={loading} onRun={runBasketBacktest} />}
+    {view === "Backtesting" && isAdmin && <BacktestingView settings={tradingSettings} />}
     {view === "Stock Search" && <><section className="search-card"><div className="search-copy"><p className="eyebrow">01 / Research a security</p><h2>Find an Indian equity</h2><p>Search the Dhan security master by symbol or company name.</p></div><div className="search-area"><form onSubmit={(e) => { e.preventDefault(); runSearch(); }}><div className="search-row"><div className="search-input"><Search size={18} /><input placeholder="Search RELIANCE, TCS, INFY…" value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>Enter</kbd></div><button className="primary search-button" type="submit" disabled={loading}>{loading ? "Searching…" : "Search"}</button></div></form>{results.length > 0 && <div className="results">{results.map((s) => <button key={`${s.securityId}-${s.segment}`} onClick={() => { setSecurity(s); setQuery(""); setResults([]); setAnalysis(null); }}><div><b>{s.symbol}</b><span>{s.name}</span></div><small>{s.exchange} · {s.securityId}</small></button>)}</div>}<div className="search-hint"><Database size={14} /><span>Security IDs are resolved from Dhan’s master—not ticker text alone.</span></div></div></section>{!configured && <section className="setup"><div className="setup-icon"><ShieldCheck size={25} /></div><div><p className="eyebrow">Secure data connection</p><h2>Connect your Dhan account to begin</h2><p>Market data and calculated statistics remain empty until server-side Dhan credentials are configured.</p></div><code>DHAN_CLIENT_ID= · DHAN_ACCESS_TOKEN=</code></section>}{!security && <section className="empty"><div className="empty-art"><CalendarDays size={30} /></div><p className="eyebrow">Awaiting a selection</p><h2>Start with a security search</h2><p>Select an equity to load its daily OHLCV history and derive seasonality statistics.</p></section>}{security && <><section className="stock-header"><div><div className="ticker-row"><span className="ticker">{security.symbol}</span><span className="exchange">{security.exchange}</span></div><h2>{security.name}</h2><p>Security ID {security.securityId} · Daily OHLCV · {analysis ? `${analysis.candles.length} trading sessions` : "Not loaded"}</p></div><button className="primary" onClick={() => analyze()} disabled={loading || !configured}>{loading ? <><RefreshCw size={16} className="spin" /> Calculating…</> : <><BarChart3 size={16} /> Load seasonality</>}</button></section>{analysis && <><section className="stats-grid"><Stat label="Current close" value={latest ? money(latest.close) : "—"} sub={latest?.date} /><Stat label="History available" value={`${new Set(analysis.candles.map((c) => c.date.slice(0, 4))).size} years`} sub="Complete years used" /><Stat label="Data through" value={latest?.date || "—"} sub="Cached locally" /><Stat label="Method" value="Daily OHLCV" sub="Adjusted data must be verified" /></section></>}</>}</>}
     {view === "Users" && isAdmin && <UsersView />}
     {view === "Settings" && <TradingSettingsView settings={tradingSettings} onSaved={setTradingSettings} />}
-    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "USA Data", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Screener", "Qullamaggie", "10 EMA Catchup", "Seasonal Stocks", "StochRSI", "Backtest", "Settings", "Users"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
+    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "USA Data", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Screener", "Qullamaggie", "10 EMA Catchup", "Seasonal Stocks", "StochRSI", "Backtesting", "Settings", "Users"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
     {viewerViews.has(view) && <TradingDisclaimer />}
   </div></main>;
 }
