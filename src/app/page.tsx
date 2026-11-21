@@ -45,7 +45,7 @@ import BacktestingView from "./BacktestingView";
 import PaperTradeView from "./PaperTradeView";
 import { isLatestLowAbove10Ema } from "@/lib/dailyEmaLow";
 import { EarningsMarkers, useEarnings } from "./EarningsMarkers";
-import type { EarningsEvent } from "@/lib/earnings";
+import { latestEarningsCandle, type EarningsEvent } from "@/lib/earnings";
 import Nifty500MiniChart from "./Nifty500MiniChart";
 import { latestDailyStop, swingLowBeforeLatest } from "@/lib/entrySizing";
 import { findVolumeSellingSignal, type VolumeSellingSignal } from "@/lib/volumeSellingLogic";
@@ -92,7 +92,7 @@ type MomentumContractionFilters = { universe: "ALL" | UniverseName; setupType: "
 type MomentumContractionRow = { status: MomentumSetupType | "BELOW_EMA" | "NO_MOMENTUM" | "NOT_TIGHT" | "VOLUME_NOT_DRY" | "ILLIQUID"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; setupType: MomentumSetupType; setupScore: number; current_date: string; current_close: number; ema50: number; emaSlope: number; distance_from_ema_pct: number; priorMovePct: number; momentumRelativeVolume: number; atr14: number; rangeCompression: number; currentVolume: number; volumeSMA20: number; volumeSMA50: number; relativeVolume: number; volumePercentile: number; lowestVolume10: boolean; lowestVolume20: boolean; avgVolume5: number; avgVolume20: number; volumeContractionRatio: number; trendStructure: "HIGHER_HIGH_LOW" | "RISING" | "SIDEWAYS" | "WEAK"; averageDailyTradedValue: number; reason: string; diagnostics: { pass: boolean; label: string }[]; recent: DailyChartPoint[] };
 type MomentumContractionResponse = { filters: MomentumContractionFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: MomentumContractionRow[]; generatedAt: string };
 type ThirtyInThirtyFilters = { universe: "ALL" | UniverseName; lookbackDays: number; windowDays: number; minReturnPct: number; minAverageDailyTradedValue: number; positive3MonthsOnly: boolean; positive6MonthsOnly: boolean; above10EmaOnly: boolean; above50EmaOnly: boolean; nearPreviousDayHighOnly: boolean; upTodayOnly: boolean; nearSwingHighOnly: boolean; strongStartOnly: boolean; earlyVolumeOnly: boolean; highVolumeOnly: boolean; abnormalVolume10dOnly: boolean; decliningVolumeOnly: boolean; dryVolumeOnly: boolean; redCandleOnly: boolean; threeRedCandleOnly: boolean; stoch20Only: boolean; stoch80Only: boolean; stochBelow80Only: boolean; stochRisingOnly: boolean; showAll: boolean };
-type ThirtyInThirtySortKey = "best_return" | "seasonal_avg" | "today_return" | "stoch" | "symbol" | "company" | "daily_sl_pct" | "swing_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "closest_stoch_high" | "closest_red_entry" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent" | "falling_trend" | "closest_abnormal_high";
+type ThirtyInThirtySortKey = "earnings_candle" | "best_return" | "seasonal_avg" | "today_return" | "stoch" | "symbol" | "company" | "daily_sl_pct" | "swing_sl_pct" | "pullback" | "near_3m_high" | "near_6m_high" | "breakout_3pct" | "closest_breakout" | "closest_stoch_high" | "closest_red_entry" | "tight_5d" | "demand_supply" | "volume_dryness" | "recent" | "falling_trend" | "closest_abnormal_high";
 type ThirtyInThirtyRow = { status: "ELIGIBLE" | "NO_30D_MOVE" | "ILLIQUID" | "FILTERED"; qualifies: boolean; security_id: string; symbol: string; company_name: string; universe_name: UniverseName; current_date: string; current_close: number; ema10: number; distance_from_10ema_pct: number; ema50: number; distance_from_ema_pct: number; best_return_pct: number; best_start_date?: string; best_start_close?: number; best_end_date?: string; best_end_close?: number; days_since_best_move: number; return_1m_pct: number; return_2m_pct: number; current_3m_return_pct: number; current_6m_return_pct: number; pullback_from_best_end_pct: number; pullback_from_3m_high_pct: number; pullback_from_6m_high_pct: number; breakout_level: number; breakout_distance_pct: number; within_3pct_breakout: boolean; tightness_5d_vs_20d: number; lowest_volume_5d_vs_20d: number; demand_supply_score: number; daily_stoch_d?: number; previous_daily_stoch_d?: number; monthly_stoch_d?: number; previous_monthly_stoch_d?: number; averageDailyTradedValue: number; reason: string; recent: Array<DailyChartPoint & { daily_stoch_d?: number }>; seasonal_avg_return?: number; seasonal_observations?: number; seasonal_window?: string };
 type ThirtyInThirtyResponse = { filters: ThirtyInThirtyFilters; evaluated: number; qualified: number; statusSummary: Record<string, number>; results: ThirtyInThirtyRow[]; generatedAt: string };
 type EmaNoTouchFilters = { universe: "ALL" | UniverseName; minAverageDailyTradedValue: number; baseDays: number; minPriorAdvancePct: number; maxBaseRangePct: number; maxDistanceFromEmaPct: number; minCatchupPct: number };
@@ -2422,7 +2422,7 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
         </div>
       </div>
     </div>
-    <CleanCandleChart earnings={earnings} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "1min" && hourlyLoading} error={timeframe === "1min" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} stochHighLine={timeframe === "daily" ? stochHighLine : null} swingHighLine={timeframe === "daily" ? swingHighLine : null} abnormalSignal={timeframe === "daily" ? abnormalSignal : undefined} />
+    <CleanCandleChart earnings={earnings} earningsCandle={timeframe === "daily" ? latestEarningsCandle(earnings, selected.recent) : undefined} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "1min" && hourlyLoading} error={timeframe === "1min" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} stochHighLine={timeframe === "daily" ? stochHighLine : null} swingHighLine={timeframe === "daily" ? swingHighLine : null} abnormalSignal={timeframe === "daily" ? abnormalSignal : undefined} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>
     <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} stochOnly stochHighLine={stochHighLine} />
@@ -2545,6 +2545,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   liveTicksRef.current = liveTicks;
   const [priceClock, setPriceClock] = useState(Date.now());
   const earnings = useEarnings(!!combined);
+  const sortByEarningsCandle = sort.key === "earnings_candle";
   const sessionDate = liveTradeDate();
   const [streamState, setStreamState] = useState<LiveFeedStatus>("connecting");
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
@@ -2715,6 +2716,16 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     };
   }, [subscriptionIds, setLiveFeedStatus]);
   const sortRows = useCallback((rows: ThirtyInThirtyRow[]) => {
+    if (sort.key === "earnings_candle") {
+      return rows.flatMap(row => {
+        const candle = latestEarningsCandle(earnings.results[row.symbol], row.recent);
+        const price = row.current_close;
+        if (!candle || !Number.isFinite(price) || price <= 0) return [];
+        const distance = Math.abs(price - candle.high) / candle.high * 100;
+        return Number(distance.toFixed(10)) <= 2 ? [{ row, distance }] : [];
+      }).sort((a, b) => a.distance - b.distance || a.row.symbol.localeCompare(b.row.symbol))
+        .map(({ row }) => row);
+    }
     const valueFor = (row: ThirtyInThirtyRow): string | number => {
       if (sort.key === "symbol") return row.symbol;
       if (sort.key === "company") return row.company_name;
@@ -2752,7 +2763,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
       return sort.direction === "asc" ? comparison : -comparison;
     });
-  }, [chartMonths, liveTicks, sellingSignals, sessionDate, sort]);
+  }, [chartMonths, earnings.results, liveTicks, sellingSignals, sessionDate, sort]);
   const matchesSelectedTrend = useCallback((row: ThirtyInThirtyRow) => !cleanTrendOnly || matchesCleanTrend(row.recent, chartMonths === 6 ? 126 : 63), [chartMonths, cleanTrendOnly]);
   const aboveRed = (row: ThirtyInThirtyRow) => isAboveSwingHighRed(row.recent, row.current_close);
   const requiresStochHigh = stochHighOnly || (combined && source === "StochHigh");
@@ -2769,10 +2780,11 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const visibleRows = useMemo(() => {
     const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
     if (previewOnly) return activeData?.results.slice(0, 1) ?? [];
+    if (sortByEarningsCandle) return sortedRows.slice(0, tileLimit);
     return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
-  }, [pinnedRows, sortedRows, tileLimit, previewOnly, activeData]);
+  }, [pinnedRows, sortedRows, tileLimit, previewOnly, activeData, sortByEarningsCandle]);
   const togglePinned = (securityId: string) => setPinnedIds((current) => current.includes(securityId) ? current.filter((id) => id !== securityId) : [...current, securityId]);
-  const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "daily_sl_pct" || key === "swing_sl_pct" || key === "closest_stoch_high" || key === "closest_red_entry" || key === "closest_abnormal_high" ? "asc" : "desc" });
+  const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "earnings_candle" || key === "daily_sl_pct" || key === "swing_sl_pct" || key === "closest_stoch_high" || key === "closest_red_entry" || key === "closest_abnormal_high" ? "asc" : "desc" });
 
   useEffect(() => {
     let cancelled = false;
@@ -2842,7 +2854,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
       <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
-      <div className="thirty-sort-control"><label htmlFor="thirty-sort">Sort</label><div><select id="thirty-sort" value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{(seasonal || combined) && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Latest Session Gain</option><option value="stoch">Stoch</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option>{combined && <option value="closest_stoch_high">Closest to StochHigh Green Line</option>}{!seasonal && <option value="closest_abnormal_high">Closest to Abnormal Vol High</option>}{combined && <option value="closest_red_entry">Closest to Red Entry</option>}<option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="falling_trend">Falling Trend {chartMonths}M</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select><button className="secondary compact" aria-label={`Sort ${sort.direction === "asc" ? "ascending" : "descending"}; change direction`} title="Change sort direction" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button></div></div>
+      <div className="thirty-sort-control"><label htmlFor="thirty-sort">Sort</label><div><select id="thirty-sort" value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{(seasonal || combined) && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Latest Session Gain</option><option value="stoch">Stoch</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option>{combined && <option value="earnings_candle">Earning Candle</option>}{combined && <option value="closest_stoch_high">Closest to StochHigh Green Line</option>}{!seasonal && <option value="closest_abnormal_high">Closest to Abnormal Vol High</option>}{combined && <option value="closest_red_entry">Closest to Red Entry</option>}<option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="falling_trend">Falling Trend {chartMonths}M</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select><button className="secondary compact" disabled={sortByEarningsCandle} aria-label={`Sort ${sort.direction === "asc" ? "ascending" : "descending"}; change direction`} title="Change sort direction" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button></div></div>
     </div>
     }
     {!previewOnly && !qMode && <fieldset className="thirty-in-thirty-switches" aria-label="Screener filters">
@@ -2918,7 +2930,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
               <ThirtyInThirtyTileChart row={row} chartMonths={chartMonths} showEma10={false} onOpen={() => setSelected(row)} abnormalSignal={!seasonal ? summarizeRecentVolume(row.recent, sessionDate).latestSpike ?? undefined : undefined} />
             </>}
           </div>;
-        }) : <p className="panel-empty">{qMode ? qWatchlistLoading ? "Loading Qullamaggie resistance stocks…" : "No Qullamaggie stocks with confirmed resistance were found." : seasonal ? "No stocks in this month's seasonal watchlist match the selected filters." : source === "SwingHigh" ? "No stocks have a higher StochRSI oversold zone with %D at or below 80 and price above the prior low." : "No stocks matched the selected 30 in 30 criteria."}</p>}
+        }) : <p className="panel-empty">{sortByEarningsCandle ? "No stocks with available earnings data are within 2% of their latest earnings candle high." : qMode ? qWatchlistLoading ? "Loading Qullamaggie resistance stocks…" : "No Qullamaggie stocks with confirmed resistance were found." : seasonal ? "No stocks in this month's seasonal watchlist match the selected filters." : source === "SwingHigh" ? "No stocks have a higher StochRSI oversold zone with %D at or below 80 and price above the prior low." : "No stocks matched the selected 30 in 30 criteria."}</p>}
       {previewOnly && Array.from({ length: lockedCount }, (_, index) => <div key={index} className="screenshot-tile locked-screener-tile">
           <div aria-hidden="true" className="locked-tile-preview"><b>••••••</b><div /></div>
           <button type="button" disabled title={accessHint}><LockKeyhole size={16} /> Full access required</button>
@@ -3452,7 +3464,7 @@ function StochDPanel({ values, width, label }: { values: Array<number | undefine
   </svg></div>;
 }
 
-function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal }: { earnings?: EarningsEvent[]; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
+function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal }: { earnings?: EarningsEvent[]; earningsCandle?: ReturnType<typeof latestEarningsCandle>; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
   if (loading) return <div className="chart-empty">Loading {timeframe === "1min" ? "1-minute" : "hourly"} candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : timeframe === "1min" ? todayMinuteRows(rows) : rows.slice(-120);
@@ -3467,6 +3479,8 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
   const calculatedEma = timeframe === "1min" ? [] : emaValues(closes, emaPeriod);
   const chartEmaValues = timeframe === "1min" ? [] : chartRows.map((row, index) => row[emaKey] ?? calculatedEma[index]);
   const visibleEmaValues = chartEmaValues.filter((value): value is number => value !== undefined);
+  if (earningsCandle) highs.push(earningsCandle.high);
+  if (earningsCandle) lows.push(earningsCandle.high);
   const priceMin = Math.min(...lows, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(swingHighLine ? [swingHighLine.price] : []));
   const priceMax = Math.max(...highs, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(swingHighLine ? [swingHighLine.price] : []));
   const candleSlot = width / chartRows.length;
@@ -3488,6 +3502,8 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
   const stochHighIndex = stochHighLine ? chartRows.findIndex(row => row.trade_date === stochHighLine.date) : -1;
   const swingHighY = swingHighLine && timeframe === "daily" ? scaleValue(swingHighLine.price, priceMin, priceMax, priceHeight, 8) : undefined;
   const swingHighIndex = swingHighLine ? chartRows.findIndex(row => row.trade_date === swingHighLine.date) : -1;
+  const earningsIndex = earningsCandle ? chartRows.findIndex(row => row.trade_date === earningsCandle.trade_date) : -1;
+  const earningsY = earningsCandle ? scaleValue(earningsCandle.high, priceMin, priceMax, priceHeight, 8) : undefined;
   const stopY = stopLevel !== undefined && highCandleIndex >= 0 ? scaleValue(stopLevel, priceMin, priceMax, priceHeight, 8) : undefined;
   const latestIndex = chartRows.length - 1;
   const latestReclaimMarker = showLatestEmaReclaimMarker && latestIndex > 0 && chartEmaValues[latestIndex] !== undefined && chartEmaValues[latestIndex - 1] !== undefined && chartRows[latestIndex - 1].close < chartEmaValues[latestIndex - 1]! && chartRows[latestIndex].close > chartEmaValues[latestIndex]!
@@ -3506,6 +3522,7 @@ function CleanCandleChart({ earnings, rows, timeframe, loading, error, highVolum
       {abnormalY !== undefined && <line className="abnormal-volume-line" x1={abnormalIndex < 0 ? 0 : abnormalIndex * candleSlot + candleSlot / 2} x2={width} y1={abnormalY} y2={abnormalY}><title>{`Latest abnormal-volume candle ${abnormalSignal!.trade_date} high ${money(abnormalSignal!.high)}`}</title></line>}
       {stochHighY !== undefined && <line className="stoch-high-line" x1={stochHighIndex < 0 ? 0 : stochHighIndex * candleSlot + candleSlot / 2} x2={width} y1={stochHighY} y2={stochHighY}><title>{`StochHigh ${money(stochHighLine!.price)} from ${stochHighLine!.date}`}</title></line>}
       {swingHighY !== undefined && <line className="swing-high-line" x1={swingHighIndex < 0 ? 0 : swingHighIndex * candleSlot + candleSlot / 2} x2={width} y1={swingHighY} y2={swingHighY}><title>{`SwingHigh prior oversold low ${money(swingHighLine!.price)} from ${swingHighLine!.date}`}</title></line>}
+      {earningsCandle && earningsY !== undefined && <line stroke="#000" strokeWidth={2} vectorEffect="non-scaling-stroke" x1={earningsIndex < 0 ? 0 : (earningsIndex + 0.5) * candleSlot} x2={width} y1={earningsY} y2={earningsY}><title>{`Earning Candle high ${money(earningsCandle.high)} on ${earningsCandle.trade_date}`}</title></line>}
       {stopY !== undefined && <line className="signal-stop-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={stopY} y2={stopY}><title>{`Signal candle 10 EMA stop loss ${money(stopLevel!)}`}</title></line>}
       {chartRows.map((row, index) => {
         const x = index * candleSlot + candleSlot / 2;

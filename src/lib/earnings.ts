@@ -44,3 +44,12 @@ export function earningsSession(events: EarningsEvent[], rows: { trade_date: str
     return session ? [{ ...event, session: session.trade_date }] : [];
   });
 }
+
+export function latestEarningsCandle(events: EarningsEvent[] | undefined, rows: { trade_date: string; high: number }[]) {
+  if (!events?.length) return;
+  const sessions = earningsSession(events, rows);
+  const latest = sessions.reduce<(typeof sessions)[number] | undefined>((current, event) =>
+    !current || event.filedAt > current.filedAt ? event : current, undefined);
+  const candle = latest && rows.find(row => row.trade_date === latest.session);
+  if (candle && Number.isFinite(candle.high) && candle.high > 0) return candle;
+}
