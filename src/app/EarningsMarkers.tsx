@@ -31,8 +31,8 @@ export function useEarnings(enabled: boolean) {
 }
 
 type Row = { trade_date: string };
-export function EarningsMarkers({ events, history, visible, candles = false }: {
-  events?: EarningsEvent[]; history: Row[]; visible: Row[]; candles?: boolean;
+export function EarningsMarkers({ events, history, visible, candles = false, rightPaddingPct = 0 }: {
+  events?: EarningsEvent[]; history: Row[]; visible: Row[]; candles?: boolean; rightPaddingPct?: number;
 }) {
   const [opened, setOpened] = useState<string>();
   if (!events?.length) return null;
@@ -40,7 +40,7 @@ export function EarningsMarkers({ events, history, visible, candles = false }: {
     const index = visible.findIndex(row => row.trade_date === event.session);
     if (index < 0) return [];
     const fraction = candles ? (index + 0.5) / visible.length : index / Math.max(1, visible.length - 1);
-    return [{ ...event, percent: fraction * 100 }];
+    return [{ ...event, percent: fraction * (100 - rightPaddingPct) }];
   });
   if (!markers.length) return null;
   return <span className="earnings-track" aria-label="Quarterly earnings">

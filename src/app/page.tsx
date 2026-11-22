@@ -13,6 +13,7 @@ import {
   BarChart3,
   CalendarDays,
   ChevronDown,
+  ChevronUp,
   Database,
   Download,
   LayoutDashboard,
@@ -2422,7 +2423,7 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
         </div>
       </div>
     </div>
-    <CleanCandleChart earnings={earnings} earningsCandle={timeframe === "daily" ? latestEarningsCandle(earnings, selected.recent) : undefined} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "1min" && hourlyLoading} error={timeframe === "1min" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} stochHighLine={timeframe === "daily" ? stochHighLine : null} swingHighLine={timeframe === "daily" ? swingHighLine : null} abnormalSignal={timeframe === "daily" ? abnormalSignal : undefined} />
+    <CleanCandleChart earnings={earnings} earningsCandle={timeframe === "daily" ? latestEarningsCandle(earnings, selected.recent) : undefined} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "1min" && hourlyLoading} error={timeframe === "1min" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} rightPadding={showScreenerStoch ? 40 : 0} abnormalSignal={timeframe === "daily" ? abnormalSignal : undefined} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>
     <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} stochOnly stochHighLine={stochHighLine} />
@@ -2540,6 +2541,8 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [stochHighOnly, setStochHighOnly] = useState(false);
   const [showTileEma10, setShowTileEma10] = useState(combined !== true);
   const [tileLimit, setTileLimit] = useState(9999);
+  const [screenerView, setScreenerView] = useState<"tiles" | "charts">("tiles");
+  const [chartId, setChartId] = useState<string>();
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
   const liveTicksRef = useRef(liveTicks);
   liveTicksRef.current = liveTicks;
@@ -2777,12 +2780,46 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   }, [combined, liveRows, swingLowOnly]);
   const sortedRows = useMemo(() => sortRows(qMode ? swingFilteredRows : swingFilteredRows.filter((row) => matchesThirtyInThirtyFilters(row, filters, liveTicks[row.security_id]) && (!lowAbove10EmaOnly || isLatestLowAbove10Ema(row)) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (seasonal || matchesSelectedTrend(row)))), [swingFilteredRows, liveTicks, filters, lowAbove10EmaOnly, aboveRedOnly, requiresStochHigh, sortRows, qMode, seasonal, matchesSelectedTrend]);
   const pinnedRows = useMemo(() => qMode ? [] : sortRows(swingFilteredRows.filter((row) => pinnedIds.includes(row.security_id) && (!lowAbove10EmaOnly || isLatestLowAbove10Ema(row)) && (!aboveRedOnly || aboveRed(row)) && (!requiresStochHigh || findStochHigh(row.recent)?.qualifies) && (!filters.stochRisingOnly || hasRisingStochRsi(row)) && (!filters.threeRedCandleOnly || hasThreeRedCandlesInLastSixDays(row)) && (!filters.abnormalVolume10dOnly || summarizeRecentVolume(row.recent, liveTradeDate()).spikeCount > 0) && (seasonal || matchesSelectedTrend(row)))), [swingFilteredRows, pinnedIds, lowAbove10EmaOnly, aboveRedOnly, requiresStochHigh, filters.stochRisingOnly, filters.threeRedCandleOnly, filters.abnormalVolume10dOnly, sortRows, qMode, seasonal, matchesSelectedTrend]);
-  const visibleRows = useMemo(() => {
-    const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
+  const resultRows = useMemo(() => {
     if (previewOnly) return activeData?.results.slice(0, 1) ?? [];
-    if (sortByEarningsCandle) return sortedRows.slice(0, tileLimit);
-    return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id)).slice(0, Math.max(0, tileLimit - pinnedRows.length))];
-  }, [pinnedRows, sortedRows, tileLimit, previewOnly, activeData, sortByEarningsCandle]);
+    if (sortByEarningsCandle) return sortedRows;
+    const pinnedSet = new Set(pinnedRows.map((row) => row.security_id));
+    return [...pinnedRows, ...sortedRows.filter((row) => !pinnedSet.has(row.security_id))];
+  }, [pinnedRows, sortedRows, previewOnly, activeData, sortByEarningsCandle]);
+  const chartsOpen = combined && screenerView === "charts";
+  const visibleRows = chartsOpen ? resultRows : resultRows.slice(0, Math.max(tileLimit, sortByEarningsCandle ? 0 : pinnedRows.length));
+  const chartIndex = Math.max(0, resultRows.findIndex(row => row.security_id === chartId));
+  const chartRow = chartsOpen ? resultRows[chartIndex] : undefined;
+  const activeChartId = chartRow?.security_id;
+
+  useEffect(() => {
+    if (chartsOpen) setChartId(activeChartId);
+  }, [chartsOpen, activeChartId]);
+
+  useEffect(() => {
+    if (!activeChartId) return;
+    const button = document.getElementById(`screener-chart-stock-${activeChartId}`);
+    const list = button?.closest(".screener-chart-stock-list");
+    if (!button || !list) return;
+    const item = button.getBoundingClientRect();
+    const viewport = list.getBoundingClientRect();
+    if (item.top < viewport.top) list.scrollTop += item.top - viewport.top;
+    if (item.bottom > viewport.bottom) list.scrollTop += item.bottom - viewport.bottom;
+  }, [activeChartId, chartsOpen, chartIndex]);
+
+  useEffect(() => {
+    if (!chartsOpen || !resultRows.length) return;
+    const handleArrow = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+        (event.target instanceof HTMLElement && (event.target.isContentEditable || event.target.closest("input, select, textarea, [role=dialog], .drawer")))) return;
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const next = resultRows[chartIndex + (event.key === "ArrowDown" ? 1 : -1)];
+      if (next) setChartId(next.security_id);
+    };
+    window.addEventListener("keydown", handleArrow);
+    return () => window.removeEventListener("keydown", handleArrow);
+  }, [chartsOpen, chartIndex, resultRows]);
   const togglePinned = (securityId: string) => setPinnedIds((current) => current.includes(securityId) ? current.filter((id) => id !== securityId) : [...current, securityId]);
   const sortBy = (key: ThirtyInThirtySortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "earnings_candle" || key === "daily_sl_pct" || key === "swing_sl_pct" || key === "closest_stoch_high" || key === "closest_red_entry" || key === "closest_abnormal_high" ? "asc" : "desc" });
 
@@ -2853,7 +2890,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       {seasonal ? <label>Universe · Month<select value={month} disabled={loading} onChange={(e) => setMonth?.(Number(e.target.value))}>{["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, index) => <option key={name} value={index}>{name} → {["Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb"][index]}</option>)}</select></label> : <><label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as ThirtyInThirtyFilters["universe"] })}>{combined ? <><option value="CNX500">NIFTY 500</option><option value="NIFTYSC500">NIFTY SMALLCAP 500</option><option value="ALL">ALL</option></> : <option value="ALL">Nifty 500</option>}</select></label><label>Lookback<input className="plain-input" type="number" value={filters.lookbackDays} onChange={(e) => setNumber("lookbackDays", Number(e.target.value))}/></label><label>Window<input className="plain-input" type="number" value={filters.windowDays} onChange={(e) => setNumber("windowDays", Number(e.target.value))}/></label><label>Return %<input className="plain-input" type="number" value={filters.minReturnPct} onChange={(e) => setNumber("minReturnPct", Number(e.target.value))}/></label></>}
       <label>Min Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label>
       <label>Chart<select value={chartMonths} onChange={(e) => setChartMonths(Number(e.target.value) === 6 ? 6 : 3)}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
-      <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>
+      {!chartsOpen && <label>Show Tiles<select value={tileLimit} onChange={(e) => setTileLimit(Number(e.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={9999}>All</option></select></label>}
       <div className="thirty-sort-control"><label htmlFor="thirty-sort">Sort</label><div><select id="thirty-sort" value={sort.key} onChange={(e) => sortBy(e.target.value as ThirtyInThirtySortKey)}>{(seasonal || combined) && <option value="seasonal_avg">Seasonal Average</option>}<option value="today_return">Latest Session Gain</option><option value="stoch">Stoch</option><option value="daily_sl_pct">Daily SL%</option><option value="swing_sl_pct">Swing Low SL%</option><option value="best_return">Best 30D Return</option><option value="volume_dryness">Volume Dryness</option><option value="breakout_3pct">Within 3% Breakout</option><option value="closest_breakout">Closest To Breakout</option>{combined && <option value="earnings_candle">Earning Candle</option>}{combined && <option value="closest_stoch_high">Closest to StochHigh Green Line</option>}{!seasonal && <option value="closest_abnormal_high">Closest to Abnormal Vol High</option>}{combined && <option value="closest_red_entry">Closest to Red Entry</option>}<option value="tight_5d">Getting Tight 5D</option><option value="demand_supply">Demand Shown Supply Drying</option><option value="falling_trend">Falling Trend {chartMonths}M</option><option value="recent">Most Recent 30D Move</option><option value="near_3m_high">Nearest 3M High</option><option value="near_6m_high">Nearest 6M High</option><option value="pullback">Pullback From Move</option><option value="symbol">Symbol</option><option value="company">Company</option></select><button className="secondary compact" disabled={sortByEarningsCandle} aria-label={`Sort ${sort.direction === "asc" ? "ascending" : "descending"}; change direction`} title="Change sort direction" onClick={() => setSort((current) => ({ ...current, direction: current.direction === "asc" ? "desc" : "asc" }))}>{sort.direction === "asc" ? "Asc" : "Desc"}</button></div></div>
     </div>
     }
@@ -2893,6 +2930,10 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
     </div>}
     {combined && earnings.unavailable && <small role="status">Earnings feed unavailable · retrying</small>}
     {qMode && qWatchlistError && <div className="error">{qWatchlistError}</div>}
+    {combined && <div className="screener-view-switch segmented-control" role="group" aria-label="Screener view">
+      <button type="button" className={screenerView === "tiles" ? "active" : ""} aria-pressed={screenerView === "tiles"} onClick={() => setScreenerView("tiles")}>Tiles</button>
+      <button type="button" className={chartsOpen ? "active" : ""} aria-pressed={!!chartsOpen} onClick={() => { setSelected(null); setScreenerView("charts"); }}>Charts</button>
+    </div>}
     {activeData && <>
       <div className="thirty-scoreboard">
         <div><span>Evaluated</span><b>{qMode ? qWatchlist?.stocks.length ?? 0 : activeData.evaluated}</b></div>
@@ -2900,7 +2941,37 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <div><span>{combined ? "Sources" : qMode ? "Source" : seasonal ? "Window" : "No Move"}</span><b>{combined ? source === "All watchlists" ? screenerSources.length : 1 : qMode ? "Qullamaggie" : seasonal ? activeData.results[0]?.seasonal_window ?? "—" : "statusSummary" in activeData ? activeData.statusSummary.NO_30D_MOVE ?? 0 : 0}</b></div>
         <div><span>Shown</span><b>{visibleRows.length} / {previewOnly ? visibleRows.length + lockedCount : sortedRows.length}</b></div>
       </div>
-      <section className="screenshot-tile-grid">
+      {chartsOpen ? chartRow ? <section className="screener-chart-workspace" aria-label="Screener charts">
+        <div className="screener-chart-main">
+          <header>
+            <h2>{chartRow.symbol}</h2>
+            <p className="muted">{chartRow.company_name}</p>
+          </header>
+          <ThirtyInThirtyChartPanel key={chartRow.security_id} earnings={earnings.results[chartRow.symbol]} selected={chartRow} chartMonths={chartMonths} settings={settings} referenceStyle sources={rowSources(chartRow)} showScreenerStoch abnormalSignal={summarizeRecentVolume(chartRow.recent, sessionDate).latestSpike ?? undefined} />
+        </div>
+        <section className="screener-chart-watchlist" aria-label="Stocks">
+          <div className="screener-chart-watchlist-header">
+            <b>Stocks</b>
+            <span>{chartIndex + 1} / {resultRows.length}</span>
+            <div className="segmented-control" role="group" aria-label="Browse stocks">
+              <button type="button" aria-label="Previous stock" title="Previous stock (↑)" disabled={chartIndex === 0} onClick={() => setChartId(resultRows[chartIndex - 1].security_id)}><ChevronUp size={16} /></button>
+              <button type="button" aria-label="Next stock" title="Next stock (↓)" disabled={chartIndex === resultRows.length - 1} onClick={() => setChartId(resultRows[chartIndex + 1].security_id)}><ChevronDown size={16} /></button>
+            </div>
+          </div>
+          <ul className="screener-chart-stock-list">
+            {resultRows.map(row => {
+              const change = latestSessionReturnPct(row, liveTicks[row.security_id]);
+              return <li key={row.security_id}>
+                <button type="button" id={`screener-chart-stock-${row.security_id}`} aria-current={row.security_id === chartRow.security_id ? "true" : undefined} onClick={() => setChartId(row.security_id)}>
+                  <span><b>{row.symbol}</b><small>{row.company_name}</small></span>
+                  {change !== undefined && <span className={change >= 0 ? "positive" : "negative"}>{pct2(change)}</span>}
+                </button>
+              </li>;
+            })}
+          </ul>
+          {previewOnly && lockedCount > 0 && <small className="screener-chart-access">{lockedCount} more · Full access required</small>}
+        </section>
+      </section> : <p className="panel-empty">No stocks match the selected filters.</p> : <section className="screenshot-tile-grid">
         {visibleRows.length ? visibleRows.map((row) => {
           const tileTick = liveTicks[row.security_id];
           const tilePriceState = !isNseSessionOpen() ? "closed" : tileTick?.source === "websocket" && priceClock - tileTick.receivedAt < 45_000 ? "live" : tileTick?.source === "intraday" && priceClock - tileTick.receivedAt < 90_000 ? "intraday" : "stale";
@@ -2935,9 +3006,9 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
           <div aria-hidden="true" className="locked-tile-preview"><b>••••••</b><div /></div>
           <button type="button" disabled title={accessHint}><LockKeyhole size={16} /> Full access required</button>
         </div>)}
-      </section>
+      </section>}
     </>}
-    {selected && <div className="drawer" onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
+    {!chartsOpen && selected && <div className="drawer" onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
       <div className="drawer-card chart-drawer">
         <button className="icon-button drawer-close" onClick={() => setSelected(null)} aria-label="Close chart">×</button>
         <p className="eyebrow">{combined ? `Screener · ${rowSources(selected).join(" · ")}` : qMode ? `Qullamaggie watchlist · resistance ${qResistance(selected.security_id)}` : seasonal ? `Seasonal Stocks · ${selected.seasonal_window} · ${selected.seasonal_avg_return?.toFixed(1)}% average` : `30 in 30 · ${selected.best_return_pct.toFixed(1)}%`}</p>
@@ -3435,9 +3506,9 @@ function chartStochDValues(closes: number[]) {
   return smooth(smooth(rawK));
 }
 
-function StochDPanel({ values, width, label }: { values: Array<number | undefined>; width: number; label: string }) {
+function StochDPanel({ values, width, label, rightPadding = 0 }: { values: Array<number | undefined>; width: number; label: string; rightPadding?: number }) {
   const height = 84;
-  const slot = width / Math.max(values.length, 1);
+  const slot = (width - rightPadding) / Math.max(values.length, 1);
   const y = (value: number) => 8 + (100 - value) / 100 * (height - 16);
   const points = values.map((value, index) => value === undefined ? null : { value, x: index * slot + slot / 2, y: y(value) });
   const path = points.map((point, index) => point ? `${index && points[index - 1] ? "L" : "M"}${point.x.toFixed(2)} ${point.y.toFixed(2)}` : "").join(" ");
@@ -3464,7 +3535,7 @@ function StochDPanel({ values, width, label }: { values: Array<number | undefine
   </svg></div>;
 }
 
-function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal }: { earnings?: EarningsEvent[]; earningsCandle?: ReturnType<typeof latestEarningsCandle>; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
+function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal, rightPadding = 0 }: { earnings?: EarningsEvent[]; earningsCandle?: ReturnType<typeof latestEarningsCandle>; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; rightPadding?: number; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
   if (loading) return <div className="chart-empty">Loading {timeframe === "1min" ? "1-minute" : "hourly"} candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : timeframe === "1min" ? todayMinuteRows(rows) : rows.slice(-120);
@@ -3483,7 +3554,7 @@ function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, 
   if (earningsCandle) lows.push(earningsCandle.high);
   const priceMin = Math.min(...lows, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(swingHighLine ? [swingHighLine.price] : []));
   const priceMax = Math.max(...highs, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(swingHighLine ? [swingHighLine.price] : []));
-  const candleSlot = width / chartRows.length;
+  const candleSlot = (width - rightPadding) / chartRows.length;
   const bodyWidth = Math.max(timeframe === "1min" ? 0.6 : 3, Math.min(8, candleSlot * 0.48));
   const maxVolume = Math.max(...chartRows.map((row) => row.volume));
   const screenerD = showScreenerStoch ? timeframe === "daily"
@@ -3545,7 +3616,7 @@ function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, 
         <title>{`${chartDateLabel(latestReclaimMarker.row.trade_date, timeframe)} reclaimed ${emaLabel}: previous close below, latest close ${latestReclaimMarker.row.close.toFixed(2)} above ${latestReclaimMarker.ema.toFixed(2)}`}</title>
       </polygon>}
     </svg>
-    {timeframe === "daily" && <EarningsMarkers events={earnings} history={rows} visible={chartRows} candles />}
+    {timeframe === "daily" && <EarningsMarkers events={earnings} history={rows} visible={chartRows} candles rightPaddingPct={rightPadding / width * 100} />}
     {timeframe === "daily" && <div className="chart-session-dates">Latest sessions, left to right: {chartRows.slice(-3).map((row) => row.trade_date.slice(0, 10)).join(" · ")}</div>}
     {referenceStyle ? <div className="thirty-reference-volume" aria-label="Volume">
       {highlightVolume && <div className="screener-volume-legend"><span><i className="screener-volume-high" />Blue ≥1.5× 20-bar average</span><span><i className="screener-volume-low" />Orange ≤0.3× 20-bar average</span></div>}
@@ -3565,7 +3636,7 @@ function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, 
         return <span key={row.trade_date} className={`outside-volume-bar ${up ? "up" : "down"} ${high ? "high" : ""}`} style={{ height }} title={`${chartDateLabel(row.trade_date, timeframe)} volume ${row.volume.toLocaleString("en-IN")}${ratio ? ` (${ratio.toFixed(1)}x)` : ""}`} />;
       })}
     </div>}
-    {showScreenerStoch && <StochDPanel values={screenerD} width={width} label={`${timeframe} StochRSI percent D`} />}
+    {showScreenerStoch && <StochDPanel values={screenerD} width={width} rightPadding={rightPadding} label={`${timeframe} StochRSI percent D`} />}
     {timeframe === "1min" && <div className="thirty-reference-legend" style={{ color: "#8b5cf6" }}>Anchored VWAP (HLC3) · {chartDateLabel(chartRows[0].trade_date, timeframe)} to {chartDateLabel(chartRows.at(-1)!.trade_date, timeframe)} IST · {Number.isFinite(vwap.at(-1)) ? money(vwap.at(-1)!) : "Waiting for volume"}</div>}
     {referenceStyle && <div className="thirty-reference-legend">{timeframe} candles{timeframe !== "1min" && <> · <span>10 EMA</span></>} · Volume below</div>}
   </div>;

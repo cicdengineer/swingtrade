@@ -203,3 +203,130 @@
 .portfolio-holdings-table th[aria-sort] .holding-sort {
   color: var(--green);
 }
+
+.screener-view-switch {
+  align-self: flex-start;
+  width: fit-content;
+}
+
+.screener-chart-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 22%);
+  align-items: start;
+  gap: 12px;
+}
+
+.screener-chart-main,
+.screener-chart-watchlist {
+  min-width: 0;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.screener-chart-main > header {
+  margin-bottom: 12px;
+}
+
+.screener-chart-main > header h2,
+.screener-chart-main > header p {
+  margin: 0;
+}
+
+.screener-chart-watchlist {
+  position: sticky;
+  top: 12px;
+}
+
+.screener-chart-watchlist-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.screener-chart-watchlist-header > b {
+  margin-right: auto;
+}
+
+.screener-chart-watchlist-header button {
+  display: inline-flex;
+  align-items: center;
+}
+
+.screener-chart-stock-list {
+  max-height: min(66vh, 660px);
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.screener-chart-stock-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-bottom-color: var(--line);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.screener-chart-stock-list button > span:first-child {
+  min-width: 0;
+}
+
+.screener-chart-stock-list button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screener-chart-stock-list button[aria-current="true"],
+.screener-chart-stock-list button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.screener-chart-stock-list button[aria-current="true"] {
+  border-left-color: currentColor;
+}
+
+.screener-chart-access {
+  display: block;
+  padding-top: 8px;
+}
+
+@media (max-width: 760px) {
+  .screener-chart-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .screener-chart-watchlist {
+    position: static;
+    grid-row: 1;
+  }
+
+  .screener-chart-stock-list {
+    max-height: 160px;
+  }
+}
+
+.screener-chart-watchlist-header .segmented-control {
+  width: auto;
+}
+
+.screener-chart-watchlist-header button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.screener-chart-main .clean-chart svg {
+  min-width: 0;
+}
