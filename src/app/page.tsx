@@ -2634,7 +2634,8 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const qIdSet = useMemo(() => new Set(qWatchlist?.stocks.map(stock => stock.securityId) ?? []), [qWatchlist]);
   const qResistance = (securityId: string) => { const value = qWatchlist?.stocks.find(stock => stock.securityId === securityId)?.resistance; return value === undefined ? "—" : money(value); };
   const rowSources = (row: ThirtyInThirtyRow): ScreenerSource[] => {
-    const names = membership[row.security_id] ?? [];
+    const names = (membership[row.security_id] ?? []).filter((name) =>
+      name !== "10 EMA Catchup" || isAbovePreviousDailyHigh(row.recent, row.current_close, row.current_date));
     const swing = findSwingHigh(row.recent, row.current_close)?.qualifies;
     return swing ? names.includes("SwingHigh") ? names : [...names, "SwingHigh"] : names.filter(name => name !== "SwingHigh");
   };
@@ -2921,6 +2922,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       <div>
         <p className="eyebrow">{combined ? "Screener" : qMode ? "Qullamaggie watchlist" : seasonal ? "Seasonal Stocks" : "30 in 30 Screener"}</p>
         <h2>{combined ? "All entry watchlists in one view" : qMode ? "Resistance setups in 30 in 30" : seasonal ? "3-month seasonal watchlist" : "30% moves in any 30 sessions"}</h2>
+        {combined && source === "10 EMA Catchup" && <small>LTP must be above the previous daily high.</small>}
         {(!combined || source === "SwingHigh") && <small>{combined ? "The latest StochRSI %D below 20 zone must have a higher low than the previous zone. Candidates remain until %D exceeds 80 or price falls to the red line. Entry is above the 10 EMA." : qMode ? "The stocks with confirmed Qullamaggie resistance, shown with 30 in 30 charts and sizing. Their inclusion does not mean they passed the 30 in 30 scan." : seasonal ? "Saved monthly watchlists: average completed 3-month return above 30%. Rebuild after updating historical data; live ticks continue while viewing." : `Finds stocks that delivered at least ${filters.minReturnPct}% in any rolling ${filters.windowDays}-session window over the last ${filters.lookbackDays} sessions.`}</small>}
       </div>
       <div className="thirty-hero-actions">
