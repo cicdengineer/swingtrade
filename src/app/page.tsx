@@ -2327,7 +2327,7 @@ function ThirtyInThirtyScoreTiles({ selected, chartMonths, liveDailyStochD, live
   </div>;
 }
 
-function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, referenceStyle = false, sources, showScreenerStoch = false, abnormalSignal, seasonal = false }: { selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[]; showScreenerStoch?: boolean; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]>; seasonal?: boolean; earnings?: EarningsEvent[] }) {
+function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, referenceStyle = false, sources, showScreenerStoch = false, abnormalSignal, seasonal = false, chartWidth }: { chartWidth?: number; selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[]; showScreenerStoch?: boolean; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]>; seasonal?: boolean; earnings?: EarningsEvent[] }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
   const [hourlyLoading, setHourlyLoading] = useState(false);
@@ -2423,7 +2423,7 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
         </div>
       </div>
     </div>
-    <CleanCandleChart earnings={earnings} earningsCandle={timeframe === "daily" ? latestEarningsCandle(earnings, selected.recent) : undefined} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "1min" && hourlyLoading} error={timeframe === "1min" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} rightPadding={showScreenerStoch ? 40 : 0} abnormalSignal={timeframe === "daily" ? abnormalSignal : undefined} />
+    <CleanCandleChart earnings={earnings} earningsCandle={timeframe === "daily" ? latestEarningsCandle(earnings, selected.recent) : undefined} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "1min" && hourlyLoading} error={timeframe === "1min" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} rightPadding={showScreenerStoch ? 40 : 0} chartWidth={chartWidth} abnormalSignal={timeframe === "daily" ? abnormalSignal : undefined} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>
     <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} stochOnly stochHighLine={stochHighLine} />
@@ -2543,6 +2543,8 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [tileLimit, setTileLimit] = useState(9999);
   const [screenerView, setScreenerView] = useState<"tiles" | "charts">("tiles");
   const [chartId, setChartId] = useState<string>();
+  const chartMainRef = useRef<HTMLDivElement>(null);
+  const [chartWidth, setChartWidth] = useState<number>();
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
   const liveTicksRef = useRef(liveTicks);
   liveTicksRef.current = liveTicks;
@@ -2791,6 +2793,17 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const chartIndex = Math.max(0, resultRows.findIndex(row => row.security_id === chartId));
   const chartRow = chartsOpen ? resultRows[chartIndex] : undefined;
   const activeChartId = chartRow?.security_id;
+  const hasChart = Boolean(chartRow);
+
+  useEffect(() => {
+    const chartMain = chartMainRef.current;
+    if (!hasChart || !chartMain) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setChartWidth(Math.max(780, Math.round(entry.contentRect.width)));
+    });
+    observer.observe(chartMain);
+    return () => observer.disconnect();
+  }, [hasChart]);
 
   useEffect(() => {
     if (chartsOpen) setChartId(activeChartId);
@@ -2942,12 +2955,12 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <div><span>Shown</span><b>{visibleRows.length} / {previewOnly ? visibleRows.length + lockedCount : sortedRows.length}</b></div>
       </div>
       {chartsOpen ? chartRow ? <section className="screener-chart-workspace" aria-label="Screener charts">
-        <div className="screener-chart-main">
+        <div className="screener-chart-main" ref={chartMainRef}>
           <header>
             <h2>{chartRow.symbol}</h2>
             <p className="muted">{chartRow.company_name}</p>
           </header>
-          <ThirtyInThirtyChartPanel key={chartRow.security_id} earnings={earnings.results[chartRow.symbol]} selected={chartRow} chartMonths={chartMonths} settings={settings} referenceStyle sources={rowSources(chartRow)} showScreenerStoch abnormalSignal={summarizeRecentVolume(chartRow.recent, sessionDate).latestSpike ?? undefined} />
+          <ThirtyInThirtyChartPanel key={chartRow.security_id} chartWidth={chartWidth} earnings={earnings.results[chartRow.symbol]} selected={chartRow} chartMonths={chartMonths} settings={settings} referenceStyle sources={rowSources(chartRow)} showScreenerStoch abnormalSignal={summarizeRecentVolume(chartRow.recent, sessionDate).latestSpike ?? undefined} />
         </div>
         <section className="screener-chart-watchlist" aria-label="Stocks">
           <div className="screener-chart-watchlist-header">
@@ -3535,13 +3548,14 @@ function StochDPanel({ values, width, label, rightPadding = 0 }: { values: Array
   </svg></div>;
 }
 
-function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal, rightPadding = 0 }: { earnings?: EarningsEvent[]; earningsCandle?: ReturnType<typeof latestEarningsCandle>; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; rightPadding?: number; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
+function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal, rightPadding = 0, chartWidth }: { chartWidth?: number; earnings?: EarningsEvent[]; earningsCandle?: ReturnType<typeof latestEarningsCandle>; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; rightPadding?: number; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
   if (loading) return <div className="chart-empty">Loading {timeframe === "1min" ? "1-minute" : "hourly"} candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : timeframe === "1min" ? todayMinuteRows(rows) : rows.slice(-120);
   if (chartRows.length < (timeframe === "1min" ? 1 : 5)) return <div className="chart-empty">{timeframe === "1min" ? "No candles for today (IST) yet." : `Not enough ${timeframe} rows for charting.`}</div>;
-  const width = 780;
-  const priceHeight = 250;
+  // Use the available width without enlarging the volume and oscillator panels.
+  const width = chartWidth ?? 780;
+  const priceHeight = Math.min(290, 250 + (width - 780) / 8);
   const volumeHeight = 76;
   const vwap = timeframe === "1min" ? anchoredVwap(chartRows) : [];
   const lows = chartRows.map((row) => row.low);
