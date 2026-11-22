@@ -330,3 +330,17 @@
 .screener-chart-main .clean-chart svg {
   min-width: 0;
 }
+
+
+.earnings-breakout-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+.earnings-breakout-summary strong { color: var(--text); }

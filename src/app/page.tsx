@@ -47,6 +47,7 @@ import PaperTradeView from "./PaperTradeView";
 import { isLatestLowAbove10Ema } from "@/lib/dailyEmaLow";
 import { EarningsMarkers, useEarnings } from "./EarningsMarkers";
 import { latestEarningsCandle, type EarningsEvent } from "@/lib/earnings";
+import { earningsBreakout } from "@/lib/earningsBreakout";
 import Nifty500MiniChart from "./Nifty500MiniChart";
 import { latestDailyStop, swingLowBeforeLatest } from "@/lib/entrySizing";
 import { findVolumeSellingSignal, type VolumeSellingSignal } from "@/lib/volumeSellingLogic";
@@ -2327,6 +2328,19 @@ function ThirtyInThirtyScoreTiles({ selected, chartMonths, liveDailyStochD, live
   </div>;
 }
 
+function EarningsBreakoutSummary({ signal, level }: { signal: NonNullable<ReturnType<typeof earningsBreakout>>; level: number }) {
+  return <section className="earnings-breakout-summary" aria-label="Earnings breakout">
+    <strong>{signal.status}</strong>
+    {signal.label && <span>{signal.label}</span>}
+    {signal.liveTest && signal.status !== "Testing the high" && <span>Intraday test</span>}
+    {signal.extended && <span title="Price is more than 2% above the earnings candle high">Extended</span>}
+    <span title={`Earnings candle high ${money(level)}`}>{pct2(signal.distance)} vs earnings high{signal.live ? " (live)" : ""}</span>
+    {signal.relativeVolume !== undefined && <span title="Last completed session volume divided by the preceding 20-session average">{signal.relativeVolume.toFixed(2)}× daily vol.</span>}
+    {signal.setupRisk !== undefined && signal.setupLow !== undefined && <span title={`Setup low ${money(signal.setupLow)} · lowest low of up to five completed post-earnings sessions before the breakout, or the latest five while setting up`}>{signal.setupRisk.toFixed(2)}% to setup low</span>}
+    {signal.resistanceRoom !== undefined && signal.resistance !== undefined && <span title={`Nearest prior daily swing high above price and the earnings level ${money(signal.resistance)}`}>{signal.resistanceRoom.toFixed(2)}% to prior resistance</span>}
+  </section>;
+}
+
 function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, referenceStyle = false, sources, showScreenerStoch = false, abnormalSignal, seasonal = false, chartWidth }: { chartWidth?: number; selected: ThirtyInThirtyRow; chartMonths: 3 | 6; settings?: TradingSettings | null; referenceStyle?: boolean; sources?: ScreenerSource[]; showScreenerStoch?: boolean; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]>; seasonal?: boolean; earnings?: EarningsEvent[] }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hourlyRows, setHourlyRows] = useState<DailyChartPoint[]>([]);
@@ -2406,6 +2420,11 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
   const swingHighLine = showScreenerStoch ? findSwingHigh(mergedDailyRows) : null;
   const dailyRows = lastTradingMonths(mergedDailyRows, chartMonths === 6 ? 126 : 63);
   const activeRows = timeframe === "daily" ? dailyRows : todayMinuteRows(hourlyRows);
+  const earningsCandle = timeframe === "daily" ? latestEarningsCandle(earnings, mergedDailyRows) : undefined;
+  const breakoutRows = hasLiveDailyCandle && latestDailyRow
+    ? [...mergedDailyRows.slice(0, -1), { ...latestDailyRow, is_provisional: true }]
+    : mergedDailyRows;
+  const breakout = earningsCandle && earningsBreakout(breakoutRows, earningsCandle);
   return <><div className="chart-shell">
     <ThirtyInThirtyRiskTiles selected={selected} activeRows={dailyRows} settings={settings} paper={showScreenerStoch} />
     <div className="chart-toolbar">
@@ -2423,7 +2442,8 @@ function ThirtyInThirtyChartPanel({ earnings, selected, chartMonths, settings, r
         </div>
       </div>
     </div>
-    <CleanCandleChart earnings={earnings} earningsCandle={timeframe === "daily" ? latestEarningsCandle(earnings, selected.recent) : undefined} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "1min" && hourlyLoading} error={timeframe === "1min" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} rightPadding={showScreenerStoch ? 40 : 0} chartWidth={chartWidth} abnormalSignal={timeframe === "daily" ? abnormalSignal : undefined} />
+    {breakout && earningsCandle && <EarningsBreakoutSummary signal={breakout} level={earningsCandle.high} />}
+    <CleanCandleChart earnings={earnings} earningsCandle={earningsCandle} rows={timeframe === "daily" ? mergedDailyRows : activeRows} timeframe={timeframe} loading={timeframe === "1min" && hourlyLoading} error={timeframe === "1min" ? hourlyError : ""} dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" showLatestEmaReclaimMarker={timeframe === "daily"} swingLowPoint={timeframe === "daily" ? thirtyInThirtySwingLowPoint(dailyRows) : undefined} referenceStyle={referenceStyle} highlightVolume={showScreenerStoch} showScreenerStoch={showScreenerStoch} rightPadding={showScreenerStoch ? 40 : 0} chartWidth={chartWidth} abnormalSignal={timeframe === "daily" ? abnormalSignal : undefined} />
     {timeframe === "daily" && dailyError && <div className="chart-empty">Live daily candle unavailable: {dailyError}</div>}
   </div>
     <ThirtyInThirtyScoreTiles selected={selected} chartMonths={chartMonths} liveDailyStochD={liveDailyStochD} livePreviousDailyStochD={livePreviousDailyStochD} stochOnly stochHighLine={stochHighLine} />
