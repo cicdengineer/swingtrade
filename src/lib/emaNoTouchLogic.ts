@@ -8,6 +8,15 @@ export type EmaCatchupCriteria = {
   minCatchupPct: number;
 };
 
+export function isAbovePreviousDailyHigh(
+  recent: ReadonlyArray<{ trade_date: string; high: number }>,
+  price: number,
+  priceDate: string,
+) {
+  const previous = recent.findLast((candle) => candle.trade_date < priceDate);
+  return previous !== undefined && Number.isFinite(price) && Number.isFinite(previous.high) && price > previous.high;
+}
+
 export function emaSeries(closes: number[], period: number): Array<number | undefined> {
   const values: Array<number | undefined> = Array(closes.length).fill(undefined);
   if (closes.length < period) return values;

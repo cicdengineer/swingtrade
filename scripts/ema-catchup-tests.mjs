@@ -7,7 +7,7 @@ const source = fs.readFileSync(new URL("../src/lib/emaNoTouchLogic.ts", import.m
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(compiled, { module, exports: module.exports, require: () => ({}) });
-const { findEmaCatchup } = module.exports;
+const { findEmaCatchup, isAbovePreviousDailyHigh } = module.exports;
 
 const criteria = { baseDays: 5, minPriorAdvancePct: 8, maxBaseRangePct: 7, maxDistanceFromEmaPct: 4, minCatchupPct: 0.5 };
 const date = (index) => new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10);
@@ -26,4 +26,10 @@ assert.equal(findEmaCatchup(wideBase, criteria), null, "wide bases are not sidew
 assert.equal(findEmaCatchup(prices, { ...criteria, minCatchupPct: setup.catchupPct + 0.1 }), null, "the EMA gap must contract enough");
 assert.equal(findEmaCatchup(prices, { ...criteria, maxDistanceFromEmaPct: setup.currentGapPct - 0.1 }), null, "price must be near the 10 EMA");
 assert.equal(findEmaCatchup([...prices, { ...prices.at(-1), trade_date: date(40), close: 90, is_provisional: true }], criteria)?.current.trade_date, date(39), "today's provisional candle is excluded");
+const recent = [{ trade_date: "2026-01-08", high: 100 }, { trade_date: "2026-01-09", high: 105 }];
+assert.equal(isAbovePreviousDailyHigh(recent, 101, "2026-01-09"), true, "a same-session price uses the preceding candle");
+assert.equal(isAbovePreviousDailyHigh(recent, 104, "2026-01-12"), false, "a newer session uses the latest completed candle");
+assert.equal(isAbovePreviousDailyHigh(recent, 105, "2026-01-12"), false, "touching the high does not qualify");
+assert.equal(isAbovePreviousDailyHigh(recent, 106, "2026-01-12"), true, "a price strictly above the high qualifies");
+assert.equal(isAbovePreviousDailyHigh(recent, 106, "2026-01-08"), false, "a previous candle is required");
 console.log("EMA catchup tests passed");

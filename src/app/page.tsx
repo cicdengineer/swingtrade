@@ -45,6 +45,7 @@ import EntrySizingTile from "./EntrySizingTile";
 import BacktestingView from "./BacktestingView";
 import PaperTradeView from "./PaperTradeView";
 import { isLatestLowAbove10Ema } from "@/lib/dailyEmaLow";
+import { isAbovePreviousDailyHigh } from "@/lib/emaNoTouchLogic";
 import { EarningsMarkers, useEarnings } from "./EarningsMarkers";
 import { latestEarningsCandle, type EarningsEvent } from "@/lib/earnings";
 import { earningsBreakout } from "@/lib/earningsBreakout";
@@ -2197,10 +2198,19 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
     }).catch((error) => { if (!controller.signal.aborted) setLiveStatus(error instanceof Error ? error.message : "Live feed unavailable"); });
     return () => controller.abort();
   }, [data]);
-  const price = (row: EmaNoTouchRow) => liveTicks[row.security_id]?.ltp ?? row.current_close;
+  const quotes = new Map(Object.values(liveTicks).map((tick) => {
+    const timestamp = tick.lastTradeTime ? tick.lastTradeTime * 1000 : tick.receivedAt;
+    const date = new Date(timestamp).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    return [tick.securityId, { tick, date }] as const;
+  }));
+  const quote = (row: EmaNoTouchRow) => {
+    const live = quotes.get(row.security_id);
+    return live && live.date >= row.current_date ? live : undefined;
+  };
+  const price = (row: EmaNoTouchRow) => quote(row)?.tick.ltp ?? row.current_close;
   const liveEma = (row: EmaNoTouchRow) => {
-    const tick = liveTicks[row.security_id];
-    return tick?.ltp && liveTradeDate() > row.current_date ? row.ema10 + (tick.ltp - row.ema10) * 2 / 11 : row.ema10;
+    const live = quote(row);
+    return live && live.date > row.current_date ? row.ema10 + (live.tick.ltp - row.ema10) * 2 / 11 : row.ema10;
   };
   const distance = (row: EmaNoTouchRow) => (price(row) / liveEma(row) - 1) * 100;
   const risk = (row: EmaNoTouchRow) => (price(row) - row.stop_loss) / price(row) * 100;
@@ -2210,18 +2220,20 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
       ? tick.dayLow > liveEma(row)
       : isLatestLowAbove10Ema(row);
   };
-  const rows = [...(data?.results ?? [])].filter((row) => distance(row) > 0 && distance(row) <= filters.maxDistanceFromEmaPct && price(row) > row.stop_loss && (!nearEmaOnly || distance(row) <= 2) && (!lowAbove10EmaOnly || todayLowAboveEma(row))).sort((a, b) => {
+  const abovePreviousHigh = (data?.results ?? []).filter((row) => isAbovePreviousDailyHigh(row.recent, price(row), quote(row)?.date ?? row.current_date));
+  const rows = abovePreviousHigh.filter((row) => distance(row) > 0 && distance(row) <= filters.maxDistanceFromEmaPct && price(row) > row.stop_loss && (!nearEmaOnly || distance(row) <= 2) && (!lowAbove10EmaOnly || todayLowAboveEma(row))).sort((a, b) => {
     const valueFor = (row: EmaNoTouchRow): number | string => sort === "ema" ? distance(row) : sort === "risk" ? risk(row) : sort === "tightness" ? row.base_range_pct : sort === "trend" ? -row.prior_advance_pct : sort === "value" ? -row.averageDailyTradedValue : row.symbol;
     const av = valueFor(a), bv = valueFor(b);
     const comparison = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
     return direction === "asc" ? comparison : -comparison;
   });
   const shown = rows.slice(0, tileLimit);
-  const selectedTick = selected ? liveTicks[selected.security_id] : undefined;
+  const selectedQuote = selected ? quote(selected) : undefined;
+  const selectedTick = selectedQuote?.tick;
   const selectedPrice = selected ? price(selected) : 0;
-  const chartRows = selected && selectedTick?.ltp && liveTradeDate() > selected.current_date ? [...selected.recent, { trade_date: liveTradeDate(), open: selectedTick.dayOpen ?? selectedTick.prevClose ?? selectedTick.ltp, high: Math.max(selectedTick.dayHigh ?? selectedTick.ltp, selectedTick.ltp), low: Math.min(selectedTick.dayLow ?? selectedTick.ltp, selectedTick.ltp), close: selectedTick.ltp, ema10: liveEma(selected), volume: selectedTick.volume ?? 0 }] : selected?.recent ?? [];
+  const chartRows = selected && selectedTick && selectedQuote.date > selected.current_date ? [...selected.recent, { trade_date: selectedQuote.date, open: selectedTick.dayOpen ?? selectedTick.prevClose ?? selectedTick.ltp, high: Math.max(selectedTick.dayHigh ?? selectedTick.ltp, selectedTick.ltp), low: Math.min(selectedTick.dayLow ?? selectedTick.ltp, selectedTick.ltp), close: selectedTick.ltp, ema10: liveEma(selected), volume: selectedTick.volume ?? 0 }] : selected?.recent ?? [];
   return <section className="research-page thirty-in-thirty-page ema-catchup-page">
-    <div className="thirty-hero thirty-in-thirty-hero"><div><p className="eyebrow">10 EMA Catchup</p><h2>Rising EMA catches a sideways stock</h2><small>Prior uptrend, a tight sideways base, rising 10 EMA, and a shrinking price gap. Position sizing uses current LTP and the base swing low.</small></div><div className="thirty-hero-actions"><div className="refresh-status"><span className={Object.keys(liveTicks).length ? "ready" : "pending"}/><b>{liveStatus}</b><small>{data ? formatTime(data.generatedAt) : "Not scanned"}</small></div><button className="primary" onClick={onRun} disabled={loading}><TrendingUp size={15}/>Run Screener</button><button className="secondary compact" onClick={() => setFilters(defaultEmaNoTouchFilters)}>Reset</button></div></div>
+    <div className="thirty-hero thirty-in-thirty-hero"><div><p className="eyebrow">10 EMA Catchup</p><h2>Rising EMA catches a sideways stock</h2><small>Prior uptrend, a tight sideways base, rising 10 EMA, and a shrinking price gap. LTP must be above the previous daily candle’s high. Position sizing uses current LTP and the base swing low.</small></div><div className="thirty-hero-actions"><div className="refresh-status"><span className={Object.keys(liveTicks).length ? "ready" : "pending"}/><b>{liveStatus}</b><small>{data ? formatTime(data.generatedAt) : "Not scanned"}</small></div><button className="primary" onClick={onRun} disabled={loading}><TrendingUp size={15}/>Run Screener</button><button className="secondary compact" onClick={() => setFilters(defaultEmaNoTouchFilters)}>Reset</button></div></div>
     <div className="momentum-filter-bar thirty-in-thirty-filters">
       <label>Universe<select value={filters.universe} onChange={(event) => setFilters({ ...filters, universe: event.target.value as EmaNoTouchFilters["universe"] })}><option value="ALL">Nifty 500</option></select></label>
       <label>Prior Move %<input className="plain-input" type="number" min="0" step="1" value={filters.minPriorAdvancePct} onChange={(event) => setFilters({ ...filters, minPriorAdvancePct: Math.max(0, Number(event.target.value)) })}/></label>
@@ -2236,10 +2248,11 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
       <button className="secondary compact" onClick={() => setDirection((value) => value === "asc" ? "desc" : "asc")}>{direction === "asc" ? "Asc" : "Desc"}</button>
     </div>
     <div className="thirty-in-thirty-switches"><label><input type="checkbox" checked={nearEmaOnly} onChange={(event) => setNearEmaOnly(event.target.checked)}/><span>Within 2% of 10 EMA</span></label><label title="The latest available session's low must be strictly above its 10 EMA"><input type="checkbox" checked={lowAbove10EmaOnly} onChange={(event) => setLowAbove10EmaOnly(event.target.checked)}/><span>Latest Low &gt; 10EMA</span></label></div>
-    {data && <><div className="thirty-scoreboard"><div><span>Evaluated</span><b>{data.evaluated}</b></div><div><span>EMA catchups</span><b>{data.qualified}</b></div><div><span>Near 10 EMA</span><b>{data.results.filter((row) => distance(row) > 0 && distance(row) <= 2).length}</b></div><div><span>Shown</span><b>{shown.length} / {rows.length}</b></div></div>
+    {data && <><div className="thirty-scoreboard"><div><span>Evaluated</span><b>{data.evaluated}</b></div><div><span>EMA catchups</span><b>{abovePreviousHigh.length}</b></div><div><span>Near 10 EMA</span><b>{abovePreviousHigh.filter((row) => distance(row) > 0 && distance(row) <= 2).length}</b></div><div><span>Shown</span><b>{shown.length} / {rows.length}</b></div></div>
       <section className="screenshot-tile-grid">{shown.length ? shown.map((row) => {
-        const tick = liveTicks[row.security_id];
-        const livePoint = tick?.ltp && liveTradeDate() > row.current_date ? { trade_date: liveTradeDate(), open: tick.dayOpen ?? tick.prevClose ?? tick.ltp, high: Math.max(tick.dayHigh ?? tick.ltp, tick.ltp), low: Math.min(tick.dayLow ?? tick.ltp, tick.ltp), close: tick.ltp, ema10: liveEma(row), volume: tick.volume ?? 0 } : null;
+        const live = quote(row);
+        const tick = live?.tick;
+        const livePoint = tick && live.date > row.current_date ? { trade_date: live.date, open: tick.dayOpen ?? tick.prevClose ?? tick.ltp, high: Math.max(tick.dayHigh ?? tick.ltp, tick.ltp), low: Math.min(tick.dayLow ?? tick.ltp, tick.ltp), close: tick.ltp, ema10: liveEma(row), volume: tick.volume ?? 0 } : null;
         const points = lastTradingMonths(livePoint ? [...row.recent, livePoint] : row.recent, chartMonths === 6 ? 126 : 63);
         const closes = points.map((point) => point.close);
         const min = Math.min(...closes, row.stop_loss), max = Math.max(...closes, row.stop_loss);
