@@ -53,6 +53,7 @@ import Nifty500MiniChart from "./Nifty500MiniChart";
 import { latestDailyStop, swingLowBeforeLatest } from "@/lib/entrySizing";
 import { findVolumeSellingSignal, type VolumeSellingSignal } from "@/lib/volumeSellingLogic";
 import { findStochHigh, type StochHighLine } from "@/lib/stochHigh";
+import { matchesStochHL } from "@/lib/stochHL";
 import { findSwingHigh, isAboveSwingHighRed, type SwingHighSignal } from "@/lib/swingHigh";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
 
@@ -2572,6 +2573,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
   const [swingLowOnly, setSwingLowOnly] = useState(false);
   const [aboveRedOnly, setAboveRedOnly] = useState(combined === true);
   const [stochHighOnly, setStochHighOnly] = useState(false);
+  const [stochHLOnly, setStochHLOnly] = useState(false);
   const [showTileEma10, setShowTileEma10] = useState(combined !== true);
   const [tileLimit, setTileLimit] = useState(9999);
   const [screenerView, setScreenerView] = useState<"tiles" | "charts">("tiles");
@@ -2647,8 +2649,10 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       if (!isNseSessionOpen()) return true;
       const tick = liveTicks[row.security_id];
       return tick && isCurrentSessionTick(tick) && priceClock - tick.receivedAt < (tick.source === "intraday" ? 90_000 : 45_000) && (tick.source === "intraday" || isCurrentIndiaTrade(tick.lastTradeTime, sessionDate));
-    }).map(row => liveAdjustedThirtyInThirty(row, liveTicks[row.security_id])).filter(row => !combined || (source === "All watchlists" ? rowSources(row).length > 0 : rowSources(row).includes(source)));
-  }, [activeData, liveTicks, priceClock, sessionDate, qMode, qIdSet, combined, source, membership]);
+    }).map(row => liveAdjustedThirtyInThirty(row, liveTicks[row.security_id])).filter(row =>
+      (!stochHLOnly || matchesStochHL(row.recent.filter(point => !point.is_provisional))) &&
+      (!combined || (source === "All watchlists" ? stochHLOnly || rowSources(row).length > 0 : rowSources(row).includes(source))));
+  }, [activeData, liveTicks, priceClock, sessionDate, qMode, qIdSet, combined, source, membership, stochHLOnly]);
   useEffect(() => {
     if (!selected) return;
     const replacement = liveRows.find((row) => row.security_id === selected.security_id);
@@ -2930,7 +2934,7 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
         <div className="refresh-status"><span className={freshPriceCount && isNseSessionOpen() ? "ready" : "pending"} /><b>{priceStatus}</b><small>{freshPriceCount} live · {intradayPriceCount} intraday · {visibleRows.length} shown</small></div>
         <button className="primary" onClick={() => qMode ? setQWatchlistRevision(value => value + 1) : onRun()} disabled={loading || qWatchlistLoading}><TrendingUp size={15}/>{combined ? loading ? "Scanning…" : "Refresh All" : qMode ? "Refresh Q Watchlist" : seasonal ? "Load Saved" : "Run Screener"}</button>
         {seasonal && <OwnerOnly><button className="secondary compact" onClick={onBuild} disabled={loading}><RefreshCw size={14}/>Build Watchlists</button></OwnerOnly>}
-        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setSwingLowOnly(false); setLowAbove10EmaOnly(combined === true); setAboveRedOnly(combined === true); setStochHighOnly(false); setShowTileEma10(combined !== true); onReset(); }}>Reset</button>
+        <button className="secondary compact" onClick={() => { setCleanTrendOnly(false); setSwingLowOnly(false); setLowAbove10EmaOnly(combined === true); setAboveRedOnly(combined === true); setStochHighOnly(false); setStochHLOnly(false); setShowTileEma10(combined !== true); onReset(); }}>Reset</button>
       </div>
     </div>
     {!previewOnly && <div className="momentum-filter-bar thirty-in-thirty-filters">
@@ -2948,6 +2952,14 @@ function ThirtyInThirtyScreenerView({ data, filters, setFilters, loading, onRun,
       {combined && <label title="Show stocks whose latest price is above the red line from the latest StochRSI oversold zone"><input type="checkbox" checked={aboveRedOnly} onChange={(e) => setAboveRedOnly(e.target.checked)}/><span>AboveRed</span></label>}
       <label title="Daily StochRSI %D below 80"><input type="checkbox" checked={filters.stochBelow80Only} onChange={(e) => setFilters({ ...filters, stochBelow80Only: e.target.checked })}/><span>Stoch&lt;80</span></label>
       {combined && <label title="Daily %D below 80; price within 5% below or above the highest high of the latest %D > 80 run"><input type="checkbox" checked={stochHighOnly} onChange={(e) => { setStochHighOnly(e.target.checked); if (e.target.checked) setFilters({ ...filters, upTodayOnly: false, stochBelow80Only: true }); }}/><span>StochHigh</span></label>}
+      {combined && <label title="Compare closes at the daily %D peak above 80 and trough below 20. The trough close must be less than 3% lower."><input type="checkbox" checked={stochHLOnly} onChange={(e) => {
+        setStochHLOnly(e.target.checked);
+        if (!e.target.checked) return;
+        setSelected(null);
+        setLowAbove10EmaOnly(false);
+        setAboveRedOnly(false);
+        setFilters({ ...filters, upTodayOnly: false, highVolumeOnly: false, stochBelow80Only: false });
+      }}/><span>StocHL</span></label>}
       <label title="Daily and monthly StochRSI %D are both rising versus their prior period"><input type="checkbox" checked={filters.stochRisingOnly} onChange={(e) => setFilters({ ...filters, stochRisingOnly: e.target.checked })}/><span>StochRising</span></label>
       <label><input type="checkbox" checked={filters.earlyVolumeOnly} onChange={(e) => setFilters({ ...filters, earlyVolumeOnly: e.target.checked })}/><span>Early Vol</span></label>
       <label><input type="checkbox" checked={filters.highVolumeOnly} onChange={(e) => setFilters({ ...filters, highVolumeOnly: e.target.checked })}/><span>High Volume</span></label>
