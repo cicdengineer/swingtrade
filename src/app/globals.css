@@ -344,3 +344,4 @@
   font-size: 12px;
 }
 .earnings-breakout-summary strong { color: var(--text); }
+@media(min-width:1200px){.universe-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}

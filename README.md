@@ -41,7 +41,7 @@ The first Google sign-in grants viewer access, including holdings and trade hist
 
 ## IPO Data
 
-Open **Data Status** and use **Refresh** in the **NSE IPO daily OHLCV** section, or click **Refresh All Data**. The server downloads NSE mainboard and SME listings for the rolling 12 months, requests daily Dhan candles from each listing date, and saves a snapshot in MySQL or in `.data/ipo-ohlcv.json` locally.
+Open **Data Status** and use **Refresh** on the **NSE IPOs** tile, or click **Refresh All Data** to sync IPOs and both index datasets. The server downloads NSE mainboard and SME listings for the rolling 12 months, requests daily Dhan candles from each listing date, and saves a snapshot in MySQL or in `.data/ipo-ohlcv.json` locally.
 
 Select a symbol to view its candles, or use **Export OHLCV CSV** to download all available rows. The IPO list flags unresolved Dhan matches and missing listing-day data. Refresh again to retry missing candles.
 
