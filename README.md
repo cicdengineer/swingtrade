@@ -39,6 +39,12 @@ Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NEXTAUTH_URL` (the origin of th
 
 The first Google sign-in grants viewer access, including holdings and trade history. Only the verified Google account `projectwealthpro@gmail.com` can change shared records, settings, or refresh stored datasets. Screeners and filters calculate results for the current view.
 
+## IPO Data
+
+Open **IPO Data** and import a CSV of NSE equity IPOs covering the 12 months through today. It must contain `Symbol` and `Listing Date` (or `Listed On`) and can include `Company Name`. Dates can use `YYYY-MM-DD` or `DD-MMM-YYYY`. The import requests daily Dhan candles from each listing date and saves a snapshot in MySQL or in `.data/ipo-ohlcv.json` locally.
+
+Select a symbol to view its candles, or use **Export OHLCV CSV** to download all available rows. The IPO list flags unresolved Dhan matches and missing listing-day data. Import the updated full listing file to refresh the snapshot or retry missing candles. Include both calendar years when assembling the rolling window from [NSE IPO Tracker](https://www.nseindia.in/ipo-tracker?type=ipo_year) exports.
+
 ## Seasonal Stocks watchlists
 
 The Seasonal Stocks screen reads prebuilt snapshots for the selected month. A month change reads only that month's saved watchlist; live Dhan ticks continue to update its tiles. To prepare data, check **Data Status** for downloaded OHLCV rows and use **Refresh All Data** there if needed; then open **Seasonality** and click **Rebuild Seasonality Statistics**; finally return to **Seasonal Stocks** and click **Build Watchlists**. Repeat the statistics and watchlist builds after refreshing historical market data. The build uses completed stored seasonal observations, requires an average three-month return strictly above 30%, and saves all 12 monthly watchlists in MySQL (or `.data/seasonal-watchlists.json` locally). **Load Saved** rereads the current month without recalculating historical returns.

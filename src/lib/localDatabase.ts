@@ -2,6 +2,7 @@ import "server-only";
 import fs from "node:fs/promises";
 import path from "node:path";
 import mysql from "mysql2/promise";
+import { randomUUID } from "node:crypto";
 import type {
   DailyPriceRecord,
   DataDownloadJobRecord,
@@ -44,6 +45,47 @@ export type SeasonalityDatabase = {
 const dbFile = path.join(process.cwd(), ".data", "seasonality-edge-db.json");
 const seasonalWatchlistsFile = path.join(process.cwd(), ".data", "seasonal-watchlists.json");
 const seasonalWatchlistsCollection = "seasonal_watchlists";
+const ipoDatasetFile = path.join(process.cwd(), ".data", "ipo-ohlcv.json");
+// Use a dedicated document because market database rewrites replace its collections.
+const ipoDatasetKey = ["ipo_ohlcv", "snapshot", "latest"];
+
+export async function readIpoDataset<T>(): Promise<T | null> {
+  if (useMysqlStorage) {
+    await ensureMysqlDb();
+    const [rows] = await withMysqlRetry(() => getMysqlPool().execute<MysqlRow[]>(
+      "SELECT data FROM seasonality_json_collections WHERE document_id = ? AND collection_name = ? AND shard_key = ?",
+      ipoDatasetKey,
+    ));
+    return parseMysqlJson<T>(rows[0]?.data);
+  }
+  try {
+    return JSON.parse(await fs.readFile(ipoDatasetFile, "utf8")) as T;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export async function writeIpoDataset(value: unknown) {
+  const data = JSON.stringify(value);
+  if (useMysqlStorage) {
+    await ensureMysqlDb();
+    await withMysqlRetry(() => getMysqlPool().execute(
+      `INSERT INTO seasonality_json_collections (document_id, collection_name, shard_key, data)
+       VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)`,
+      [...ipoDatasetKey, data],
+    ));
+    return;
+  }
+  await fs.mkdir(path.dirname(ipoDatasetFile), { recursive: true });
+  const temporaryFile = `${ipoDatasetFile}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporaryFile, data);
+    await fs.rename(temporaryFile, ipoDatasetFile);
+  } finally {
+    await fs.unlink(temporaryFile).catch(() => {});
+  }
+}
 let writeQueue: Promise<void> = Promise.resolve();
 const replacementCharacter = "\uFFFD";
 const mysqlDatabaseId = "default";

@@ -138,7 +138,7 @@ function splitCsvLine(line: string) {
   return line.match(/("(?:[^"]|"")*"|[^,]*)(?:,|$)/g)?.map((value) => value.replace(/,$/, "").replace(/^"|"$/g, "").replace(/""/g, "\"").trim()) ?? [];
 }
 
-function parseCsv(text: string) {
+export function parseCsv(text: string) {
   const lines = text.split(/\r?\n/).filter(Boolean);
   const headers = splitCsvLine(lines.shift() ?? "").map((header) => header.trim());
   return lines.map((line) => {
