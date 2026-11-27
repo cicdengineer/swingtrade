@@ -1,11 +1,12 @@
 import "server-only";
 import type { DailyPriceRecord, UniverseName } from "./types";
-import { readDatabase } from "./localDatabase";
+import { readDatabase, readIpoDataset } from "./localDatabase";
+import type { IpoDataset } from "./ipoDataset";
 import { calculateEma, calculateSma } from "./swingScreenerService";
 import { calculateStochRsiD } from "./stochRsiScreenerService";
 
 export type ThirtyInThirtyFilters = {
-  universe: UniverseName | "ALL";
+  universe: UniverseName | "ALL" | "IPO";
   lookbackDays: number;
   windowDays: number;
   minReturnPct: number;
@@ -38,7 +39,7 @@ export type ThirtyInThirtyRow = {
   security_id: string;
   symbol: string;
   company_name: string;
-  universe_name: UniverseName;
+  universe_name: UniverseName | "IPO";
   current_date: string;
   current_close: number;
   ema10: number;
@@ -123,13 +124,14 @@ export function analyzeStock(input: {
   securityId: string;
   symbol: string;
   companyName: string;
-  universeName: UniverseName;
-  prices: DailyPriceRecord[];
+  universeName: ThirtyInThirtyRow["universe_name"];
+  prices: Pick<DailyPriceRecord, "trade_date" | "open" | "high" | "low" | "close" | "volume" | "is_provisional">[];
   filters: ThirtyInThirtyFilters;
 }): ThirtyInThirtyRow | null {
   const rows = [...input.prices].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
   const neededRows = input.filters.lookbackDays + input.filters.windowDays + 5;
-  if (rows.length < Math.min(neededRows, 70)) return null;
+  const minimumRows = input.universeName === "IPO" ? Math.max(50, input.filters.windowDays + 1) : Math.min(neededRows, 70);
+  if (rows.length < minimumRows) return null;
 
   const currentIndex = rows.length - 1;
   const current = rows[currentIndex];
@@ -175,8 +177,8 @@ export function analyzeStock(input: {
   const movePass = best.returnPct >= input.filters.minReturnPct;
   const first1m = rows.slice(-21).at(0);
   const first2m = rows.slice(-42).at(0);
-  const first3m = rows.slice(-63).at(0);
-  const first6m = rows.slice(-126).at(0);
+  const first3m = input.universeName === "IPO" && rows.length < 63 ? undefined : rows.slice(-63).at(0);
+  const first6m = input.universeName === "IPO" && rows.length < 126 ? undefined : rows.slice(-126).at(0);
   const return1m = first1m ? pct(current.close, first1m.close) : 0;
   const return2m = first2m ? pct(current.close, first2m.close) : 0;
   const current3mReturn = first3m ? pct(current.close, first3m.close) : 0;
@@ -285,10 +287,13 @@ export function analyzeStock(input: {
   };
 }
 
-async function calculateThirtyInThirtyScreener(filters: Partial<ThirtyInThirtyFilters> = {}) {
+async function calculateThirtyInThirtyScreener(filters: Partial<ThirtyInThirtyFilters> = {}, includeIpos = false) {
   const merged = { ...defaultThirtyInThirtyFilters, ...filters };
-  const db = await readDatabase();
-  const eligibleMembers = db.universe_members.filter((member) =>
+  const [db, ipoDataset] = await Promise.all([
+    merged.universe === "IPO" ? null : readDatabase(),
+    merged.universe === "IPO" || (merged.universe === "ALL" && includeIpos) ? readIpoDataset<IpoDataset>() : null,
+  ]);
+  const eligibleMembers = (db?.universe_members ?? []).filter((member) =>
     member.is_current_constituent &&
     member.security_id &&
     (merged.universe === "ALL" || member.universe_name === merged.universe)
@@ -297,7 +302,7 @@ async function calculateThirtyInThirtyScreener(filters: Partial<ThirtyInThirtyFi
   for (const member of eligibleMembers) if (!membersBySecurity.has(member.security_id)) membersBySecurity.set(member.security_id, member);
   const members = [...membersBySecurity.values()];
   const pricesBySecurity = new Map<string, DailyPriceRecord[]>();
-  for (const price of db.daily_prices) {
+  for (const price of db?.daily_prices ?? []) {
     const list = pricesBySecurity.get(price.security_id);
     if (list) list.push(price);
     else pricesBySecurity.set(price.security_id, [price]);
@@ -313,6 +318,22 @@ async function calculateThirtyInThirtyScreener(filters: Partial<ThirtyInThirtyFi
     });
     return row ? [row] : [];
   });
+  const seen = new Set(rows.map((row) => row.security_id));
+  for (const listing of ipoDataset?.listings ?? []) {
+    if (!listing.securityId || seen.has(listing.securityId)) continue;
+    const row = analyzeStock({
+      securityId: listing.securityId,
+      symbol: listing.symbol,
+      companyName: listing.company || listing.symbol,
+      universeName: "IPO",
+      prices: listing.candles.map(({ date, ...candle }) => ({ ...candle, trade_date: date })),
+      filters: merged,
+    });
+    if (row) {
+      seen.add(row.security_id);
+      rows.push(row);
+    }
+  }
   const results = rows.filter((row) => merged.showAll || row.qualifies).sort((a, b) => b.best_return_pct - a.best_return_pct);
   const statusSummary = rows.reduce<Record<string, number>>((acc, row) => {
     acc[row.status] = (acc[row.status] ?? 0) + 1;
@@ -321,17 +342,17 @@ async function calculateThirtyInThirtyScreener(filters: Partial<ThirtyInThirtyFi
   return { filters: merged, evaluated: rows.length, qualified: rows.filter((row) => row.qualifies).length, statusSummary, results, generatedAt: new Date().toISOString() };
 }
 
-export async function runThirtyInThirtyScreener(filters: Partial<ThirtyInThirtyFilters> = {}) {
+export async function runThirtyInThirtyScreener(filters: Partial<ThirtyInThirtyFilters> = {}, includeIpos = false) {
   const merged = { ...defaultThirtyInThirtyFilters, ...filters };
-  const key = JSON.stringify(merged);
+  const key = JSON.stringify([merged, includeIpos]);
   const cached = globalCache.__thirtyInThirtyCache;
   if (cached?.key === key && cached.expiresAt > Date.now()) return cached.value;
-  const value = await calculateThirtyInThirtyScreener(merged);
+  const value = await calculateThirtyInThirtyScreener(merged, includeIpos);
   globalCache.__thirtyInThirtyCache = { key, value, expiresAt: Date.now() + 60_000 };
   return value;
 }
 
 export async function getThirtyInThirtyScreenerDetail(securityId: string) {
-  const response = await runThirtyInThirtyScreener({ showAll: true });
+  const response = await runThirtyInThirtyScreener({ showAll: true }, true);
   return response.results.find((row) => row.security_id === securityId) ?? null;
 }

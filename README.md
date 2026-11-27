@@ -45,6 +45,8 @@ Open **Data Status** and use **Refresh** in the **NSE IPO daily OHLCV** section,
 
 Select a symbol to view its candles, or use **Export OHLCV CSV** to download all available rows. The IPO list flags unresolved Dhan matches and missing listing-day data. Refresh again to retry missing candles.
 
+In **Screener**, select **NSE IPOs** under **Universe** to screen the saved listings. The IPO universe requires at least 50 daily candles for the 50 EMA and enough sessions for the selected return window.
+
 ## Seasonal Stocks watchlists
 
 The Seasonal Stocks screen reads prebuilt snapshots for the selected month. A month change reads only that month's saved watchlist; live Dhan ticks continue to update its tiles. To prepare data, check **Data Status** for downloaded OHLCV rows and use **Refresh All Data** there if needed; then open **Seasonality** and click **Rebuild Seasonality Statistics**; finally return to **Seasonal Stocks** and click **Build Watchlists**. Repeat the statistics and watchlist builds after refreshing historical market data. The build uses completed stored seasonal observations, requires an average three-month return strictly above 30%, and saves all 12 monthly watchlists in MySQL (or `.data/seasonal-watchlists.json` locally). **Load Saved** rereads the current month without recalculating historical returns.
