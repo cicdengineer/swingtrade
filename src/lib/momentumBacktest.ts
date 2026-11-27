@@ -29,7 +29,7 @@ function rank(current: Map<string, Quote>, base: Map<string, Quote>, eligible?: 
   return candidates.sort((a, b) => b.returnPct - a.returnPct || a.symbol.localeCompare(b.symbol) || a.id.localeCompare(b.id));
 }
 
-export function simulateMomentumBacktest(prices: Quote[]) {
+export function simulateMomentumBacktest(prices: Quote[], startDate?: string) {
   const validClose = (quote: Quote) => !quote.is_provisional && Number.isFinite(quote.close) && quote.close > 0;
   let latest = "";
   for (const quote of prices) {
@@ -46,20 +46,22 @@ export function simulateMomentumBacktest(prices: Quote[]) {
     closes.set(quote.trade_date, session);
   }
   const dates = [...closes.keys()].sort();
-  const beginning = dates.findIndex(date => date >= start);
+  const availableStart = dates.find(date => date >= start)!;
+  if (startDate && (startDate < availableStart || startDate > latest)) {
+    throw new RangeError("Choose a date within the available replay.");
+  }
+  const beginning = dates.findIndex(date => date >= (startDate ?? availableStart));
   const flat = new Map<string, Quote>();
   const holdings = new Map<string, Holding>();
   let basket = new Set<string>();
   let realized = 0;
   let pendingExit: ExitReason | undefined;
-  let restartAfterLimit = false;
 
   const snapshots = dates.slice(beginning).map((date, offset) => {
     const index = beginning + offset;
     const month = date.slice(0, 7);
     const previous = dates[index - 1];
     const next = dates[index + 1];
-    const monthStart = previous?.slice(0, 7) !== month;
     const monthEnd = Boolean(next && next.slice(0, 7) !== month)
       || shiftDays(date, 1).slice(0, 7) !== month;
     const current = closes.get(date)!;
@@ -90,22 +92,18 @@ export function simulateMomentumBacktest(prices: Quote[]) {
       }
       pendingExit = holdings.size ? exit : undefined;
       basket = new Set();
-      if (exit !== "Month end") restartAfterLimit = true;
     } else {
       if (!basket.size && previous) {
-        const calendarRanking = monthStart && !restartAfterLimit;
-        const priorMonth = previous.slice(0, 7);
-        const cutoff = calendarRanking ? `${priorMonth}-01` : shiftDays(previous, -30);
+        const cutoff = shiftDays(previous, -65);
         let baseIndex = index - 1;
-        while (baseIndex >= 0 && (calendarRanking ? dates[baseIndex] >= cutoff : dates[baseIndex] > cutoff)) baseIndex--;
+        while (baseIndex >= 0 && dates[baseIndex] > cutoff) baseIndex--;
         const base = closes.get(dates[baseIndex]) ?? flat;
         picks = rank(previousCloses, base).filter(candidate => candidate.returnPct >= 30 && current.has(candidate.id)).slice(0, 10);
         basket = new Set(picks.map(candidate => candidate.id));
-        signal = calendarRanking ? "Prior calendar month ranking" : "Trailing 30 calendar days ranking";
-        restartAfterLimit = false;
+        signal = "65-day basket selection";
       } else if (basket.size) {
-        picks = rank(current, previousCloses, basket).slice(0, 3);
-        signal = "Daily basket ranking";
+        picks = rank(current, previousCloses, basket).slice(0, Math.ceil(basket.size * 0.3));
+        signal = "Daily top 30%";
       }
       for (const pick of picks) {
         const quote = current.get(pick.id);
@@ -128,7 +126,7 @@ export function simulateMomentumBacktest(prices: Quote[]) {
       pendingExit: Boolean(pendingExit),
     };
   });
-  return { snapshots };
+  return { snapshots, availableStart, availableEnd: latest };
 }
 
 export type MomentumBacktestResult = ReturnType<typeof simulateMomentumBacktest>;

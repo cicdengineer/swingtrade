@@ -1,0 +1,114 @@
+.workspace {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  --replay-tint: color-mix(in srgb, var(--green) 9%, var(--panel));
+}
+
+.hero, .replay, .signal, .ledger, .metrics > div {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: clamp(20px, 3vw, 34px);
+  background: linear-gradient(115deg, var(--panel) 42%, var(--replay-tint));
+}
+
+.hero h2 { margin: 0; font-size: clamp(25px, 3.5vw, 39px); letter-spacing: -.05em; }
+.hero p { max-width: 64ch; margin: 9px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+.workspace button, .controls input {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.workspace button { cursor: pointer; }
+.workspace button:hover:not(:disabled) { border-color: var(--green); }
+.workspace button:disabled { cursor: default; opacity: .45; }
+.workspace :is(button, input, summary):focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.workspace .primary { background: #155c4b; border-color: #155c4b; color: #fff; }
+
+.replay {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.replay > small, .timeline { grid-column: 1 / -1; }
+.dateInfo, .controls, .timeline { display: flex; align-items: center; gap: 9px; }
+.dateInfo { gap: 12px; }
+.dateInfo > svg { flex: none; color: var(--green); }
+.dateInfo h3, .tableTitle h3, .signal h3 { margin: 0; font-size: 15px; }
+.workspace small { color: var(--muted); font-size: 11px; }
+.controls { flex-wrap: wrap; }
+.controls input { min-width: 138px; flex: 0 0 auto; }
+:global(:root[data-theme="dark"]) .controls input { color-scheme: dark; }
+.timeline input { width: 100%; min-width: 0; accent-color: var(--green); }
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1.25fr repeat(4, 1fr);
+  gap: 10px;
+  margin: 0;
+}
+
+.metrics > div { padding: 15px; }
+.metrics > div:first-child { background: var(--replay-tint); border-color: color-mix(in srgb, var(--green) 32%, var(--line)); }
+.metrics dt { color: var(--muted); font-size: 11px; font-weight: 700; }
+.metrics dd { margin: 8px 0 0; font-size: clamp(14px, 1.55vw, 24px); font-weight: 800; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.gain, .buy { color: var(--green); }
+.loss, .sell { color: var(--red); }
+
+.signal { padding: 15px 20px; }
+.signal p { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.signal ul { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 10px 0 0; list-style: none; }
+.signal li, .buy, .sell { padding: 4px 8px; border-radius: 5px; background: var(--replay-tint); font-size: 11px; }
+.signal li { color: var(--muted); }
+.signal li strong { color: var(--text); margin-right: 4px; }
+.sell { background: color-mix(in srgb, var(--red) 9%, var(--panel)); }
+
+.tables { display: grid; gap: 16px; }
+.ledger { overflow: hidden; }
+.tableTitle { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 15px 20px; }
+.tableScroll { overflow-x: auto; }
+.tableScroll table { min-width: 590px; }
+.tableScroll th, .tableScroll td { padding: 11px 16px; white-space: nowrap; }
+.tableScroll td:first-child { color: var(--text); }
+.empty, .assumptions { color: var(--muted); font-size: 12px; }
+.empty { margin: 0; padding: 12px 20px 20px; border-top: 1px solid var(--line); }
+.assumptions { line-height: 1.6; }
+.assumptions summary { cursor: pointer; width: fit-content; }
+
+@media (max-width: 850px) {
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metrics > div:first-child { grid-column: 1 / -1; }
+}
+
+@media (max-width: 620px) {
+  .hero { align-items: flex-start; flex-direction: column; }
+  .replay { grid-template-columns: minmax(0, 1fr); padding: 14px; }
+  .controls { gap: 6px; }
+  .workspace button, .controls input { padding-inline: 8px; }
+  .controls input { min-width: 125px; }
+}
