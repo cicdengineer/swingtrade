@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Play, RotateCcw } from "lucide-react";
 import type { MomentumBacktestResult } from "@/lib/momentumBacktest";
+import type { LeaderBreakoutResult } from "@/lib/leaderBreakout";
 import styles from "./BacktestingView.module.css";
 
 const currency = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
@@ -27,13 +28,16 @@ function Table({ headers, rows, empty }: { headers: string[]; rows: ReactNode[][
 }
 
 export default function BacktestingView() {
-  const [result, setResult] = useState<MomentumBacktestResult | null>(null);
+  const [strategy, setStrategy] = useState<"breakout" | "momentum">("breakout");
+  const [result, setResult] = useState<MomentumBacktestResult | LeaderBreakoutResult | null>(null);
   const [index, setIndex] = useState(0);
   const [date, setDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const snapshots = result?.snapshots ?? [];
   const day = snapshots[index];
+  const breakout = strategy === "breakout";
+  const breakoutDay = result?.strategy === "breakout" ? result.snapshots[index] : undefined;
   const first = snapshots[0]?.date;
   const canJump = Boolean(first && date >= first && result && date <= result.availableEnd);
   const canStart = Boolean(date && (!result || (date >= result.availableStart && date <= result.availableEnd)));
@@ -48,8 +52,9 @@ export default function BacktestingView() {
     setError("");
     setLoading(true);
     try {
-      const query = start ? `?start=${encodeURIComponent(start)}` : "";
-      const response = await fetch(`/api/backtesting${query}`, { method: "POST" });
+      const query = new URLSearchParams({ strategy });
+      if (start) query.set("start", start);
+      const response = await fetch(`/api/backtesting?${query}`, { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Backtest failed.");
       setResult(data);
@@ -65,12 +70,24 @@ export default function BacktestingView() {
   return <div className={styles.workspace} aria-busy={loading}>
     <section className={styles.hero}>
       <div>
-        <h2>Momentum replay</h2>
-        <p>Build a basket of up to 10 NSE stocks with a 30% gain over 65 calendar days. Buy ₹10,000 per stock, then add ₹10,000 each to the strongest 30% of the basket every session, rounded up.</p>
+        <h2>{breakout ? "Market-leader breakout" : "Momentum basket"}</h2>
+        <p>{breakout
+          ? "Allocate up to ₹10,000 per session to one NSE stock breaking its prior 20-session high. Rank qualifying stocks by their 63-session outperformance versus the Nifty 500."
+          : "Build a basket of up to 10 NSE stocks with a 30% gain over 65 calendar days. Buy ₹10,000 per stock, then add ₹10,000 each to the strongest 30% of the basket every session, rounded up."}</p>
       </div>
-      <button className={styles.primary} type="button" onClick={() => void run()} disabled={loading}>
-        <Play size={15} /> {loading ? "Loading replay…" : "Run full year"}
-      </button>
+      <div className={styles.controls}>
+        <select aria-label="Backtest strategy" value={strategy} disabled={loading} onChange={event => {
+          setStrategy(event.target.value === "momentum" ? "momentum" : "breakout");
+          setResult(null);
+          setError("");
+        }}>
+          <option value="breakout">Market-leader breakout</option>
+          <option value="momentum">Momentum basket</option>
+        </select>
+        <button className={styles.primary} type="button" onClick={() => void run()} disabled={loading}>
+          <Play size={15} /> {loading ? "Loading replay…" : "Run full year"}
+        </button>
+      </div>
     </section>
 
     <section className={styles.replay} aria-label="Replay controls">
@@ -103,15 +120,21 @@ export default function BacktestingView() {
         <div><dt>Deployed this session</dt><dd>{money(day.deployed)}</dd></div>
         <div><dt>Open positions at cost</dt><dd>{money(day.invested)}</dd></div>
       </dl>
+      {breakoutDay && <p className={styles.replayStats}>
+        <span>Max MTM drawdown <strong>{money(breakoutDay.maxDrawdown)}</strong></span>
+        <span>Peak capital deployed <strong>{money(breakoutDay.peakCapital)}</strong></span>
+        <span>Sessions with a buy <strong>{breakoutDay.buySessions} of {index + 1}</strong></span>
+      </p>}
       {(day.signal || day.pendingExit) && <section className={styles.signal}>
         {day.signal && <h3>{day.signal}</h3>}
-        {day.pendingExit && <p>Some exits are pending a fresh closing price.</p>}
-        {day.picks.length > 0 && <ul>{day.picks.map(pick => <li key={pick.id}><strong>{pick.symbol}</strong> {pick.returnPct.toFixed(2)}%</li>)}</ul>}
+        {breakoutDay?.missedEntry && <p>{breakoutDay.missedEntry} had no valid opening price. The order expired.</p>}
+        {day.pendingExit && <p>{breakoutDay ? `Exits queued for the next available open · ${breakoutDay.queuedExits.join(", ")}` : "Some exits are pending a fresh closing price."}</p>}
+        {day.picks.length > 0 && <ul>{day.picks.map(pick => <li key={pick.id}><strong>{pick.symbol}</strong> {pick.returnPct.toFixed(2)}{breakout ? " pp vs Nifty 500" : "%"}</li>)}</ul>}
       </section>}
       <div className={styles.tables}>
         <section className={styles.ledger}>
-          <div className={styles.tableTitle}><h3>Trades at the close</h3><small>{day.trades.length} fills</small></div>
-          <Table headers={["Stock", "Action", "Close", "Shares", "Amount", "Realized P&L"]} empty="No trades this session."
+          <div className={styles.tableTitle}><h3>{breakout ? "Trades at the open" : "Trades at the close"}</h3><small>{day.trades.length} fills</small></div>
+          <Table headers={["Stock", "Action", "Fill price", "Shares", "Amount", "Realized P&L"]} empty="No trades this session."
             rows={day.trades.map(trade => [<strong>{trade.symbol}</strong>, <span className={trade.action === "Buy" ? styles.buy : styles.sell}>{trade.action}</span>, money(trade.price), shares(trade.quantity), money(trade.amount), trade.pnl === undefined ? "—" : <Profit value={trade.pnl} />])} />
         </section>
         <section className={styles.ledger}>
@@ -122,7 +145,9 @@ export default function BacktestingView() {
       </div>
     </>}
     <details className={styles.assumptions}><summary>Trading rules and fill assumptions</summary>
-      <p>Rank new baskets using the prior close and the last available market session at or before the 65-day cutoff. Exit at month end or at a basket MTM of −₹50,000 or +₹1,00,000. Fills use closing prices, fractional shares, zero fees, and no funding cap.</p>
+      <p>{breakout
+        ? "Signals require a close above the 50-session moving average and prior 20-session high, plus positive 63-session outperformance. Exit after a close below the 20-session average or 20 holding sessions. Fills use the next open, fractional shares, 0.10% fees and 0.10% slippage per side. The ₹10,000 buy budget includes fees. Unused budget stays in cash."
+        : "Rank new baskets using the prior close and the last available market session at or before the 65-day cutoff. Exit at month end or at a basket MTM of −₹50,000 or +₹1,00,000. Fills use closing prices, fractional shares, zero fees, and no funding cap."}</p>
     </details>
   </div>;
 }

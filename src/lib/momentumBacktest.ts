@@ -13,7 +13,7 @@ function shiftDays(date: string, days: number) {
   return result.toISOString().slice(0, 10);
 }
 
-function yearEarlier(date: string) {
+export function yearEarlier(date: string) {
   const year = Number(date.slice(0, 4)) - 1;
   const candidate = `${year}${date.slice(4)}`;
   return new Date(candidate).toISOString().slice(0, 10) === candidate ? candidate : `${year}-02-28`;
@@ -126,7 +126,7 @@ export function simulateMomentumBacktest(prices: Quote[], startDate?: string) {
       pendingExit: Boolean(pendingExit),
     };
   });
-  return { snapshots, availableStart, availableEnd: latest };
+  return { strategy: "momentum" as const, snapshots, availableStart, availableEnd: latest };
 }
 
 export type MomentumBacktestResult = ReturnType<typeof simulateMomentumBacktest>;

@@ -112,3 +112,15 @@
   .workspace button, .controls input { padding-inline: 8px; }
   .controls input { min-width: 125px; }
 }
+
+.replayStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin: 0;
+  padding: 0 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.replayStats strong { color: var(--text); margin-left: 4px; }
