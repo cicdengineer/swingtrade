@@ -41,7 +41,7 @@ The first Google sign-in grants viewer access, including holdings and trade hist
 
 ## IPO Data
 
-Open **IPO Data** and import a CSV of NSE equity IPOs covering the 12 months through today. It must contain `Symbol` and `Listing Date` (or `Listed On`) and can include `Company Name`. Dates can use `YYYY-MM-DD` or `DD-MMM-YYYY`. The import requests daily Dhan candles from each listing date and saves a snapshot in MySQL or in `.data/ipo-ohlcv.json` locally.
+Open **Data Status** and scroll to **NSE IPO daily OHLCV** below the index dataset cards. Import a CSV of NSE equity IPOs covering the 12 months through today. It must contain `Symbol` and `Listing Date` (or `Listed On`) and can include `Company Name`. Dates can use `YYYY-MM-DD` or `DD-MMM-YYYY`. The import requests daily Dhan candles from each listing date and saves a snapshot in MySQL or in `.data/ipo-ohlcv.json` locally.
 
 Select a symbol to view its candles, or use **Export OHLCV CSV** to download all available rows. The IPO list flags unresolved Dhan matches and missing listing-day data. Import the updated full listing file to refresh the snapshot or retry missing candles. Include both calendar years when assembling the rolling window from [NSE IPO Tracker](https://www.nseindia.in/ipo-tracker?type=ipo_year) exports.
 
