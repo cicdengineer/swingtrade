@@ -5,7 +5,7 @@ import { type NextRequest, NextResponse } from "next/server";
 const viewerQueries = new Set([
   "/api/analysis", "/api/scanner", "/api/usa-data",
   "/api/qullamaggie-screener", "/api/trade-management/preview",
-  ...["early-breakout", "ema-no-touch", "ema-reversal-pullback", "hourly-breakout",
+  ...["early-breakout", "ema-no-touch", "ema-reversal-pullback", "flag", "hourly-breakout",
     "momentum-contraction", "stoch-rsi", "swing", "thirty-in-thirty", "thirty-up"]
     .map(name => `/api/${name}-screener/run`),
   ...["ema-no-touch", "ema-reversal-pullback", "stoch-rsi", "thirty-in-thirty"]

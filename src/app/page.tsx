@@ -42,6 +42,7 @@ import QullamaggieView from "./QullamaggieView";
 import VolumeSellingView from "./VolumeSellingView";
 import USADataView from "./USADataView";
 import EntrySizingTile from "./EntrySizingTile";
+import { flagDefaults, flagTargetMultiplier, type FlagBoundaries, type FlagFilters, type FlagResponse, type FlagRow } from "@/lib/flagScreenerLogic";
 import BacktestingView from "./BacktestingView";
 import PaperTradeView from "./PaperTradeView";
 import { isLatestLowAbove10Ema } from "@/lib/dailyEmaLow";
@@ -57,7 +58,7 @@ import { matchesStochHL } from "@/lib/stochHL";
 import { findSwingHigh, isAboveSwingHighRed, type SwingHighSignal } from "@/lib/swingHigh";
 import type { VolumeSellingRow } from "@/lib/volumeSellingScreenerService";
 
-type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Paper Trade" | "Backtesting" | "Settings" | "Users";
+type View = "Dashboard" | "Stock Search" | "Data Status" | "USA Data" | "Seasonality" | "Scanner" | "Swing Screener" | "30%Up" | "Early Breakout" | "Hourly Breakout" | "Momentum Tight" | "30 in 30" | "VolumeSelling" | "Screener" | "Qullamaggie" | "10 EMA Catchup" | "Flag" | "Seasonal Stocks" | "StochRSI" | "Portfolio" | "Paper Trade" | "Backtesting" | "Settings" | "Users";
 type DataSummary = { universe_name: UniverseName; total_constituents: number; mapped: number; stocks_downloaded: number; stocks_pending: number; stocks_failed: number; earliest_data_date: string | null; latest_data_date: string | null; index_latest_date: string | null; total_ohlcv_rows: number; last_refresh: string | null; historical_sessions: number; latest_official?: number; latest_provisional?: number };
 type DataDownloadJob = { id?: string; status: string; total: number; completed: number; remaining: number; successful: number; failed: number; current_stock?: string; current_status?: string; progress: number; started_at?: string; finished_at?: string; last_successful_update?: string; data_through_date?: string; notice?: string; pending_eod_count?: number; trading_date?: string; historical_candles_backfilled?: number; official_candles_updated?: number; provisional_candles_created?: number; provisional_candles_reconciled?: number; already_up_to_date?: number; errors: string[] };
 type DataStatus = { dhan_connected: boolean; dhan_profile?: { ok: boolean; dhanClientId?: string; tokenValidity?: string; activeSegment?: string; dataPlan?: string; dataValidity?: string; error?: string }; database_size_bytes: number; price_adjustment_status: string; latest_market_data: null | { trading_date: string; official: number; provisional: number; data_status: string }; latest_job: null | DataDownloadJob; summaries: DataSummary[]; failures: { symbol: string; security_id: string; error_message: string; attempt_count: number; last_attempt: string }[]; quality_issues: unknown[]; universe_sources: Record<string, { label: string; url: string }> };
@@ -154,6 +155,7 @@ const strategyNav: { name: View; icon: typeof Activity }[] = [
   { name: "VolumeSelling", icon: TrendingDown },
   { name: "Qullamaggie", icon: TrendingUp },
   { name: "10 EMA Catchup", icon: TrendingUp },
+  { name: "Flag", icon: TrendingUp },
   { name: "Seasonal Stocks", icon: CalendarDays },
   { name: "StochRSI", icon: Activity },
   { name: "Backtesting", icon: BarChart3 },
@@ -2155,21 +2157,15 @@ function MomentumContractionScreenerView({ data, filters, setFilters, loading, o
   return <section className="research-page thirty-up-page momentum-page"><div className="notice"><AlertTriangle size={18}/><span>Momentum Tight scans for prior demand followed by price tightness and volume dry-up. It does not predict breakouts.</span></div><div className="thirty-hero momentum-hero"><div><p className="eyebrow">Momentum + Volume Contraction</p><h2>Demand shown, supply drying up</h2><small>Server-side scan is cached for 60 seconds; live socket ticks update visible mini charts and the opened chart without recalculating the scan.</small></div><div className="thirty-hero-actions"><div className="refresh-status"><span className={autoRefresh ? "ready" : "idle-dot"} /><b>{autoRefresh ? "Auto refresh on" : "Auto refresh off"}</b><small>Last {formatTime(updatedAt)}</small></div><button className="secondary compact" onClick={() => setAutoRefresh((value) => !value)}>{autoRefresh ? "Pause" : "Resume"}</button><button className="primary" onClick={() => onRun()} disabled={loading}><Activity size={15}/>Run Scanner</button><button className="secondary compact" onClick={() => setSettingsOpen(true)}><Settings size={14}/>Settings</button></div></div><div className="momentum-filter-bar"><label>Setup<select value={filters.setupType} onChange={(e) => setFilters({ ...filters, setupType: e.target.value as MomentumContractionFilters["setupType"] })}><option value="ALL">All</option><option value="MOMENTUM_CONTRACTION">Momentum Contraction</option><option value="TRENDING_TIGHT">Trending Tight</option></select></label><label>Universe<select value={filters.universe} onChange={(e) => setFilters({ ...filters, universe: e.target.value as MomentumContractionFilters["universe"] })}><option value="ALL">Nifty 500</option></select></label><label>Score<input className="plain-input" type="number" value={filters.minSetupScore} onChange={(e) => setNumber("minSetupScore", Number(e.target.value))}/></label><label>Move %<input className="plain-input" type="number" value={filters.minPriorMovePct} onChange={(e) => setNumber("minPriorMovePct", Number(e.target.value))}/></label><label>EMA Max %<input className="plain-input" type="number" value={filters.maxDistanceFromEmaPct} onChange={(e) => setNumber("maxDistanceFromEmaPct", Number(e.target.value))}/></label><label>Vol Dry<input className="plain-input" type="number" step="0.05" value={filters.dryVolumeRatio} onChange={(e) => setNumber("dryVolumeRatio", Number(e.target.value))}/></label><label>Tightness<input className="plain-input" type="number" step="0.05" value={filters.tightRangeAtr} onChange={(e) => setNumber("tightRangeAtr", Number(e.target.value))}/></label><FallingTrendButton active={fallingDirection !== null} direction={fallingDirection ?? "desc"} onClick={() => setFallingDirection((current) => current === null ? "desc" : current === "desc" ? "asc" : null)} /><button className="secondary compact" onClick={onReset}>Reset Filters</button></div>{data && <><div className="thirty-scoreboard"><div><span>Evaluated</span><b>{data.evaluated}</b></div><div><span>Setups</span><b>{data.qualified}</b></div><div><span>Momentum</span><b>{data.results.filter((row) => row.setupType === "MOMENTUM_CONTRACTION").length}</b></div><div><span>Trending</span><b>{data.results.filter((row) => row.setupType === "TRENDING_TIGHT").length}</b></div></div><section className="momentum-grid">{sortedRows.length ? sortedRows.map((row) => <button key={row.security_id} className="momentum-tile" onClick={() => setSelected(row)} title={`${row.setupType.replace("_", " ")} · Score ${row.setupScore}`}><span><b>{row.symbol}</b><small>{row.company_name}</small></span><MomentumMiniChart row={row} liveTick={liveTicks[row.security_id]} onOpen={() => setSelected(row)} /></button>) : <p className="panel-empty">No stocks currently meet the selected momentum contraction criteria.</p>}</section></>}{settingsOpen && <div className="drawer"><div className="drawer-card narrow-drawer"><button className="icon-button drawer-close" onClick={() => setSettingsOpen(false)}>×</button><p className="eyebrow">Scanner Settings</p><h2>Momentum Tight thresholds</h2><div className="settings-grid compact-form"><label>EMA Length<input className="plain-input" type="number" value={filters.emaLength} onChange={(e) => setNumber("emaLength", Number(e.target.value))}/></label><label>EMA Slope Lookback<input className="plain-input" type="number" value={filters.emaSlopeLookback} onChange={(e) => setNumber("emaSlopeLookback", Number(e.target.value))}/></label><label>Momentum Lookback<input className="plain-input" type="number" value={filters.momentumLookback} onChange={(e) => setNumber("momentumLookback", Number(e.target.value))}/></label><label>Expansion RVOL<input className="plain-input" type="number" step="0.1" value={filters.expansionRelativeVolume} onChange={(e) => setNumber("expansionRelativeVolume", Number(e.target.value))}/></label><label>Volume Avg Length<input className="plain-input" type="number" value={filters.volumeAverageLength} onChange={(e) => setNumber("volumeAverageLength", Number(e.target.value))}/></label><label>ATR Length<input className="plain-input" type="number" value={filters.atrLength} onChange={(e) => setNumber("atrLength", Number(e.target.value))}/></label><label>Low Volume Lookback<input className="plain-input" type="number" value={filters.lowVolumeLookback} onChange={(e) => setNumber("lowVolumeLookback", Number(e.target.value))}/></label><label>Contraction Lookback<input className="plain-input" type="number" value={filters.contractionLookback} onChange={(e) => setNumber("contractionLookback", Number(e.target.value))}/></label><label>Minimum Traded Value<input className="plain-input" type="number" value={filters.minAverageDailyTradedValue} onChange={(e) => setNumber("minAverageDailyTradedValue", Number(e.target.value))}/></label><label className="toggle-row"><input type="checkbox" checked={filters.requireRisingEma} onChange={(e) => setFilters({ ...filters, requireRisingEma: e.target.checked })}/><span>Require rising EMA</span></label><label className="toggle-row"><input type="checkbox" checked={filters.showAll} onChange={(e) => setFilters({ ...filters, showAll: e.target.checked })}/><span>Show failed rows</span></label><label className="toggle-row"><input type="checkbox" checked={filters.debug} onChange={(e) => setFilters({ ...filters, debug: e.target.checked })}/><span>Show diagnostics</span></label></div><div className="toolbar-actions"><button className="primary" onClick={() => { setSettingsOpen(false); onRun(); }}>Apply Settings</button><button className="secondary" onClick={onReset}>Reset To Defaults</button></div></div></div>}{selected && <div className="drawer"><div className="drawer-card chart-drawer"><button className="icon-button drawer-close" onClick={() => setSelected(null)}>×</button><p className="eyebrow">{selected.setupType.replace("_", " ")} · Score {selected.setupScore}</p><h2>{selected.symbol} · {selected.company_name}</h2><p className="muted">{selected.reason}</p><ThirtyUpChartPanel selected={selected} intradayEndpoint="momentum-contraction-screener" showTradePreview={false} /><div className="stats-grid compact-stats"><Stat label="Prior Move" value={pct(selected.priorMovePct)} sub={`${selected.momentumRelativeVolume.toFixed(1)}x max RVOL`}/><Stat label="Range / ATR" value={selected.rangeCompression.toFixed(2)} sub={`ATR ${money(selected.atr14)}`}/><Stat label="Volume Dry-Up" value={`${selected.relativeVolume.toFixed(2)}x`} sub={`bottom ${selected.volumePercentile.toFixed(0)}%`}/><Stat label="EMA Distance" value={pct(selected.distance_from_ema_pct)} sub={`slope ${pct(selected.emaSlope)}`}/></div>{(filters.debug || selected.diagnostics.length > 0) && <section className="rule-list"><details open={filters.debug}><summary>Diagnostics</summary>{selected.diagnostics.map((item) => <span key={item.label} className={item.pass ? "pass" : "fail"}>{item.pass ? "PASS" : "FAIL"} - {item.label}</span>)}</details></section>}</div></div>}</section>;
 }
 
-function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, selected, setSelected, settings }: { data: EmaNoTouchResponse | null; filters: EmaNoTouchFilters; setFilters: (filters: EmaNoTouchFilters) => void; loading: boolean; onRun: () => void; selected: EmaNoTouchRow | null; setSelected: (row: EmaNoTouchRow | null) => void; settings?: TradingSettings | null }) {
-  const [sort, setSort] = useState<"ema" | "risk" | "tightness" | "trend" | "value" | "symbol">("ema");
-  const [direction, setDirection] = useState<"asc" | "desc">("asc");
-  const [nearEmaOnly, setNearEmaOnly] = useState(false);
-  const [lowAbove10EmaOnly, setLowAbove10EmaOnly] = useState(false);
-  const [chartMonths, setChartMonths] = useState<3 | 6>(3);
-  const [tileLimit, setTileLimit] = useState(80);
+function useStrategyLiveQuotes(data: { results: { security_id: string }[] } | null) {
   const [liveTicks, setLiveTicks] = useState<Record<string, LiveTick>>({});
   const [liveStatus, setLiveStatus] = useState("Last completed close");
   useEffect(() => {
     const ids = (data?.results ?? []).slice(0, 500).map((row) => row.security_id);
+    setLiveTicks({});
+    setLiveStatus(ids.length ? "Connecting live prices" : "Last completed close");
     if (!ids.length) return;
     const controller = new AbortController();
-    setLiveTicks({});
-    setLiveStatus("Connecting live prices");
     const handleEvent = (event: string, payload: string) => {
       if (event === "snapshot") {
         const ticks = JSON.parse(payload) as LiveTick[];
@@ -2204,6 +2200,17 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
     const date = new Date(timestamp).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
     return [tick.securityId, { tick, date }] as const;
   }));
+  return { liveTicks, liveStatus, quotes };
+}
+
+function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, selected, setSelected, settings }: { data: EmaNoTouchResponse | null; filters: EmaNoTouchFilters; setFilters: (filters: EmaNoTouchFilters) => void; loading: boolean; onRun: () => void; selected: EmaNoTouchRow | null; setSelected: (row: EmaNoTouchRow | null) => void; settings?: TradingSettings | null }) {
+  const [sort, setSort] = useState<"ema" | "risk" | "tightness" | "trend" | "value" | "symbol">("ema");
+  const [direction, setDirection] = useState<"asc" | "desc">("asc");
+  const [nearEmaOnly, setNearEmaOnly] = useState(false);
+  const [lowAbove10EmaOnly, setLowAbove10EmaOnly] = useState(false);
+  const [chartMonths, setChartMonths] = useState<3 | 6>(3);
+  const [tileLimit, setTileLimit] = useState(80);
+  const { liveTicks, liveStatus, quotes } = useStrategyLiveQuotes(data);
   const quote = (row: EmaNoTouchRow) => {
     const live = quotes.get(row.security_id);
     return live && live.date >= row.current_date ? live : undefined;
@@ -2266,6 +2273,158 @@ function EmaNoTouchScreenerView({ data, filters, setFilters, loading, onRun, sel
         </button>;
       }) : <p className="panel-empty">No rising EMA catchups match these filters.</p>}</section></>}
     {selected && <div className="drawer" onClick={() => setSelected(null)}><div className="drawer-card chart-drawer" onClick={(event) => event.stopPropagation()}><button className="icon-button drawer-close" onClick={() => setSelected(null)}>×</button><p className="eyebrow">10 EMA Catchup · {pct2(distance(selected))} above EMA</p><h2>{selected.symbol} · {selected.company_name}</h2><p className="muted">{selected.reason}</p><div className="chart-shell"><div className="entry-sizing-grid"><EntrySizingTile title="LTP to Swing Low Sizing" entry={selectedPrice} stop={selected.stop_loss} settings={settings}/></div><div className="chart-toolbar"><div><p className="eyebrow">Daily chart</p><span>Rising 10 EMA · swing-low stop at {money(selected.stop_loss)}</span></div><a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer"><ArrowUpRight size={14}/>TradingView</a></div><CleanCandleChart rows={chartRows} timeframe="daily" dailySessions={chartMonths === 6 ? 126 : 63} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" swingLowPoint={selected.recent.find((point) => point.trade_date === selected.swing_low_date)}/></div><div className="strategy-stat-grid"><StrategyStat label="LTP" value={money(selectedPrice)} sub={selectedTick ? "Live" : selected.current_date}/><StrategyStat label="Swing Low SL" value={money(selected.stop_loss)} sub={selected.swing_low_date}/><StrategyStat label="Risk to SL" value={pct2(risk(selected))}/><StrategyStat label="EMA Gap" value={pct2(distance(selected))}/><StrategyStat label="Prior Advance" value={pct2(selected.prior_advance_pct)}/><StrategyStat label="Base Range" value={pct2(selected.base_range_pct)}/><StrategyStat label="EMA Rise" value={pct2(selected.ema_slope_pct)}/><StrategyStat label="EMA Catchup" value={`${selected.catchup_pct.toFixed(2)} pp`}/></div></div></div>}
+  </section>;
+}
+
+const flagNumericFilters: { key: Exclude<keyof FlagFilters, "universe">; label: string; min: number; max?: number; step: number }[] = [
+  { key: "poleDays", label: "Prior Move Sessions", min: 3, max: 30, step: 1 },
+  { key: "minPriorAdvancePct", label: "Prior Move Min %", min: 1, max: 100, step: 0.5 },
+  { key: "minBaseDays", label: "Pennant Min Sessions", min: 5, max: 30, step: 1 },
+  { key: "maxBaseDays", label: "Pennant Max Sessions", min: 5, max: 40, step: 1 },
+  { key: "maxRetracementPct", label: "Max Pole Retracement %", min: 5, max: 90, step: 1 },
+  { key: "minContractionPct", label: "Min Range Contraction %", min: 5, max: 90, step: 1 },
+  { key: "maxBaseVolumeRatio", label: "Max Pennant Volume ×", min: 0.1, max: 5, step: 0.1 },
+  { key: "minBreakoutVolumeRatio", label: "Min Breakout Volume ×", min: 0, max: 10, step: 0.1 },
+  { key: "minAverageDailyTradedValue", label: "Min Daily Traded Value ₹", min: 0, step: 1 },
+];
+
+function FlagScreenerView({ settings }: { settings?: TradingSettings | null }) {
+  const [data, setData] = useState<FlagResponse | null>(null);
+  const [filters, setFilters] = useState(flagDefaults);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showPatternHistory, setShowPatternHistory] = useState(false);
+  const [chartMonths, setChartMonths] = useState(3);
+  const [tileLimit, setTileLimit] = useState(80);
+  const [stage, setStage] = useState("all");
+  const [sort, setSort] = useState("level");
+  const [ascending, setAscending] = useState(true);
+  const { liveTicks, liveStatus, quotes } = useStrategyLiveQuotes(data);
+
+  const run = async (criteria: FlagFilters, signal?: AbortSignal) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/flag-screener/run", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filters: criteria }), signal,
+      });
+      const result = await readJsonResponse<FlagResponse>(response, "Flag screener unavailable");
+      setData(result);
+      setFilters(current => current === criteria || criteria === flagDefaults ? result.filters : current);
+    } catch (cause) {
+      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "Flag screener unavailable");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  };
+  useEffect(() => {
+    const controller = new AbortController();
+    void run(flagDefaults, controller.signal);
+    return () => controller.abort();
+  }, []);
+
+  const session = liveTradeDate();
+  const tickFor = (row: FlagRow) => {
+    const quote = quotes.get(row.security_id);
+    return quote && quote.date === session && quote.date > row.recent.at(-1)!.trade_date && quote.tick.ltp > 0 ? quote.tick : undefined;
+  };
+  const price = (row: FlagRow) => tickFor(row)?.ltp ?? row.recent.at(-1)!.close;
+  const move = (row: FlagRow) => 100 * (price(row) / (row.breakout?.close ?? row.resistance) - 1);
+  const active = (data?.results ?? []).filter(row => {
+    const tick = tickFor(row);
+    if (!tick) return true;
+    if (row.breakout) return Math.max(tick.ltp, tick.dayHigh ?? 0) < row.breakout.close * flagTargetMultiplier;
+    return tick.ltp >= row.support;
+  });
+  const matches = active.filter(row => stage === "all" || row.status === stage).sort((a, b) => {
+    const comparison = sort === "symbol" ? a.symbol.localeCompare(b.symbol)
+      : sort === "contraction" ? b.contraction - a.contraction
+      : sort === "advance" ? b.advance - a.advance : Math.abs(move(a)) - Math.abs(move(b));
+    return (ascending ? comparison : -comparison) || a.symbol.localeCompare(b.symbol);
+  });
+  const shown = matches.slice(0, tileLimit);
+  const selected = data?.results.find(row => row.security_id === selectedId);
+  const sessions = chartMonths === 6 ? 126 : 63;
+  const chartRows = (row: FlagRow) => {
+    const tick = tickFor(row);
+    if (!tick) return row.recent;
+    const previous = row.recent.at(-1)!;
+    const open = tick.dayOpen || tick.prevClose || previous.close;
+    return [...row.recent, {
+      trade_date: session, open, high: Math.max(tick.dayHigh ?? 0, open, tick.ltp),
+      low: Math.min(tick.dayLow || tick.ltp, open, tick.ltp), close: tick.ltp,
+      volume: tick.volume ?? 0, ema10: previous.ema10 === undefined ? undefined : previous.ema10 + (tick.ltp - previous.ema10) * 2 / 11,
+    }];
+  };
+  const stageLabel = (row: FlagRow) => row.breakout ? "Breakout confirmed" : tickFor(row) && price(row) > row.resistance ? "Above resistance · awaiting close" : "Forming";
+  const selectedChartRows = selected ? chartRows(selected) : [];
+  const patternOutsideChart = selected && selectedChartRows.slice(-sessions)[0].trade_date > selected.boundaries.startDate;
+  const historicalRows = showPatternHistory && patternOutsideChart ? selected.patternHistory : undefined;
+
+  return <section className="research-page thirty-in-thirty-page ema-catchup-page">
+    <div className="thirty-hero thirty-in-thirty-hero">
+      <div><p className="eyebrow">Flag</p><h2>Bullish pennants after a short-term advance</h2><small>Watch converging ranges and daily close breakouts. Track confirmed breakouts until price reaches 5% above the breakout close.</small></div>
+      <div className="thirty-hero-actions">
+        <div className="refresh-status"><span className={Object.keys(liveTicks).length ? "ready" : "pending"}/><b>{liveStatus}</b><small>{data ? formatTime(data.generatedAt) : "Not scanned"}</small></div>
+        <button className="primary" onClick={() => void run(filters)} disabled={loading}><TrendingUp size={15}/>{loading ? "Scanning…" : "Run Screener"}</button>
+        <button className="secondary compact" onClick={() => {
+          setFilters(flagDefaults);
+          setStage("all");
+          setSort("level");
+          setAscending(true);
+          setChartMonths(3);
+          setTileLimit(80);
+          void run(flagDefaults);
+        }} disabled={loading}>Reset</button>
+      </div>
+    </div>
+    <div className="momentum-filter-bar thirty-in-thirty-filters">
+      <label>Universe<select value={filters.universe} onChange={event => setFilters({ ...filters, universe: event.target.value as FlagFilters["universe"] })}><option value="CNX500">Nifty 500</option><option value="NIFTYSC500">Nifty Smallcap 500</option><option value="ALL">All tracked universes</option></select></label>
+      {flagNumericFilters.map(({ key, label, min, max, step }) => <label key={key}>{label}<input className="plain-input" type="number" min={min} max={max} step={step} value={filters[key]} onChange={event => setFilters({ ...filters, [key]: Number(event.target.value) })}/></label>)}
+      <label>Chart<select value={chartMonths} onChange={event => setChartMonths(Number(event.target.value))}><option value={3}>3 months</option><option value={6}>6 months</option></select></label>
+      <label>Show Tiles<select value={tileLimit} onChange={event => setTileLimit(Number(event.target.value))}><option value={40}>40</option><option value={80}>80</option><option value={120}>120</option><option value={Infinity}>All</option></select></label>
+      <label>Sort<select value={sort} onChange={event => setSort(event.target.value)}><option value="level">Nearest breakout level</option><option value="contraction">Tightest contraction</option><option value="advance">Strongest prior move</option><option value="symbol">Symbol</option></select></label>
+      <button className="secondary compact" onClick={() => setAscending(value => !value)}>{ascending ? "Asc" : "Desc"}</button>
+      <label>Stage<select value={stage} onChange={event => setStage(event.target.value)}><option value="all">All</option><option value="forming">Forming</option><option value="breakout">Confirmed breakout</option></select></label>
+    </div>
+    {error && <p role="alert" className="panel-empty">{error}</p>}
+    {data && <>
+      <div className="thirty-scoreboard"><div><span>Evaluated</span><b>{data.evaluated}</b></div><div><span>Forming</span><b>{active.filter(row => !row.breakout).length}</b></div><div><span>Confirmed breakouts</span><b>{active.filter(row => row.breakout).length}</b></div><div><span>Shown</span><b>{shown.length} / {matches.length}</b></div></div>
+      <section className="screenshot-tile-grid">{shown.length ? shown.map(row => {
+        const prices = chartRows(row).slice(-sessions).map(point => point.close);
+        const min = Math.min(...prices, row.swingLow.low), max = Math.max(...prices, row.swingLow.low);
+        const path = prices.map((close, index) => `${index ? "L" : "M"}${index * 220 / Math.max(prices.length - 1, 1)} ${scaleValue(close, min, max, 82)}`).join(" ");
+        return <button key={row.security_id} type="button" className="screenshot-tile ema-catchup-tile" onClick={() => { setShowPatternHistory(false); setSelectedId(row.security_id); }}>
+          <b>{row.symbol}</b><small>{row.company_name}</small><span className="ema-catchup-values">LTP {money(price(row))} · SL {money(row.swingLow.low)}<em>{stageLabel(row)} · {pct2(move(row))}</em></span>
+          <span className="thirty-in-thirty-chart"><svg viewBox="0 0 220 82" preserveAspectRatio="none" aria-hidden="true"><path className="spark-area" d={`${path} L220 82 L0 82 Z`}/><path className={prices.at(-1)! >= prices[0] ? "spark-line up" : "spark-line down"} d={path}/></svg></span>
+        </button>;
+      }) : <p className="panel-empty">No bullish pennants or active breakouts match these filters.</p>}</section>
+    </>}
+    {selected && <div className="drawer" onClick={() => setSelectedId(null)}>
+      <div className="drawer-card chart-drawer" role="dialog" aria-modal="true" aria-label={`${selected.symbol} pennant chart`} onClick={event => event.stopPropagation()}>
+        <button className="icon-button drawer-close" aria-label="Close chart" onClick={() => setSelectedId(null)}>×</button>
+        <p className="eyebrow">Flag · {active.includes(selected) ? stageLabel(selected) : selected.breakout ? "Target reached" : "Below support"}</p>
+        <h2>{selected.symbol} · {selected.company_name}</h2>
+        <p className="muted">{selected.baseDays} sessions of consolidation after a {pct2(selected.advance)} advance. Pennant volume averaged {selected.volumeRatio.toFixed(2)}× the prior move.</p>
+        <div className="chart-shell">
+          <div className="entry-sizing-grid"><EntrySizingTile title="LTP to Swing Low Sizing" entry={price(selected)} stop={selected.swingLow.low} settings={settings}/></div>
+          <div className="chart-toolbar"><div><p className="eyebrow">Daily chart</p><span>10 EMA · swing-low stop at {money(selected.swingLow.low)}</span></div><a className="secondary compact tradingview-link" href={tradingViewUrl(selected.symbol)} target="_blank" rel="noreferrer"><ArrowUpRight size={14}/>TradingView</a></div>
+          {patternOutsideChart && selected.patternHistory && <button className="secondary compact" onClick={() => setShowPatternHistory(value => !value)}>{historicalRows ? "Show latest prices" : "Show original pennant"}</button>}
+          <CleanCandleChart rows={historicalRows ?? selectedChartRows} timeframe="daily" dailySessions={sessions} emaKey="ema10" emaPeriod={10} emaLabel="10 EMA" swingLowPoint={selected.swingLow} pennant={selected.boundaries}/>
+        </div>
+        <div className="strategy-stat-grid">
+          <StrategyStat label="LTP" value={money(price(selected))} sub={tickFor(selected) ? "Live" : selected.recent.at(-1)!.trade_date}/>
+          <StrategyStat label="Swing Low SL" value={money(selected.swingLow.low)} sub={selected.swingLow.trade_date}/>
+          <StrategyStat label="Risk to SL" value={pct2(100 * (1 - selected.swingLow.low / price(selected)))}/>
+          <StrategyStat label="Prior Advance" value={pct2(selected.advance)}/>
+          <StrategyStat label="Range Contraction" value={pct2(selected.contraction)}/>
+          <StrategyStat label={selected.breakout ? "Breakout Close" : "Next-Session Resistance"} value={money(selected.breakout?.close ?? selected.resistance)} sub={selected.breakout?.trade_date}/>
+          <StrategyStat label={selected.breakout ? "Gain Since Breakout" : "Distance From Resistance"} value={pct2(move(selected))}/>
+          {selected.breakout ? <StrategyStat label="+5% Target" value={money(selected.breakout.close * flagTargetMultiplier)}/> : <StrategyStat label="Next-Session Support" value={money(selected.support)}/>}
+        </div>
+      </div>
+    </div>}
   </section>;
 }
 
@@ -3610,7 +3769,7 @@ function StochDPanel({ values, width, label, rightPadding = 0 }: { values: Array
   </svg></div>;
 }
 
-function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal, rightPadding = 0, chartWidth }: { chartWidth?: number; earnings?: EarningsEvent[]; earningsCandle?: ReturnType<typeof latestEarningsCandle>; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; rightPadding?: number; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
+function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, error, highVolumeRatio = 1.8, dailySessions = 63, emaKey = "ema50", emaPeriod = 50, emaLabel = "50 EMA", showLatestEmaReclaimMarker = false, swingLowPoint, highCandle, stopLevel, referenceStyle = false, highlightVolume = false, showScreenerStoch = false, stochHighLine, swingHighLine, abnormalSignal, rightPadding = 0, chartWidth, pennant }: { pennant?: FlagBoundaries; chartWidth?: number; earnings?: EarningsEvent[]; earningsCandle?: ReturnType<typeof latestEarningsCandle>; rows: DailyChartPoint[]; timeframe: ChartTimeframe; loading?: boolean; error?: string; highVolumeRatio?: number; dailySessions?: number; emaKey?: "ema10" | "ema50"; emaPeriod?: number; emaLabel?: string; showLatestEmaReclaimMarker?: boolean; swingLowPoint?: DailyChartPoint; highCandle?: { date: string; high: number }; stopLevel?: number; referenceStyle?: boolean; highlightVolume?: boolean; showScreenerStoch?: boolean; stochHighLine?: StochHighLine | null; swingHighLine?: SwingHighSignal | null; rightPadding?: number; abnormalSignal?: NonNullable<ReturnType<typeof summarizeRecentVolume>["latestSpike"]> }) {
   if (loading) return <div className="chart-empty">Loading {timeframe === "1min" ? "1-minute" : "hourly"} candles...</div>;
   if (error) return <div className="chart-empty">{error}</div>;
   const chartRows = timeframe === "daily" ? lastTradingMonths(rows, dailySessions) : timeframe === "1min" ? todayMinuteRows(rows) : rows.slice(-120);
@@ -3626,6 +3785,18 @@ function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, 
   const calculatedEma = timeframe === "1min" ? [] : emaValues(closes, emaPeriod);
   const chartEmaValues = timeframe === "1min" ? [] : chartRows.map((row, index) => row[emaKey] ?? calculatedEma[index]);
   const visibleEmaValues = chartEmaValues.filter((value): value is number => value !== undefined);
+  const pennantStart = pennant ? chartRows.findIndex(row => row.trade_date === pennant.startDate) : -1;
+  const pennantEnd = pennant ? chartRows.findIndex(row => row.trade_date === pennant.endDate) : -1;
+  const pennantValues = pennant && pennantStart >= 0 && pennantEnd > pennantStart
+    ? [[pennant.upperStart, pennant.upperEnd], [pennant.lowerStart, pennant.lowerEnd]] : [];
+  const pennantDisplayEnd = Math.min(pennantEnd + 1, chartRows.length - 1);
+  const pennantLines = pennantValues.map(([start, end]) => ({
+    start, end: end + (end - start) * (pennantDisplayEnd - pennantEnd) / (pennantEnd - pennantStart),
+  }));
+  for (const { start, end } of pennantLines) {
+    lows.push(start, end);
+    highs.push(start, end);
+  }
   if (earningsCandle) highs.push(earningsCandle.high);
   if (earningsCandle) lows.push(earningsCandle.high);
   const priceMin = Math.min(...lows, ...visibleEmaValues, ...(stopLevel === undefined ? [] : [stopLevel]), ...(abnormalSignal ? [abnormalSignal.high] : []), ...(stochHighLine ? [stochHighLine.price] : []), ...(swingHighLine ? [swingHighLine.price] : []));
@@ -3664,6 +3835,7 @@ function CleanCandleChart({ earnings, earningsCandle, rows, timeframe, loading, 
   return <div className={`clean-chart ${referenceStyle ? "thirty-reference-chart" : ""}`}>
     {!referenceStyle && <div className="chart-legend"><span><i className="legend-candle" />{timeframe === "daily" ? "Daily" : timeframe === "1min" ? "1Min" : "Hourly"} candles</span>{timeframe !== "1min" && <span><i className="legend-ema" />{emaLabel}</span>}{swingLowY !== undefined && <span><i className="legend-swing-low" />Swing low {money(swingLowPoint!.low)}</span>}{highCandleY !== undefined && <span><i className="legend-high-candle" />Entry above {money(highCandle!.high)}</span>}{stopY !== undefined && <span><i className="legend-stop-level" />Signal EMA SL {money(stopLevel!)}</span>}{stochHighLine && <span><i className="legend-stoch-high" />StochHigh {money(stochHighLine.price)}</span>}{swingHighLine && <span><i className="legend-swing-high" />SwingHigh {money(swingHighLine.price)}</span>}<span><i className="legend-volume" />Volume strip</span><span><i className="legend-high-volume" />High volume</span></div>}
     <svg viewBox={`0 0 ${width} ${priceHeight}`} role="img" aria-label={`${timeframe} candlestick chart`}>
+      {pennantLines.map(({ start, end }, index) => <line key={index} stroke="#3978e5" strokeWidth={2} x1={(pennantStart + 0.5) * candleSlot} x2={(pennantDisplayEnd + 0.5) * candleSlot} y1={scaleValue(start, priceMin, priceMax, priceHeight, 8)} y2={scaleValue(end, priceMin, priceMax, priceHeight, 8)}><title>{index === 0 ? "Pennant resistance" : "Pennant support"}</title></line>)}
       {swingLowY !== undefined && <line className="swing-low-line" x1={swingLowIndex * candleSlot + candleSlot / 2} x2={width} y1={swingLowY} y2={swingLowY}><title>{`Swing low ${money(swingLowPoint!.low)} on ${swingLowPoint!.trade_date}`}</title></line>}
       {highCandleY !== undefined && <line className="high-candle-line" x1={highCandleIndex * candleSlot + candleSlot / 2} x2={width} y1={highCandleY} y2={highCandleY}><title>{`High candle ${money(highCandle!.high)} on ${highCandle!.date}`}</title></line>}
       {abnormalY !== undefined && <line className="abnormal-volume-line" x1={abnormalIndex < 0 ? 0 : abnormalIndex * candleSlot + candleSlot / 2} x2={width} y1={abnormalY} y2={abnormalY}><title>{`Latest abnormal-volume candle ${abnormalSignal!.trade_date} high ${money(abnormalSignal!.high)}`}</title></line>}
@@ -4132,6 +4304,7 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
     {view === "VolumeSelling" && <VolumeSellingView settings={tradingSettings} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Screener" && <CombinedScreenerView settings={tradingSettings} emaFilters={emaNoTouchFilters} stochFilters={stochRsiFilters} setLiveFeedStatus={updateLiveFeedStatus} />}
     {view === "Qullamaggie" && <QullamaggieView settings={tradingSettings} onOpenSettings={() => setView("Settings")} />}
+    {view === "Flag" && <FlagScreenerView settings={tradingSettings} />}
     {view === "10 EMA Catchup" && <EmaNoTouchScreenerView data={emaNoTouch} filters={emaNoTouchFilters} setFilters={setEmaNoTouchFilters} loading={loading} onRun={runEmaNoTouchScreener} selected={selectedEmaNoTouch} setSelected={setSelectedEmaNoTouch} settings={tradingSettings} />}
     {view === "Seasonal Stocks" && <ThirtyInThirtyScreenerView seasonal month={seasonalMonth} setMonth={(month) => { setSelectedSeasonalStock(null); setSeasonalMonth(month); }} data={seasonalStocksByMonth[seasonalMonth] ?? null} filters={seasonalFilters} setFilters={setSeasonalFilters} loading={loading} onRun={runSeasonalStocks} onBuild={buildSeasonalStocks} onOpenSeasonality={() => setView("Seasonality")} onReset={() => setSeasonalFilters(defaultThirtyInThirtyFilters)} selected={selectedSeasonalStock} setSelected={setSelectedSeasonalStock} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={seasonalStocksByMonth[seasonalMonth]?.generatedAt} settings={tradingSettings} />}
     {view === "StochRSI" && <StochRsiScreenerView data={stochRsi} filters={stochRsiFilters} setFilters={setStochRsiFilters} loading={loading} onRun={runStochRsiScreener} onReset={() => setStochRsiFilters(defaultStochRsiFilters)} selected={selectedStochRsi} setSelected={setSelectedStochRsi} setLiveFeedStatus={updateLiveFeedStatus} updatedAt={stochRsiUpdatedAt} settings={tradingSettings} />}
@@ -4139,7 +4312,7 @@ function Workspace({ isAdmin }: { isAdmin: boolean }) {
     {view === "Stock Search" && <><section className="search-card"><div className="search-copy"><p className="eyebrow">01 / Research a security</p><h2>Find an Indian equity</h2><p>Search the Dhan security master by symbol or company name.</p></div><div className="search-area"><form onSubmit={(e) => { e.preventDefault(); runSearch(); }}><div className="search-row"><div className="search-input"><Search size={18} /><input placeholder="Search RELIANCE, TCS, INFY…" value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>Enter</kbd></div><button className="primary search-button" type="submit" disabled={loading}>{loading ? "Searching…" : "Search"}</button></div></form>{results.length > 0 && <div className="results">{results.map((s) => <button key={`${s.securityId}-${s.segment}`} onClick={() => { setSecurity(s); setQuery(""); setResults([]); setAnalysis(null); }}><div><b>{s.symbol}</b><span>{s.name}</span></div><small>{s.exchange} · {s.securityId}</small></button>)}</div>}<div className="search-hint"><Database size={14} /><span>Security IDs are resolved from Dhan’s master—not ticker text alone.</span></div></div></section>{!configured && <section className="setup"><div className="setup-icon"><ShieldCheck size={25} /></div><div><p className="eyebrow">Secure data connection</p><h2>Connect your Dhan account to begin</h2><p>Market data and calculated statistics remain empty until server-side Dhan credentials are configured.</p></div><code>DHAN_CLIENT_ID= · DHAN_ACCESS_TOKEN=</code></section>}{!security && <section className="empty"><div className="empty-art"><CalendarDays size={30} /></div><p className="eyebrow">Awaiting a selection</p><h2>Start with a security search</h2><p>Select an equity to load its daily OHLCV history and derive seasonality statistics.</p></section>}{security && <><section className="stock-header"><div><div className="ticker-row"><span className="ticker">{security.symbol}</span><span className="exchange">{security.exchange}</span></div><h2>{security.name}</h2><p>Security ID {security.securityId} · Daily OHLCV · {analysis ? `${analysis.candles.length} trading sessions` : "Not loaded"}</p></div><button className="primary" onClick={() => analyze()} disabled={loading || !configured}>{loading ? <><RefreshCw size={16} className="spin" /> Calculating…</> : <><BarChart3 size={16} /> Load seasonality</>}</button></section>{analysis && <><section className="stats-grid"><Stat label="Current close" value={latest ? money(latest.close) : "—"} sub={latest?.date} /><Stat label="History available" value={`${new Set(analysis.candles.map((c) => c.date.slice(0, 4))).size} years`} sub="Complete years used" /><Stat label="Data through" value={latest?.date || "—"} sub="Cached locally" /><Stat label="Method" value="Daily OHLCV" sub="Adjusted data must be verified" /></section></>}</>}</>}
     {view === "Users" && isAdmin && <UsersView />}
     {view === "Settings" && <TradingSettingsView settings={tradingSettings} onSaved={setTradingSettings} />}
-    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "USA Data", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Screener", "Qullamaggie", "10 EMA Catchup", "Seasonal Stocks", "StochRSI", "Backtesting", "Settings", "Users"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
+    {!["Dashboard", "Portfolio", "Stock Search", "Data Status", "USA Data", "Seasonality", "Scanner", "Swing Screener", "30%Up", "Early Breakout", "Hourly Breakout", "Momentum Tight", "30 in 30", "Screener", "Qullamaggie", "10 EMA Catchup", "Flag", "Seasonal Stocks", "StochRSI", "Backtesting", "Settings", "Users"].includes(view) && <section className="empty"><div className="empty-art"><Activity size={30} /></div><p className="eyebrow">{view}</p><h2>{view} workspace</h2><p>{`${view} remains intentionally deferred for a later phase.`}</p></section>}
     {viewerViews.has(view) && <TradingDisclaimer />}
   </div></main>;
 }
