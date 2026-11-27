@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import type { IpoDataset } from "@/lib/ipoDataset";
 
-export default function IpoDataView({ isAdmin }: { isAdmin: boolean }) {
+export default function IpoDataView({ isAdmin, refreshRequest }: { isAdmin: boolean; refreshRequest: number }) {
   const [dataset, setDataset] = useState<IpoDataset | null>(null);
   const [symbol, setSymbol] = useState("");
-  const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
-  const [importing, setImporting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const lastRequest = useRef(refreshRequest);
+  const refreshInFlight = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -24,22 +26,29 @@ export default function IpoDataView({ isAdmin }: { isAdmin: boolean }) {
     return () => controller.abort();
   }, []);
 
-  async function importListings(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!file) return;
-    setImporting(true);
+  const refresh = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    setRefreshing(true);
     setError("");
     try {
-      const response = await fetch("/api/data/ipo", { method: "POST", body: await file.text() });
+      const response = await fetch("/api/data/ipo", { method: "POST" });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not import IPO data.");
+      if (!response.ok) throw new Error(body.error ?? "Could not refresh IPO data.");
       setDataset(body.dataset);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not import IPO data.");
+      setError(error instanceof Error ? error.message : "Could not refresh IPO data.");
     } finally {
-      setImporting(false);
+      refreshInFlight.current = false;
+      setRefreshing(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (loading || refreshRequest === lastRequest.current) return;
+    lastRequest.current = refreshRequest;
+    if (isAdmin) void refresh();
+  }, [isAdmin, loading, refresh, refreshRequest]);
 
   const listings = dataset?.listings ?? [];
   const selected = listings.find((listing) => listing.symbol === symbol) ?? listings[0];
@@ -52,18 +61,17 @@ export default function IpoDataView({ isAdmin }: { isAdmin: boolean }) {
         <h2>NSE IPO daily OHLCV</h2>
         <small>{dataset ? `Listings since ${dataset.from} · Requested through ${dataset.through} · ${listings.length} IPOs · ${rows.toLocaleString()} candles · ${issues} coverage issues` : "Daily candles from listing for IPOs in the last year."}</small>
       </div>
-      {rows > 0 && <a className="secondary" href="/api/data/ipo?format=csv">Export OHLCV CSV</a>}
-    </div>
-    {isAdmin && <form className="panel" onSubmit={importListings}>
-      <div className="panel-head">
-        <label>Full NSE IPO listings CSV <input type="file" accept=".csv,text/csv" required disabled={importing} onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
-        <button className="primary" disabled={loading || importing || !file}>{importing ? "Fetching Dhan candles…" : "Import and refresh"}</button>
+      <div className="toolbar-actions">
+        {rows > 0 && <a className="secondary compact" href="/api/data/ipo?format=csv">Export OHLCV CSV</a>}
+        {isAdmin && <button type="button" className="secondary compact" onClick={() => void refresh()} disabled={loading || refreshing}>
+          <RefreshCw size={14} className={refreshing ? "spin" : ""} />
+          {refreshing ? "Downloading IPO data…" : "Refresh"}
+        </button>}
       </div>
-      <p className="panel-empty">Include all listings for the rolling year. Required columns are Symbol and Listing Date (or Listed On). Company Name is optional.</p>
-    </form>}
+    </div>
     {error && <p className="error" role="alert">{error}</p>}
     {loading && <p role="status">Loading saved IPO data…</p>}
-    {!loading && !dataset && <p className="panel-empty">No IPO dataset has been imported yet.</p>}
+    {!loading && !refreshing && !dataset && <p className="panel-empty">No IPO data has been downloaded yet.</p>}
     {dataset && <section className="panel">
       <div className="panel-head"><h2>IPO listings</h2></div>
       <div className="table-wrap"><table>

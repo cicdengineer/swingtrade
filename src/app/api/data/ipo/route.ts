@@ -1,54 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasDhanCredentials } from "@/lib/dhan";
-import { getHistoricalData, getIndiaTradingDate, getSecurityMaster, isIndianMarketClosed, parseCsv } from "@/lib/historicalDataService";
-import type { IpoDataset, IpoListing } from "@/lib/ipoDataset";
+import { getHistoricalData, getIndiaTradingDate, getSecurityMaster, isIndianMarketClosed } from "@/lib/historicalDataService";
+import type { IpoDataset } from "@/lib/ipoDataset";
 import { readIpoDataset, writeIpoDataset } from "@/lib/localDatabase";
+import { fetchNseIpoListings } from "@/lib/nseIpoListings";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const dateString = (date: Date) => date.toISOString().slice(0, 10);
 const dateAtMidnight = (value: string) => new Date(`${value}T00:00:00Z`);
-const months = "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split(" ");
 let refreshing = false;
-
-function listingDate(value: string) {
-  const match = /^(\d{1,2})[- ]([A-Z]{3})[- ](\d{2}|\d{4})$/i.exec(value);
-  if (match) {
-    const month = months.indexOf(match[2].toUpperCase()) + 1;
-    const year = match[3].length === 2 ? `20${match[3]}` : match[3];
-    value = `${year}-${String(month).padStart(2, "0")}-${match[1].padStart(2, "0")}`;
-  }
-  const date = dateAtMidnight(value);
-  return Number.isFinite(date.getTime()) && dateString(date) === value ? value : null;
-}
-
-function parseListings(csv: string, from: string, today: string) {
-  const listings = new Map<string, IpoListing>();
-  for (const row of parseCsv(csv.replace(/^\uFEFF/, ""))) {
-    const fields = Object.fromEntries(Object.entries(row).map(([key, value]) =>
-      [key.toLowerCase().replace(/[^a-z]/g, ""), value]));
-    const symbol = fields.symbol?.toUpperCase();
-    const rawDate = fields.listingdate ?? fields.listedon;
-    if (!Object.values(fields).some(Boolean)) continue;
-    if (!symbol || !/^[A-Z0-9][A-Z0-9&._-]{0,31}$/.test(symbol) || !rawDate) {
-      throw new Error("Each CSV row must have an NSE symbol and a listing date.");
-    }
-    const date = listingDate(rawDate);
-    if (!date) throw new Error(`Invalid listing date for ${symbol}. Use YYYY-MM-DD or DD-MMM-YYYY.`);
-    if (date < from || date > today) continue;
-    const previous = listings.get(symbol);
-    if (previous && previous.listingDate !== date) throw new Error(`Conflicting listing dates for ${symbol}.`);
-    listings.set(symbol, { symbol, listingDate: date, company: fields.companyname || fields.company || previous?.company || "" });
-  }
-  return [...listings.values()].sort((a, b) => b.listingDate.localeCompare(a.listingDate) || a.symbol.localeCompare(b.symbol));
-}
 
 export async function GET(request: NextRequest) {
   try {
     const dataset = await readIpoDataset<IpoDataset>();
     if (request.nextUrl.searchParams.get("format") !== "csv") return NextResponse.json({ dataset });
-    if (!dataset) return NextResponse.json({ error: "Import IPO listings first." }, { status: 404 });
+    if (!dataset) return NextResponse.json({ error: "Refresh IPO data first." }, { status: 404 });
     const rows = dataset.listings.flatMap(({ symbol, listingDate, securityId, candles }) =>
       candles.map(({ date, open, high, low, close, volume }) =>
         [symbol, listingDate, securityId, date, open, high, low, close, volume].join(",")));
@@ -65,8 +33,8 @@ export async function GET(request: NextRequest) {
 }
 
 // Middleware restricts shared dataset writes to the owner.
-export async function POST(request: NextRequest) {
-  if (refreshing) return NextResponse.json({ error: "An IPO import is already running." }, { status: 409 });
+export async function POST() {
+  if (refreshing) return NextResponse.json({ error: "An IPO refresh is already running." }, { status: 409 });
   if (!hasDhanCredentials()) return NextResponse.json({ error: "Dhan credentials are not configured." }, { status: 503 });
   refreshing = true;
   try {
@@ -80,15 +48,11 @@ export async function POST(request: NextRequest) {
     start.setUTCFullYear(start.getUTCFullYear() - 1);
     if (start.getUTCDate() !== day) start.setUTCDate(0);
     const from = dateString(start);
-    let listings: IpoListing[];
-    try {
-      const csv = await request.text();
-      if (csv.length > 1_000_000) throw new Error("The listings CSV must be under 1 MB.");
-      listings = parseListings(csv, from, today);
-      if (!listings.length) throw new Error("The CSV contains no IPO listings in the last year.");
-    } catch (error) {
-      return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid listings CSV." }, { status: 400 });
-    }
+    const listings = await fetchNseIpoListings(from, today).catch((error) => {
+      console.error("Could not fetch NSE IPO listings", error);
+      return null;
+    });
+    if (!listings) return NextResponse.json({ error: "Could not download NSE IPO listings. Try again shortly." }, { status: 502 });
 
     const [master, previous] = await Promise.all([getSecurityMaster(), readIpoDataset<IpoDataset>()]);
     const instruments = new Map<string, Set<string>>();
@@ -120,7 +84,7 @@ export async function POST(request: NextRequest) {
         } else if (listing.listingDate >= dateString(to)) {
           issue = "Awaiting the first completed trading session.";
         } else if (Date.now() >= deadline) {
-          issue = "Import time limit reached. Reimport this CSV to continue.";
+          issue = "Refresh time limit reached. Refresh again to continue.";
         } else {
           try {
             const last = saved.at(-1)?.date;
@@ -137,7 +101,7 @@ export async function POST(request: NextRequest) {
             candles = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
             if (candles[0]?.date !== listing.listingDate) issue = "Dhan did not return a valid listing-day candle.";
           } catch {
-            issue = "Dhan historical data could not be fetched. Reimport to retry.";
+            issue = "Dhan historical data could not be fetched. Refresh to retry.";
           }
         }
         results[index] = { ...listing, securityId, candles, issue };
@@ -150,7 +114,7 @@ export async function POST(request: NextRequest) {
     await writeIpoDataset(dataset);
     return NextResponse.json({ dataset });
   } catch (error) {
-    console.error("Could not import the IPO dataset", error);
+    console.error("Could not refresh the IPO dataset", error);
     return NextResponse.json({ error: "Could not load the Dhan instrument master or save IPO data." }, { status: 502 });
   } finally {
     refreshing = false;
